@@ -400,7 +400,7 @@ async function init(){
     };
   });
   try{
-    const{error}=await db.from('logistica_meta').select('id').limit(1);
+    const{error}=await db.from('logistica_stock').select('id').limit(1);
     setDB(!error);
     if(!error){await loadFromDB(true);await loadOccParams();}
   }catch(e){setDB(false);}
