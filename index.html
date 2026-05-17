@@ -437,7 +437,7 @@ select.cad-inp{cursor:pointer;}
       <div class="tw2"><table>
         <thead><tr>
           <th>EAN</th><th>Descrição</th><th>Categoria</th><th>Subcategoria</th>
-          <th class="num">Stock</th><th class="num">Un/Pos</th><th class="num">Posições</th>
+          <th class="num">Stock Unilog</th><th class="num">Un/Pos</th><th class="num">Pos. Teóricas</th><th class="num">Pos. Reais</th>
           <th>Ocup. Última Pos.</th><th>Alerta</th>
         </tr></thead>
         <tbody id="ovBody"></tbody>
@@ -520,7 +520,7 @@ async function init(){
       if(t.dataset.page==='recon')renderReconPage();
       if(t.dataset.page==='suspeitos')renderSusp();
       if(t.dataset.page==='cadastro')renderCadastro();
-      if(t.dataset.page==='occupation'){if(sapData)renderOccView();renderOccBase();}
+      if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
       if(t.dataset.page==='history')renderHistory();
     };
   });
@@ -794,11 +794,7 @@ function renderUpKpis(){
 function renderReconPage(){
   if(!Object.keys(reconData).length){document.getElementById('reconEmpty').style.display='block';return;}
   document.getElementById('reconEmpty').style.display='none';
-  // Update cat filter
-  const cats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
-  const sel=document.getElementById('reconCat');const cur=sel.value;
-  sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
-  if(cats.includes(cur))sel.value=cur;else sel.value='';
+  // cat filter updated dynamically in renderRecon
   renderDepotPills();renderRecon();
 }
 
@@ -819,14 +815,19 @@ function renderRecon(){
   let rows=[...(reconData[activeDepot]||[])];
   const srch=document.getElementById('reconSrch').value.toLowerCase();
   const estado=document.getElementById('reconEstado').value;
-  const catF=document.getElementById('reconCat').value;
-  const subF=document.getElementById('reconSub').value;
+  // Update category options
+  const reconCatSel=document.getElementById('reconCat');const reconCatCur=reconCatSel.value;
+  const reconCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
+  reconCatSel.innerHTML='<option value="">Todas as categorias</option>'+reconCats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  reconCatSel.value=reconCats.includes(reconCatCur)?reconCatCur:'';
+  const catF=reconCatSel.value; // read AFTER restoring
   // Update subcategory options based on selected category
   const reconSubSrc=catF?occParams.filter(p=>p.cat===catF):occParams;
   const reconSubs=[...new Set(reconSubSrc.map(p=>p.subcat).filter(Boolean))].sort();
   const reconSubSel=document.getElementById('reconSub');const reconSubCur=reconSubSel.value;
   reconSubSel.innerHTML='<option value="">Todas as subcategorias</option>'+reconSubs.map(c=>`<option value="${c}">${c}</option>`).join('');
   reconSubSel.value=reconSubs.includes(reconSubCur)?reconSubCur:'';
+  const subF=reconSubSel.value; // read AFTER restoring
   const valF=document.getElementById('reconValidade').value;
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(!showAll)rows=rows.filter(r=>r.diff!==0);
@@ -1184,31 +1185,45 @@ function updateOccFilters(){
 
 // ── OCC VIEW ──
 function renderOccView(){
-  if(!sapData){document.getElementById('ovBody').innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros SAP primeiro</td></tr>';return;}
+  if(!uniData){document.getElementById('ovBody').innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros para ver a ocupação</td></tr>';return;}
   const srch=document.getElementById('ovSrch').value.toLowerCase();
-  const catF=document.getElementById('ovCat').value;
   const depF=document.getElementById('ovDep').value;
   const alertF=document.getElementById('ovAlerta').value;
-  // Update category options
+  // Update category options first
   const allOvCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
   const ovCatSel=document.getElementById('ovCat');const ovCatCur=ovCatSel.value;
   ovCatSel.innerHTML='<option value="">Todas as categorias</option>'+allOvCats.map(c=>`<option value="${c}">${c}</option>`).join('');
   ovCatSel.value=allOvCats.includes(ovCatCur)?ovCatCur:'';
+  const catF=ovCatSel.value; // read AFTER restoring
   // Update subcategory options filtered by category
   const ovSubSrc=catF?occParams.filter(p=>p.cat===catF):occParams;
   const allOvSubs=[...new Set(ovSubSrc.map(p=>p.subcat).filter(Boolean))].sort();
   const ovSubSel=document.getElementById('ovSub');const ovSubCur=ovSubSel.value;
   ovSubSel.innerHTML='<option value="">Todas as subcategorias</option>'+allOvSubs.map(c=>`<option value="${c}">${c}</option>`).join('');
   ovSubSel.value=allOvSubs.includes(ovSubCur)?ovSubCur:'';
-  const subF=ovSubSel.value;
-  const filtered=depF?sapData.filter(r=>r.deposito===depF):sapData;
-  const byEan={};filtered.forEach(r=>{if(!r.EAN_norm)return;if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={desc:r.desc,qt:0};byEan[r.EAN_norm].qt+=r.qt;});
+  const subF=ovSubSel.value; // read AFTER restoring
+  // Use Unilog for physical stock and real positions
+  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2']};
+  const filteredClasses=depF?(depClassMap[depF]||[]):null;
+  const uniFiltered=uniData?uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe)):[];
+  const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
+  const byEan={};
+  uniFiltered.forEach(r=>{
+    if(!r.EAN_norm)return;
+    if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={desc:descMap[r.EAN_norm]||r.produto||'',qt:0,enderecos:new Set()};
+    byEan[r.EAN_norm].qt+=r.qt;
+    if(r.endereco)byEan[r.EAN_norm].enderecos.add(r.endereco);
+  });
+  Object.values(byEan).forEach(v=>v.nEnderecos=v.enderecos.size);
   let rows=Object.entries(byEan).map(([ean,v])=>{
     const param=occParams.find(p=>p.ean===ean);
     const posicoes=param&&param.qty_per_pos>0?Math.ceil(v.qt/param.qty_per_pos):null;
     const lastPct=param&&param.qty_per_pos>0?(v.qt%param.qty_per_pos)/param.qty_per_pos*100:null;
     const underutil=lastPct!==null&&lastPct>0&&lastPct<50;
-    return{ean,desc:v.desc,qt:v.qt,param,posicoes,lastPct,underutil,cat:param?.cat||'',subcat:param?.subcat||''};
+    // Real positions occupied in Unilog vs theoretical
+    const posReal=v.nEnderecos;
+    const posDiff=posicoes!==null?posReal-posicoes:null; // positive = more positions than needed
+    return{ean,desc:v.desc,qt:v.qt,param,posicoes,posReal,posDiff,lastPct,underutil,cat:param?.cat||'',subcat:param?.subcat||''};
   });
   if(srch)rows=rows.filter(r=>r.ean.includes(srch)||r.desc.toLowerCase().includes(srch));
   if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===(catF);});}
@@ -1243,6 +1258,7 @@ function renderOccView(){
       <td class="num">${fmt(r.qt)}</td>
       <td class="num">${r.param?fmt(r.param.qty_per_pos):'—'}</td>
       <td class="num">${r.posicoes!==null?fmt(r.posicoes):'—'}</td>
+      <td class="num">${r.posReal>0?`<span style="font-weight:600;color:${r.posDiff!==null&&r.posDiff>0?'var(--red)':r.posDiff===0?'var(--green)':'var(--text)'}">${fmt(r.posReal)}${r.posDiff!==null&&r.posDiff>0?` <span style="font-size:10px;color:var(--red)">+${r.posDiff}</span>`:''}</span>`:'—'}</td>
       <td style="min-width:100px">${pct!==null?`<div style="display:flex;align-items:center;gap:6px"><div class="pw" style="flex:1"><div class="pf" style="width:${Math.min(100,Math.round(pct))}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono);width:28px">${Math.round(pct)}%</span></div>`:''}</td>
       <td>${alert}</td>
     `;
