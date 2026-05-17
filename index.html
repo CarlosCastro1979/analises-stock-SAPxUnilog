@@ -10,9 +10,9 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
 :root {
   --red:#e8192c; --red-dark:#b5121f; --red-glow:rgba(232,25,44,0.18);
-  --bg:#111214; --bg2:#17191d; --bg3:#1e2026; --bg4:#252830;
-  --border:rgba(255,255,255,0.08); --border2:rgba(255,255,255,0.14);
-  --text:#f0f0f2; --text2:#a0a5b0; --muted:#5a6070;
+  --bg:#0d1117; --bg2:#161b22; --bg3:#21262d; --bg4:#30363d;
+  --border:rgba(255,255,255,0.12); --border2:rgba(255,255,255,0.22);
+  --text:#e6edf3; --text2:#c9d1d9; --muted:#8b949e;
   --green:#22c55e; --yellow:#f59e0b; --blue:#3b82f6; --purple:#a855f7;
   --mono:'JetBrains Mono',monospace; --sans:'Space Grotesk',sans-serif;
 }
@@ -54,7 +54,7 @@ header{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 24p
 /* KPI */
 .kr{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px;}
 .kpi{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:14px 16px;}
-.kl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:5px;}
+.kl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text2);margin-bottom:5px;}
 .kv{font-family:var(--mono);font-size:22px;font-weight:700;}
 .kv.g{color:var(--green);} .kv.r{color:var(--red);} .kv.y{color:var(--yellow);} .kv.b{color:var(--blue);}
 .ks{font-size:10px;color:var(--muted);margin-top:3px;}
@@ -274,7 +274,8 @@ tr.dr td:first-child{border-left:2px solid rgba(232,25,44,.45);}
         <th onclick="doSort('susp','EAN_norm')">EAN</th>
         <th onclick="doSort('susp','desc')">Descrição</th>
         <th onclick="doSort('susp','Lote_norm')">Lote Unilog</th>
-        <th onclick="doSort('susp','qt')" class="num">Qt Unilog</th>
+        <th class="num" onclick="doSort('susp','qt')">Qt Unilog</th>
+        <th>Depósito / Classe</th>
         <th>Observações</th>
       </tr></thead>
       <tbody id="suspBody"></tbody>
@@ -480,19 +481,22 @@ function buildSusp(){
   const dm={};sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});uniData.forEach(r=>{if(r.EAN_norm&&r.produto&&!dm[r.EAN_norm])dm[r.EAN_norm]=r.produto;});
   const sapLotes={};
   sapData.forEach(r=>{if(!r.Lote_norm)return;if(!sapLotes[r.EAN_norm])sapLotes[r.EAN_norm]={};if(!sapLotes[r.EAN_norm][r.Lote_norm])sapLotes[r.EAN_norm][r.Lote_norm]=0;sapLotes[r.EAN_norm][r.Lote_norm]+=r.qt;});
+  const classeToDepot={};
+  for(const dk of DKS){DEPOT_MAP[dk].classes.forEach(cl=>{classeToDepot[cl]=DEPOT_MAP[dk].label;});}
   const uA={};
-  uniData.forEach(r=>{if(!r.Lote_norm)return;const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0};uA[k].qt+=r.qt;});
+  uniData.forEach(r=>{if(!r.Lote_norm)return;const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,classes:new Set()};uA[k].qt+=r.qt;uA[k].classes.add(r.classe);});
   const sapSet=new Set();
   sapData.forEach(r=>{if(r.Lote_norm)sapSet.add(r.EAN_norm+'|'+r.Lote_norm);});
   suspData=[];
   for(const[k,v]of Object.entries(uA)){
     if(sapSet.has(k))continue;
-    const{EAN_norm,Lote_norm,qt}=v;
+    const{EAN_norm,Lote_norm,qt,classes}=v;
     const desc=dm[EAN_norm]||'';
+    const depots=[...classes].map(cl=>{const dl=classeToDepot[cl]||cl;return dl.split('—')[1]?.trim()||cl;});
     const sapL=Object.keys(sapLotes[EAN_norm]||{});
     let best=null;
     for(const sl of sapL){const r=sim(Lote_norm,sl);if(r>=0.7&&r<1.0){if(!best||r>best.ratio)best={lote:sl,ratio:r,qt:sapLotes[EAN_norm][sl]};}}
-    suspData.push({EAN_norm,Lote_norm,qt,desc,similar:best});
+    suspData.push({EAN_norm,Lote_norm,qt,desc,similar:best,depots});
   }
   const badge=document.getElementById('suspBadge');
   badge.textContent=suspData.length;badge.style.display=suspData.length>0?'':'none';
@@ -643,7 +647,8 @@ function renderSusp(){
       obs=`<div class="sb"><span class="badge bwarn">Lote SAP: <strong>${r.similar.lote}</strong></span><div class="pw" style="width:50px"><div class="pf" style="width:${pct}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono)">${pct}%</span><span style="font-size:10px;color:var(--muted)">Qt SAP: ${fmt(r.similar.qt)}</span></div>`;
     }
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td><span class="badge bneu">${r.EAN_norm}</span></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td><td><span class="badge berr">${r.Lote_norm}</span></td><td class="num">${fmt(r.qt)}</td><td>${obs}</td>`;
+    const depotHtml=(r.depots||[]).map(d=>`<span class="badge binfo" style="margin-right:3px">${d}</span>`).join('');
+    tr.innerHTML=`<td><span class="badge bneu">${r.EAN_norm}</span></td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td><td><span class="badge berr">${r.Lote_norm}</span></td><td class="num">${fmt(r.qt)}</td><td>${depotHtml||'—'}</td><td>${obs}</td>`;
     body.appendChild(tr);
   }
 }
