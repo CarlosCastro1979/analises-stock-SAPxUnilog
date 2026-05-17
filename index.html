@@ -349,7 +349,7 @@ select.cad-inp{cursor:pointer;}
       </div>
       <div class="tb">
         <input class="inp is" id="cadSrch" placeholder="EAN ou descrição…" oninput="renderCadastro()">
-        <select class="inp" id="cadCat" onchange="renderCadastro()">
+        <select class="inp" id="cadCat" onchange="document.getElementById('cadSub').value='';renderCadastro()">
           <option value="">Todas as categorias</option>
           <option value="__sem__">— Sem categoria —</option>
         </select>
@@ -839,7 +839,9 @@ function renderRecon(){
       const days=parseInt(valF);return d>=today&&(d-today)/(1000*86400)<=days;
     });
   }
-  applySort('recon',rows);
+  // Default secondary sort: cat → subcat → desc
+  if(!sorts['recon']){rows.sort((a,b)=>{const cc=String(a.cat||'').localeCompare(String(b.cat||''));if(cc!==0)return cc;return String(a.desc||'').localeCompare(String(b.desc||''));});}
+  else applySort('recon',rows);
 
   const all=reconData[activeDepot]||[];const diffs=all.filter(r=>r.diff!==0).length;const pct=all.length>0?Math.round((all.length-diffs)/all.length*100):0;
   document.getElementById('reconKpis').innerHTML=`
@@ -899,7 +901,8 @@ function renderSusp(){
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
   if(catF)rows=rows.filter(r=>r.cat===catF);
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
-  applySort('susp',rows);
+  if(!sorts['susp']){rows.sort((a,b)=>{const cc=String(a.cat||'').localeCompare(String(b.cat||''));if(cc!==0)return cc;return String(a.desc||'').localeCompare(String(b.desc||''));});}
+  else applySort('susp',rows);
   const withSim=suspData.filter(r=>r.similar).length;
   document.getElementById('suspKpis').innerHTML=`
     <div class="kpi"><div class="kl">Lotes suspeitos</div><div class="kv r">${fmt(suspData.length)}</div></div>
@@ -968,11 +971,16 @@ function renderCadastro(){
 
   // Update filters
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
-  const allSubs=[...new Set(occParams.map(p=>p.subcat).filter(Boolean))].sort();
   const csel=document.getElementById('cadCat');const ccur=csel.value;
   csel.innerHTML='<option value="">Todas as categorias</option><option value="__sem__">— Sem categoria —</option>'+allCats.map(c=>`<option value="${c}">${c}</option>`).join('');csel.value=ccur;
+  // Subcategories filtered by selected category
+  const subSource=ccur&&ccur!=='__sem__'?occParams.filter(p=>p.cat===ccur):occParams;
+  const allSubs=[...new Set(subSource.map(p=>p.subcat).filter(Boolean))].sort();
   const ssel=document.getElementById('cadSub');const scur=ssel.value;
-  ssel.innerHTML='<option value="">Todas as subcategorias</option><option value="__sem__">— Sem subcategoria —</option>'+allSubs.map(c=>`<option value="${c}">${c}</option>`).join('');ssel.value=scur;
+  const scrValid=allSubs.includes(scur)?scur:'';
+  ssel.innerHTML='<option value="">Todas as subcategorias</option><option value="__sem__">— Sem subcategoria —</option>'+allSubs.map(c=>`<option value="${c}">${c}</option>`).join('');
+  ssel.value=scrValid;
+  if(scur!==scrValid){document.getElementById('cadSub').value='';}
 
   // Apply filters
   if(srch)items=items.filter(i=>i.ean.includes(srch)||i.desc.toLowerCase().includes(srch));
@@ -987,9 +995,11 @@ function renderCadastro(){
   else if(semF==='sem_sub')items=items.filter(i=>!i.subcat);
   else if(semF==='sem_qpp')items=items.filter(i=>!i.qty_per_pos||i.qty_per_pos<=1);
 
-  // Sort
+  // Sort: primary column selected, secondary always cat→subcat→desc
   const {col,dir}=cadSortState;
   items.sort((a,b)=>{
+    if(col!=='cat'){const catCmp=String(a.cat||'').localeCompare(String(b.cat||''));if(catCmp!==0)return catCmp;}
+    if(col!=='subcat'&&col!=='cat'){const subCmp=String(a.subcat||'').localeCompare(String(b.subcat||''));if(subCmp!==0)return subCmp;}
     let va=a[col]??'',vb=b[col]??'';
     if(typeof va==='boolean')va=va?1:0;if(typeof vb==='boolean')vb=vb?1:0;
     if(typeof va==='number'&&typeof vb==='number')return dir*(va-vb);
@@ -1142,7 +1152,7 @@ function renderOccView(){
   if(subF)rows=rows.filter(r=>r.subcat===subF);
   if(alertF==='sub')rows=rows.filter(r=>r.underutil);
   else if(alertF==='sem')rows=rows.filter(r=>!r.param);
-  rows.sort((a,b)=>(b.posicoes||0)-(a.posicoes||0));
+  rows.sort((a,b)=>{const cc=String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'));if(cc!==0)return cc;const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;return String(a.desc||'').localeCompare(String(b.desc||''));});
   const wP=rows.filter(r=>r.param).length;const tP=rows.reduce((s,r)=>s+(r.posicoes||0),0);const uC=rows.filter(r=>r.underutil).length;
   document.getElementById('ovKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmt(rows.length)}</div></div>
@@ -1174,7 +1184,7 @@ function renderOccView(){
 function renderOccBase(){
   const srch=document.getElementById('obSrch').value.toLowerCase();
   const catF=document.getElementById('obCat').value;
-  let params=[...occParams];
+  let params=[...occParams].sort((a,b)=>{const cc=String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'));if(cc!==0)return cc;const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;return String(a.descricao||'').localeCompare(String(b.descricao||''));});
   if(srch)params=params.filter(p=>p.ean.includes(srch)||(p.descricao||'').toLowerCase().includes(srch));
   if(catF)params=params.filter(p=>p.cat===catF);
   const grid=document.getElementById('occBaseGrid');grid.innerHTML='';
