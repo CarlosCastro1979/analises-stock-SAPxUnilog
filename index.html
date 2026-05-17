@@ -1316,12 +1316,14 @@ function renderOccView(){
 
   // ── KPIs ──
   const wP=rows.filter(r=>r.param).length;
-  const tP=rows.reduce((s,r)=>s+(r.posReal||0),0);const tOpt=rows.reduce((s,r)=>s+(r.posOtimizadas||0),0);const tPoup=rows.reduce((s,r)=>s+(r.poupanca||0),0);
+  // Count globally unique enderecos across all filtered Unilog data
+  const globalEnderecos=new Set(uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!=='').map(r=>r.endereco));
+  const tP=globalEnderecos.size;const tOpt=rows.reduce((s,r)=>s+(r.posOtimizadas||0),0);const tPoup=rows.reduce((s,r)=>s+(r.poupanca||0),0);
   const uC=rows.reduce((s,r)=>s+(r.totalSubutil||0)+(r.totalConsolidavel||0),0);
   document.getElementById('ovKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com parâmetro</div><div class="kv g">${fmt(wP)}</div><div class="ks">${rows.length?Math.round(wP/rows.length*100):0}%</div></div>
-    <div class="kpi"><div class="kl">Posições Reais</div><div class="kv b">${fmt(tP)}</div><div class="ks">endereços Unilog</div></div>
+    <div class="kpi"><div class="kl">Posições Reais</div><div class="kv b">${fmt(tP)}</div><div class="ks">${depF?("Dep "+depF.padStart(4,"0")):"Todos os depósitos"} · endereços únicos</div></div>
     <div class="kpi"><div class="kl">Após Optimização</div><div class="kv">${fmt(tOpt)}</div></div>
     <div class="kpi"><div class="kl">Posições a Libertar</div><div class="kv ${tPoup>0?'r':''}">${fmt(tPoup)}</div><div class="ks">${tP>0?Math.round(tPoup/tP*100):0}% do total</div></div>
     <div class="kpi"><div class="kl">Lotes Subaproveit.</div><div class="kv y">${fmt(uC)}</div></div>
@@ -1347,7 +1349,7 @@ function renderOccView(){
             ${doadores.map(d=>`<div style="font-size:10px;color:var(--text2);margin-top:2px;padding-left:8px">
               ▸ Mover <strong>${fmt(d.qt)}</strong> un de <span style="font-family:var(--mono);background:#e2e8f0;padding:1px 5px;border-radius:3px">${d.end}</span>
               → <span style="font-family:var(--mono);background:#dbeafe;padding:1px 5px;border-radius:3px">${receptor.end}</span>
-              <span style="color:var(--muted)">(liberta ${posExcesso} posição)</span>
+              <span style="color:var(--muted)">(liberta ${posExcesso} posição${posExcesso>1?'s':''})</span>
             </div>`).join('')}
           </div>`;
         }).join('');
