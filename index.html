@@ -332,42 +332,76 @@ select.cad-inp{cursor:pointer;}
 
 <!-- ══ CADASTRO ══ -->
 <div class="page" id="page-cadastro">
-  <div class="card">
-    <div class="ch">
-      <div class="ct">Cadastro de Artigos</div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn bg bs" onclick="exportCadastroXlsx()">⬇ Excel</button>
-        <button class="btn bp bs" onclick="saveCadastroAll()">💾 Guardar Alterações</button>
+  <div class="its">
+    <div class="it active" onclick="cadTab('artigos',this)">🗂️ Artigos</div>
+    <div class="it" onclick="cadTab('duplicados',this)">⚠️ EAN Duplicados<span id="dupBadge" class="bc" style="display:none;background:var(--yellow);color:#92400e"></span></div>
+  </div>
+
+  <!-- ARTIGOS -->
+  <div id="cad-artigos">
+    <div class="card">
+      <div class="ch">
+        <div class="ct">Cadastro de Artigos</div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn bg bs" onclick="exportCadastroXlsx()">⬇ Excel</button>
+          <button class="btn bp bs" onclick="saveCadastroAll()">💾 Guardar Alterações</button>
+        </div>
       </div>
+      <div class="tb">
+        <input class="inp is" id="cadSrch" placeholder="EAN ou descrição…" oninput="renderCadastro()">
+        <select class="inp" id="cadCat" onchange="renderCadastro()">
+          <option value="">Todas as categorias</option>
+          <option value="__sem__">— Sem categoria —</option>
+        </select>
+        <select class="inp" id="cadSub" onchange="renderCadastro()">
+          <option value="">Todas as subcategorias</option>
+          <option value="__sem__">— Sem subcategoria —</option>
+        </select>
+        <select class="inp" id="cadLote" onchange="renderCadastro()">
+          <option value="">Lote — todos</option>
+          <option value="1">Lote obrigatório</option>
+          <option value="0">Sem lote</option>
+          <option value="vazio">Sem parâmetro</option>
+        </select>
+        <select class="inp" id="cadSemParam" onchange="renderCadastro()">
+          <option value="">Todos</option>
+          <option value="sem_cat">Sem categoria</option>
+          <option value="sem_sub">Sem subcategoria</option>
+          <option value="sem_qpp">Sem un/posição</option>
+        </select>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;" id="cadCount"></div>
+      <div class="tw2"><table id="cadTable">
+        <thead><tr>
+          <th onclick="cadSort('ean')" id="cadTh_ean">EAN</th>
+          <th onclick="cadSort('desc')" id="cadTh_desc">Descrição SAP</th>
+          <th onclick="cadSort('cat')" id="cadTh_cat" style="min-width:160px">Categoria</th>
+          <th onclick="cadSort('subcat')" id="cadTh_subcat" style="min-width:140px">Subcategoria</th>
+          <th onclick="cadSort('qty_per_pos')" id="cadTh_qty_per_pos" style="min-width:80px">Un/Posição</th>
+          <th onclick="cadSort('lote_obrigatorio')" id="cadTh_lote_obrigatorio">Lote Obrig.</th>
+          <th style="min-width:120px">Notas</th>
+        </tr></thead>
+        <tbody id="cadBody"></tbody>
+      </table></div>
     </div>
-    <div class="tb">
-      <input class="inp is" id="cadSrch" placeholder="EAN ou descrição…" oninput="renderCadastro()">
-      <select class="inp" id="cadCat" onchange="renderCadastro()"><option value="">Todas as categorias</option></select>
-      <select class="inp" id="cadLote" onchange="renderCadastro()">
-        <option value="">Lote — todos</option>
-        <option value="1">Lote obrigatório</option>
-        <option value="0">Sem lote</option>
-        <option value="vazio">Sem parâmetro definido</option>
-      </select>
-      <select class="inp" id="cadSemParam" onchange="renderCadastro()">
-        <option value="">Todos</option>
-        <option value="sem_cat">Sem categoria</option>
-        <option value="sem_qpp">Sem un/posição</option>
-      </select>
+  </div>
+
+  <!-- DUPLICADOS -->
+  <div id="cad-duplicados" style="display:none">
+    <div class="card">
+      <div class="ch"><div class="ct">EAN com Múltiplos Códigos SAP</div></div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
+        Um EAN deve corresponder a um único código de material SAP. Os casos abaixo indicam inconsistências na base de dados SAP que devem ser corrigidas com urgência.
+      </p>
+      <div class="kr" id="dupKpis"></div>
+      <div class="tw2"><table>
+        <thead><tr>
+          <th>EAN</th><th>Descrição</th><th class="num">Nº Materiais</th><th>Materiais SAP</th><th>Depósitos</th>
+        </tr></thead>
+        <tbody id="dupBody"></tbody>
+      </table></div>
+      <div id="dupEmpty" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum EAN duplicado detectado</div></div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;" id="cadCount"></div>
-    <div class="tw2"><table id="cadTable">
-      <thead><tr>
-        <th>EAN</th>
-        <th>Descrição SAP</th>
-        <th style="min-width:160px">Categoria</th>
-        <th style="min-width:140px">Subcategoria</th>
-        <th style="min-width:80px">Un/Posição</th>
-        <th>Lote Obrig.</th>
-        <th style="min-width:120px">Notas</th>
-      </tr></thead>
-      <tbody id="cadBody"></tbody>
-    </table></div>
   </div>
 </div>
 
@@ -590,6 +624,90 @@ function buildSusp(){
   const badge=document.getElementById('suspBadge');badge.textContent=suspData.length;badge.style.display=suspData.length>0?'':'none';
 }
 
+// ── BUILD & RENDER DUPLICADOS ──
+function buildDuplicados(){
+  if(!sapData)return[];
+  // Map EAN → set of materials
+  const eanMat={};
+  sapData.forEach(r=>{
+    if(!r.EAN_norm||!r.material)return;
+    if(!eanMat[r.EAN_norm])eanMat[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc,mats:new Set(),deps:new Set()};
+    eanMat[r.EAN_norm].mats.add(r.material);
+    eanMat[r.EAN_norm].deps.add(r.deposito);
+  });
+  return Object.values(eanMat).filter(e=>e.mats.size>1).sort((a,b)=>b.mats.size-a.mats.size);
+}
+
+function checkDuplicadosAlert(){
+  const dups=buildDuplicados();
+  const badge=document.getElementById('dupBadge');
+  badge.textContent=dups.length;
+  badge.style.display=dups.length>0?'':'none';
+  if(dups.length>0)showDupModal(dups);
+}
+
+function showDupModal(dups){
+  const existing=document.getElementById('dupAlertModal');
+  if(existing)existing.remove();
+  const overlay=document.createElement('div');
+  overlay.id='dupAlertModal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:300;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML=`
+    <div style="background:#fff;border-radius:10px;padding:28px;width:580px;max-width:96vw;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <div style="width:40px;height:40px;background:#fef3c7;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">⚠️</div>
+        <div>
+          <div style="font-size:16px;font-weight:700;color:#92400e">EAN com múltiplos códigos SAP detectados</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${dups.length} EAN(s) com mais de 1 material associado — situação que deve ser corrigida com urgência</div>
+        </div>
+      </div>
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:12px;max-height:280px;overflow-y:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="border-bottom:1px solid #fde68a">
+            <th style="padding:6px 8px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#92400e">EAN</th>
+            <th style="padding:6px 8px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#92400e">Descrição</th>
+            <th style="padding:6px 8px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#92400e">Materiais SAP</th>
+          </tr></thead>
+          <tbody>
+            ${dups.slice(0,15).map(d=>`<tr style="border-bottom:1px solid #fef3c7">
+              <td style="padding:6px 8px;font-family:var(--mono);font-size:11px">${d.ean}</td>
+              <td style="padding:6px 8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.desc}</td>
+              <td style="padding:6px 8px"><div style="display:flex;gap:4px;flex-wrap:wrap">${[...d.mats].map(m=>`<span style="background:#fde68a;padding:1px 6px;border-radius:3px;font-family:var(--mono);font-size:10px;font-weight:600">${m}</span>`).join('')}</div></td>
+            </tr>`).join('')}
+            ${dups.length>15?`<tr><td colspan="3" style="padding:6px 8px;color:var(--muted);font-size:11px">… e mais ${dups.length-15} EANs. Ver aba "EAN Duplicados".</td></tr>`:''}
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button onclick="document.getElementById('dupAlertModal').remove();document.querySelector('[data-page=cadastro]').click();setTimeout(()=>cadTab('duplicados',document.querySelector('.it:nth-child(2)')),100)" style="background:var(--yellow);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Ver Detalhes</button>
+        <button onclick="document.getElementById('dupAlertModal').remove()" style="background:#fff;border:1px solid var(--border2);padding:8px 18px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text2)">Fechar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function renderDuplicados(){
+  const dups=buildDuplicados();
+  document.getElementById('dupEmpty').style.display=dups.length===0?'block':'none';
+  document.getElementById('dupKpis').innerHTML=`
+    <div class="kpi"><div class="kl">EANs duplicados</div><div class="kv r">${dups.length}</div></div>
+    <div class="kpi"><div class="kl">Total materiais extra</div><div class="kv y">${dups.reduce((s,d)=>s+d.mats.size-1,0)}</div></div>
+  `;
+  const body=document.getElementById('dupBody');body.innerHTML='';
+  for(const d of dups){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td><span class="badge bneu">${d.ean}</span></td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.desc}</td>
+      <td class="num" style="color:var(--red);font-weight:700">${d.mats.size}</td>
+      <td>${[...d.mats].map(m=>`<span class="badge bwarn" style="margin-right:3px">${m}</span>`).join('')}</td>
+      <td style="font-size:11px">${[...d.deps].map(dep=>`<span class="badge bgray" style="margin-right:3px">Dep ${dep.padStart(4,'0')}</span>`).join('')}</td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!dups.length)eRow(body,5,'');
+}
+
 function simRatio(a,b){const la=a.length,lb=b.length;if(!la||!lb)return 0;const dp=Array.from({length:la+1},(_,i)=>Array.from({length:lb+1},(_,j)=>i===0?j:j===0?i:0));for(let i=1;i<=la;i++)for(let j=1;j<=lb;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return 1-dp[la][lb]/Math.max(la,lb);}
 
 // ── PROCESS ──
@@ -597,7 +715,7 @@ async function processAll(){
   if(!sapData||!uniData)return;
   company=document.getElementById('coSel').value;
   document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
-  buildRecon();buildSusp();await autoSeedOcc();renderUpKpis();updateChip();
+  buildRecon();buildSusp();checkDuplicadosAlert();await autoSeedOcc();renderUpKpis();updateChip();
   try{
     const payload={id:company,company,uploaded_at:new Date().toISOString(),sap_rows:sapData.length,unilog_rows:uniData.length,sap_data:JSON.stringify(sapData),unilog_data:JSON.stringify(uniData),recon_summary:JSON.stringify(buildSummary())};
     const{error}=await db.from('logistica_stock').upsert(payload,{onConflict:'id'});
@@ -615,7 +733,7 @@ async function loadFromDB(silent=false){
     const{data,error}=await db.from('logistica_stock').select('*').eq('id',company).single();
     if(error||!data){if(!silent)toast('Sem dados para '+company,'error');return;}
     sapData=JSON.parse(data.sap_data);uniData=JSON.parse(data.unilog_data);company=data.company;
-    buildRecon();buildSusp();renderUpKpis();updateChip();
+    buildRecon();buildSusp();checkDuplicadosAlert();renderUpKpis();updateChip();
     const dt=new Date(data.uploaded_at);
     document.getElementById('loadBanner').style.display='flex';
     document.getElementById('loadBanner').innerHTML=`☁️ <strong>${data.company}</strong> — Upload: <strong>${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</strong> — SAP: <strong>${data.sap_rows}</strong> — Unilog: <strong>${data.unilog_rows}</strong>`;
@@ -811,10 +929,25 @@ function renderSusp(){
 }
 
 // ── CADASTRO ──
+let cadSortState={col:'desc',dir:1};
+function cadSort(col){
+  if(cadSortState.col===col)cadSortState.dir*=-1;else cadSortState={col,dir:1};
+  document.querySelectorAll('[id^="cadTh_"]').forEach(th=>{th.classList.remove('asc','desc');});
+  const th=document.getElementById('cadTh_'+col);
+  if(th)th.classList.add(cadSortState.dir===1?'asc':'desc');
+  renderCadastro();
+}
+function cadTab(name,el){
+  el.closest('.page').querySelectorAll('.it').forEach(t=>t.classList.remove('active'));el.classList.add('active');
+  document.getElementById('cad-artigos').style.display=name==='artigos'?'':'none';
+  document.getElementById('cad-duplicados').style.display=name==='duplicados'?'':'none';
+  if(name==='duplicados')renderDuplicados();
+}
 function renderCadastro(){
   if(!sapData){document.getElementById('cadBody').innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros SAP primeiro</td></tr>';return;}
   const srch=document.getElementById('cadSrch').value.toLowerCase();
   const catF=document.getElementById('cadCat').value;
+  const subF=document.getElementById('cadSub').value;
   const loteF=document.getElementById('cadLote').value;
   const semF=document.getElementById('cadSemParam').value;
 
@@ -824,24 +957,46 @@ function renderCadastro(){
   let items=Object.values(eanMap).map(e=>{
     const p=occParams.find(x=>x.ean===e.ean);
     const edited=cadEdits[e.ean];
-    return{ean:e.ean,desc:e.desc,cat:edited?.cat!==undefined?edited.cat:(p?.cat||''),subcat:edited?.subcat!==undefined?edited.subcat:(p?.subcat||''),qty_per_pos:edited?.qty_per_pos!==undefined?edited.qty_per_pos:(p?.qty_per_pos||''),lote_obrigatorio:edited?.lote_obrigatorio!==undefined?edited.lote_obrigatorio:(p?.lote_obrigatorio||false),notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),hasParam:!!p};
+    return{ean:e.ean,desc:e.desc,
+      cat:edited?.cat!==undefined?edited.cat:(p?.cat||''),
+      subcat:edited?.subcat!==undefined?edited.subcat:(p?.subcat||''),
+      qty_per_pos:edited?.qty_per_pos!==undefined?edited.qty_per_pos:(p?.qty_per_pos||null),
+      lote_obrigatorio:edited?.lote_obrigatorio!==undefined?edited.lote_obrigatorio:(p?.lote_obrigatorio||false),
+      notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),
+      hasParam:!!p};
   });
 
+  // Update filters
+  const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
+  const allSubs=[...new Set(occParams.map(p=>p.subcat).filter(Boolean))].sort();
+  const csel=document.getElementById('cadCat');const ccur=csel.value;
+  csel.innerHTML='<option value="">Todas as categorias</option><option value="__sem__">— Sem categoria —</option>'+allCats.map(c=>`<option value="${c}">${c}</option>`).join('');csel.value=ccur;
+  const ssel=document.getElementById('cadSub');const scur=ssel.value;
+  ssel.innerHTML='<option value="">Todas as subcategorias</option><option value="__sem__">— Sem subcategoria —</option>'+allSubs.map(c=>`<option value="${c}">${c}</option>`).join('');ssel.value=scur;
+
+  // Apply filters
   if(srch)items=items.filter(i=>i.ean.includes(srch)||i.desc.toLowerCase().includes(srch));
-  if(catF)items=items.filter(i=>i.cat===catF);
+  if(catF==='__sem__')items=items.filter(i=>!i.cat);
+  else if(catF)items=items.filter(i=>i.cat===catF);
+  if(subF==='__sem__')items=items.filter(i=>!i.subcat);
+  else if(subF)items=items.filter(i=>i.subcat===subF);
   if(loteF==='1')items=items.filter(i=>i.lote_obrigatorio===true);
   else if(loteF==='0')items=items.filter(i=>i.lote_obrigatorio===false&&i.hasParam);
   else if(loteF==='vazio')items=items.filter(i=>!i.hasParam);
   if(semF==='sem_cat')items=items.filter(i=>!i.cat);
+  else if(semF==='sem_sub')items=items.filter(i=>!i.subcat);
   else if(semF==='sem_qpp')items=items.filter(i=>!i.qty_per_pos||i.qty_per_pos<=1);
 
+  // Sort
+  const {col,dir}=cadSortState;
+  items.sort((a,b)=>{
+    let va=a[col]??'',vb=b[col]??'';
+    if(typeof va==='boolean')va=va?1:0;if(typeof vb==='boolean')vb=vb?1:0;
+    if(typeof va==='number'&&typeof vb==='number')return dir*(va-vb);
+    return dir*String(va).localeCompare(String(vb));
+  });
+
   document.getElementById('cadCount').textContent=`${items.length} artigos`;
-
-  // Update cat filter
-  const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
-  const sel=document.getElementById('cadCat');const cur=sel.value;
-  sel.innerHTML='<option value="">Todas as categorias</option>'+allCats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;
-
   const body=document.getElementById('cadBody');body.innerHTML='';
   for(const item of items){
     const edited=!!cadEdits[item.ean];
@@ -849,9 +1004,9 @@ function renderCadastro(){
     if(edited)tr.style.background='#fffbeb';
     tr.innerHTML=`
       <td><span class="badge bneu">${item.ean}</span></td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(item.desc)}">${item.desc}</td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(item.desc)}">${item.desc}</td>
       <td><input class="cad-inp" list="cad_cat_dl" value="${esc(item.cat)}" onchange="cadEdit('${item.ean}','cat',this.value)" placeholder="Categoria…"><datalist id="cad_cat_dl">${allCats.map(c=>`<option value="${c}">`).join('')}</datalist></td>
-      <td><input class="cad-inp" value="${esc(item.subcat)}" onchange="cadEdit('${item.ean}','subcat',this.value)" placeholder="Subcategoria…"></td>
+      <td><input class="cad-inp" list="cad_sub_dl" value="${esc(item.subcat)}" onchange="cadEdit('${item.ean}','subcat',this.value)" placeholder="Subcategoria…"><datalist id="cad_sub_dl">${allSubs.map(c=>`<option value="${c}">`).join('')}</datalist></td>
       <td><input class="cad-inp" type="number" min="1" value="${item.qty_per_pos||''}" onchange="cadEdit('${item.ean}','qty_per_pos',parseInt(this.value)||null)" placeholder="0" style="width:70px"></td>
       <td class="cad-toggle">
         <div class="tw" onclick="cadToggleLote('${item.ean}',this)">
