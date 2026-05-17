@@ -1266,7 +1266,7 @@ function renderOccView(){
   let rows=Object.entries(byEan).map(([ean,v])=>{
     const param=occParams.find(p=>p.ean===ean);
     const qpp=param&&param.qty_per_pos>1?param.qty_per_pos:0; // only meaningful if >1 un/pos
-    let posOtimizadas=0,loteDetail=[],totalSubutil=0,totalConsolidavel=0;
+    let loteDetail=[],totalSubutil=0,totalConsolidavel=0;
     // posReal = total lines in Unilog for this EAN (each line = 1 position, Qtd End=1)
     const posReal=v.lotes.reduce((s,l)=>s+l.nEnderecos,0);
 
@@ -1290,12 +1290,13 @@ function renderOccView(){
           consolidacao={posExcesso,doadores,receptor};
         }
       }
-      posOtimizadas+=posMinima;
+      // posMinima tracked per lote in loteDetail
       loteDetail.push({lote:l.lote,qt:l.qt,posMinima,posReais:l.nEnderecos,posExcesso,pct,faltam,subutil,consolidacao});
     });
 
-    const poupanca=totalConsolidavel>0?totalConsolidavel:0;
-    return{ean,desc:v.desc,qt:v.qt,param,posReal,posOtimizadas,poupanca,
+    const poupanca=totalConsolidavel;
+    const posOtimizadasFinal=posReal-poupanca; // real positions after consolidation
+    return{ean,desc:v.desc,qt:v.qt,param,posReal,posOtimizadas:posOtimizadasFinal,poupanca,
       underutil:totalSubutil>0||totalConsolidavel>0,loteDetail,totalSubutil,totalConsolidavel,
       nLotes:v.lotes.length,cat:param?.cat||'',subcat:param?.subcat||''};
   });
