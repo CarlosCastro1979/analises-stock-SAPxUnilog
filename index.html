@@ -417,7 +417,7 @@ select.cad-inp{cursor:pointer;}
       <div class="ch"><div class="ct">Stock vs Ocupação de Posições</div><button class="btn bg bs" onclick="exportOccXlsx()">⬇ Excel</button></div>
       <div class="tb">
         <input class="inp is" id="ovSrch" placeholder="EAN ou descrição…" oninput="renderOccView()">
-        <select class="inp" id="ovCat" onchange="renderOccView()"><option value="">Todas as categorias</option></select>
+        <select class="inp" id="ovCat" onchange="document.getElementById('ovSub').value='';renderOccView()"><option value="">Todas as categorias</option></select>
         <select class="inp" id="ovSub" onchange="renderOccView()"><option value="">Todas as subcategorias</option></select>
         <select class="inp" id="ovDep" onchange="renderOccView()">
           <option value="">Todos os depósitos</option>
@@ -520,7 +520,7 @@ async function init(){
       if(t.dataset.page==='recon')renderReconPage();
       if(t.dataset.page==='suspeitos')renderSusp();
       if(t.dataset.page==='cadastro')renderCadastro();
-      if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
+      if(t.dataset.page==='occupation'){if(sapData)renderOccView();renderOccBase();}
       if(t.dataset.page==='history')renderHistory();
     };
   });
@@ -1184,12 +1184,23 @@ function updateOccFilters(){
 
 // ── OCC VIEW ──
 function renderOccView(){
-  if(!sapData)return;
+  if(!sapData){document.getElementById('ovBody').innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros SAP primeiro</td></tr>';return;}
   const srch=document.getElementById('ovSrch').value.toLowerCase();
   const catF=document.getElementById('ovCat').value;
-  const subF=document.getElementById('ovSub').value;
   const depF=document.getElementById('ovDep').value;
   const alertF=document.getElementById('ovAlerta').value;
+  // Update category options
+  const allOvCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
+  const ovCatSel=document.getElementById('ovCat');const ovCatCur=ovCatSel.value;
+  ovCatSel.innerHTML='<option value="">Todas as categorias</option>'+allOvCats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  ovCatSel.value=allOvCats.includes(ovCatCur)?ovCatCur:'';
+  // Update subcategory options filtered by category
+  const ovSubSrc=catF?occParams.filter(p=>p.cat===catF):occParams;
+  const allOvSubs=[...new Set(ovSubSrc.map(p=>p.subcat).filter(Boolean))].sort();
+  const ovSubSel=document.getElementById('ovSub');const ovSubCur=ovSubSel.value;
+  ovSubSel.innerHTML='<option value="">Todas as subcategorias</option>'+allOvSubs.map(c=>`<option value="${c}">${c}</option>`).join('');
+  ovSubSel.value=allOvSubs.includes(ovSubCur)?ovSubCur:'';
+  const subF=ovSubSel.value;
   const filtered=depF?sapData.filter(r=>r.deposito===depF):sapData;
   const byEan={};filtered.forEach(r=>{if(!r.EAN_norm)return;if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={desc:r.desc,qt:0};byEan[r.EAN_norm].qt+=r.qt;});
   let rows=Object.entries(byEan).map(([ean,v])=>{
@@ -1216,8 +1227,14 @@ function renderOccView(){
   const body=document.getElementById('ovBody');body.innerHTML='';
   for(const r of rows){
     const pct=r.lastPct;const col=pct===null?'':pct<30?'var(--red)':pct<70?'var(--yellow)':'var(--green)';
-    let alert='';if(r.underutil)alert='<span class="badge bwarn">⚠ Subaproveit.</span>';else if(!r.param)alert='<span class="badge bgray">Sem parâm.</span>';
+    // Units to fill last position
+    const toFill=r.param&&r.param.qty_per_pos>0&&r.qt>0?(r.param.qty_per_pos-(r.qt%r.param.qty_per_pos))%r.param.qty_per_pos:null;
+    let alert='';
+    if(!r.param)alert='<span class="badge bgray">Sem parâm.</span>';
+    else if(r.underutil)alert=`<span class="badge bwarn">⚠ Faltam ${fmt(toFill)} un</span>`;
+    else if(toFill===0)alert='<span class="badge bok">✓ Posições cheias</span>';
     const tr=document.createElement('tr');
+    if(r.underutil)tr.style.background='#fffbeb';
     tr.innerHTML=`
       <td><span class="badge bneu">${r.ean}</span></td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc}</td>
