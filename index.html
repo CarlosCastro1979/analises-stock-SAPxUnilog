@@ -264,7 +264,8 @@ select.cad-inp{cursor:pointer;}
         <option value="diverg">Divergência (ambos têm)</option>
         <option value="ok">OK</option>
       </select>
-      <select class="inp" id="reconCat" onchange="renderRecon()"><option value="">Todas as categorias</option></select>
+      <select class="inp" id="reconCat" onchange="document.getElementById('reconSub').value='';renderRecon()"><option value="">Todas as categorias</option></select>
+      <select class="inp" id="reconSub" onchange="renderRecon()"><option value="">Todas as subcategorias</option></select>
       <select class="inp" id="reconValidade" onchange="renderRecon()">
         <option value="">Toda a validade</option>
         <option value="vencido">Vencidos</option>
@@ -819,6 +820,13 @@ function renderRecon(){
   const srch=document.getElementById('reconSrch').value.toLowerCase();
   const estado=document.getElementById('reconEstado').value;
   const catF=document.getElementById('reconCat').value;
+  const subF=document.getElementById('reconSub').value;
+  // Update subcategory options based on selected category
+  const reconSubSrc=catF?occParams.filter(p=>p.cat===catF):occParams;
+  const reconSubs=[...new Set(reconSubSrc.map(p=>p.subcat).filter(Boolean))].sort();
+  const reconSubSel=document.getElementById('reconSub');const reconSubCur=reconSubSel.value;
+  reconSubSel.innerHTML='<option value="">Todas as subcategorias</option>'+reconSubs.map(c=>`<option value="${c}">${c}</option>`).join('');
+  reconSubSel.value=reconSubs.includes(reconSubCur)?reconSubCur:'';
   const valF=document.getElementById('reconValidade').value;
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(!showAll)rows=rows.filter(r=>r.diff!==0);
@@ -828,6 +836,7 @@ function renderRecon(){
   else if(estado==='diverg')rows=rows.filter(r=>r.qt_sap>0&&r.qt_uni>0&&r.diff!==0);
   else if(estado==='ok')rows=rows.filter(r=>r.diff===0);
   if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===(catF);});}
+  if(subF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.subcat||'')===(subF);});}
   const minDiffVal=parseFloat(document.getElementById('reconMinDiff').value)||0;if(minDiffVal>0)rows=rows.filter(r=>Math.abs(r.diff)>=minDiffVal);
   if(valF){
     const today=new Date();today.setHours(0,0,0,0);
@@ -905,6 +914,7 @@ function renderSusp(){
   if(flt==='similar')rows=rows.filter(r=>r.similar);
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
   if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===(catF);});}
+  if(subF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.subcat||'')===(subF);});}
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
   if(!sorts['susp']){rows.sort((a,b)=>{const cc=String(a.cat||'').localeCompare(String(b.cat||''));if(cc!==0)return cc;return String(a.desc||'').localeCompare(String(b.desc||''));});}
   else applySort('susp',rows);
@@ -1191,6 +1201,7 @@ function renderOccView(){
   });
   if(srch)rows=rows.filter(r=>r.ean.includes(srch)||r.desc.toLowerCase().includes(srch));
   if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===(catF);});}
+  if(subF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.subcat||'')===(subF);});}
   if(subF)rows=rows.filter(r=>r.subcat===subF);
   if(alertF==='sub')rows=rows.filter(r=>r.underutil);
   else if(alertF==='sem')rows=rows.filter(r=>!r.param);
