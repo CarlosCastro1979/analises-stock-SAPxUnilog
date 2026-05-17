@@ -437,8 +437,8 @@ select.cad-inp{cursor:pointer;}
       <div class="tw2"><table>
         <thead><tr>
           <th>EAN</th><th>Descrição</th><th>Categoria</th><th>Subcategoria</th>
-          <th class="num">Stock Unilog</th><th class="num">Un/Pos</th><th class="num">Pos. Teóricas</th><th class="num">Pos. Reais</th>
-          <th>Ocup. Última Pos.</th><th>Alerta</th>
+          <th class="num">Stock Unilog</th><th class="num">Un/Pos</th><th class="num">Pos. Reais</th><th class="num">Pos. Optimizadas</th><th class="num">Poupança</th>
+          <th>Recomendação</th>
         </tr></thead>
         <tbody id="ovBody"></tbody>
       </table></div>
@@ -1242,45 +1242,65 @@ function renderOccView(){
   uniFiltered.forEach(r=>{
     if(!r.EAN_norm)return;
     const k=r.EAN_norm+'|'+r.Lote_norm;
-    if(!byEanLote[k])byEanLote[k]={ean:r.EAN_norm,lote:r.Lote_norm,desc:descMap[r.EAN_norm]||r.produto||'',qt:0,enderecos:new Set()};
+    if(!byEanLote[k])byEanLote[k]={ean:r.EAN_norm,lote:r.Lote_norm,desc:descMap[r.EAN_norm]||r.produto||'',qt:0,enderecos:[],endSet:new Set()};
     byEanLote[k].qt+=r.qt;
-    if(r.endereco)byEanLote[k].enderecos.add(r.endereco);
+    if(r.endereco&&!byEanLote[k].endSet.has(r.endereco)){
+      byEanLote[k].endSet.add(r.endereco);
+      byEanLote[k].enderecos.push({end:r.endereco,qt:0});
+    }
+    // accumulate qty per endereco
+    if(r.endereco){const e=byEanLote[k].enderecos.find(x=>x.end===r.endereco);if(e)e.qt+=r.qt;}
   });
 
   // ── Roll up to EAN level ──
   const byEan={};
   Object.values(byEanLote).forEach(v=>{
-    if(!byEan[v.ean])byEan[v.ean]={desc:v.desc,qt:0,enderecos:new Set(),lotes:[]};
+    if(!byEan[v.ean])byEan[v.ean]={desc:v.desc,qt:0,endSet:new Set(),lotes:[]};
     byEan[v.ean].qt+=v.qt;
-    v.enderecos.forEach(e=>byEan[v.ean].enderecos.add(e));
-    byEan[v.ean].lotes.push({lote:v.lote,qt:v.qt,nEnderecos:v.enderecos.size});
+    v.enderecos.forEach(e=>byEan[v.ean].endSet.add(e.end));
+    byEan[v.ean].lotes.push({lote:v.lote,qt:v.qt,nEnderecos:v.enderecos.length,enderecos:v.enderecos});
   });
+  Object.values(byEan).forEach(v=>v.nEnderecos=v.endSet.size);
 
   // ── Build rows ──
   let rows=Object.entries(byEan).map(([ean,v])=>{
     const param=occParams.find(p=>p.ean===ean);
     const qpp=param?.qty_per_pos||0;
-    let posTeoricas=null,loteDetail=[],totalSubutil=0,totalFaltam=0;
+    let posOtimizadas=null,loteDetail=[],totalSubutil=0,totalConsolidavel=0;
+    // posReal = sum of actual physical positions per lote in Unilog
+    const posReal=v.lotes.reduce((s,l)=>s+l.nEnderecos,0);
     if(qpp>0){
-      posTeoricas=0;
+      posOtimizadas=0;
       v.lotes.forEach(l=>{
-        const posLote=Math.ceil(l.qt/qpp);
+        const posMinima=Math.ceil(l.qt/qpp); // min positions if fully consolidated
         const resto=l.qt%qpp;
         const pct=resto===0?100:Math.round(resto/qpp*100);
         const faltam=resto===0?0:qpp-resto;
-        const subutil=resto>0&&pct<50;
-        posTeoricas+=posLote;
+        const subutil=resto>0&&pct<50; // last position less than 50% full
+        const posExcesso=Math.max(0,l.nEnderecos-posMinima); // positions that can be freed
+        posOtimizadas+=posMinima;
         if(subutil)totalSubutil++;
-        totalFaltam+=faltam;
-        loteDetail.push({lote:l.lote,qt:l.qt,posLote,pct,faltam,subutil,posReais:l.nEnderecos});
+        if(posExcesso>0)totalConsolidavel+=posExcesso;
+        // Build consolidation instructions if same lote is spread across too many positions
+        let consolidacao=null;
+        if(posExcesso>0&&l.enderecos&&l.enderecos.length>1){
+          const endSorted=[...l.enderecos].sort((a,b)=>a.qt-b.qt);
+          // Doadores: the smallest positions that together can be emptied
+          const doadores=[];let remaining=0;
+          for(let i=0;i<endSorted.length-1&&doadores.length<posExcesso;i++){
+            doadores.push(endSorted[i]);
+            remaining+=endSorted[i].qt;
+          }
+          const receptor=endSorted[endSorted.length-1];
+          consolidacao={posExcesso,doadores,receptor,totalMover:remaining};
+        }
+        loteDetail.push({lote:l.lote,qt:l.qt,posMinima,posReais:l.nEnderecos,posExcesso,pct,faltam,subutil,consolidacao});
       });
     }
-    const posReal=v.enderecos.size;
-    const posDiff=posTeoricas!==null?posReal-posTeoricas:null;
-    const lastPct=qpp>0&&v.qt>0?(v.qt%qpp===0?0:(v.qt%qpp)/qpp*100):null;
-    return{ean,desc:v.desc,qt:v.qt,param,posicoes:posTeoricas,posReal,posDiff,lastPct,
-      underutil:totalSubutil>0,loteDetail,totalSubutil,totalFaltam,nLotes:v.lotes.length,
-      cat:param?.cat||'',subcat:param?.subcat||''};
+    const poupanca=posOtimizadas!==null?posReal-posOtimizadas:null;
+    return{ean,desc:v.desc,qt:v.qt,param,posReal,posOtimizadas,poupanca,
+      underutil:totalSubutil>0||totalConsolidavel>0,loteDetail,totalSubutil,totalConsolidavel,
+      nLotes:v.lotes.length,cat:param?.cat||'',subcat:param?.subcat||''};
   });
 
   // ── Apply filters (using captured values, NOT re-reading selects) ──
@@ -1299,12 +1319,14 @@ function renderOccView(){
 
   // ── KPIs ──
   const wP=rows.filter(r=>r.param).length;
-  const tP=rows.reduce((s,r)=>s+(r.posicoes||0),0);
-  const uC=rows.reduce((s,r)=>s+(r.totalSubutil||0),0);
+  const tP=rows.reduce((s,r)=>s+(r.posReal||0),0);const tOpt=rows.reduce((s,r)=>s+(r.posOtimizadas||0),0);const tPoup=tP-tOpt;
+  const uC=rows.reduce((s,r)=>s+(r.totalSubutil||0)+(r.totalConsolidavel||0),0);
   document.getElementById('ovKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com parâmetro</div><div class="kv g">${fmt(wP)}</div><div class="ks">${rows.length?Math.round(wP/rows.length*100):0}%</div></div>
-    <div class="kpi"><div class="kl">Posições estimadas</div><div class="kv b">${fmt(tP)}</div></div>
+    <div class="kpi"><div class="kl">Posições Reais</div><div class="kv b">${fmt(tP)}</div></div>
+    <div class="kpi"><div class="kl">Pos. Optimizadas</div><div class="kv">${fmt(tOpt)}</div></div>
+    <div class="kpi"><div class="kl">Poupança possível</div><div class="kv r">${fmt(tPoup)}</div><div class="ks">posições libertáveis</div></div>
     <div class="kpi"><div class="kl">Lotes Subaproveit.</div><div class="kv y">${fmt(uC)}</div></div>
   `;
 
@@ -1316,11 +1338,31 @@ function renderOccView(){
     let alert='';
     if(!r.param){alert='<span class="badge bgray">Sem parâm.</span>';}
     else if(r.nLotes===0){alert='—';}
-    else if(r.totalSubutil>0){
-      const details=r.loteDetail.filter(l=>l.subutil).map(l=>`<div style="font-size:10px;color:var(--yellow);margin-top:2px">Lote ${l.lote||'—'}: ${fmt(l.qt)} un / ${l.posLote} pos (${l.pct}%) — faltam ${fmt(l.faltam)}</div>`).join('');
-      alert=`<span class="badge bwarn">⚠ ${r.totalSubutil} lote(s)</span>${details}`;
+    else{
+      // Check for consolidation opportunities (same lote in more positions than needed)
+      const consol=r.loteDetail.filter(l=>l.consolidacao&&l.consolidacao.posExcesso>0);
+      const subutil=r.loteDetail.filter(l=>l.subutil&&!l.consolidacao);
+      if(consol.length>0){
+        const consolHtml=consol.map(l=>{
+          const {doadores,receptor,posExcesso}=l.consolidacao;
+          return `<div style="font-size:10px;margin-top:3px">
+            <span class="badge binfo">📦 Lote ${l.lote||'—'} — consolidar ${posExcesso} pos.</span>
+            ${doadores.map(d=>`<div style="font-size:10px;color:var(--text2);margin-top:2px;padding-left:8px">
+              ▸ Mover <strong>${fmt(d.qt)}</strong> un de <span style="font-family:var(--mono);background:#e2e8f0;padding:1px 5px;border-radius:3px">${d.end}</span>
+              → <span style="font-family:var(--mono);background:#dbeafe;padding:1px 5px;border-radius:3px">${receptor.end}</span>
+              <span style="color:var(--muted)">(liberta ${posExcesso} posição)</span>
+            </div>`).join('')}
+          </div>`;
+        }).join('');
+        const subHtml=subutil.map(l=>`<div style="font-size:10px;color:var(--muted);margin-top:2px">Lote ${l.lote||'—'}: ${fmt(l.qt)} un (${l.pct}%) — aguardar receção</div>`).join('');
+        alert=`<span class="badge binfo">🔧 ${consol.length} consolid.</span>${consolHtml}${subHtml}`;
+      } else if(r.totalSubutil>0){
+        const details=subutil.map(l=>`<div style="font-size:10px;color:var(--muted);margin-top:2px">Lote ${l.lote||'—'}: ${fmt(l.qt)} un (${l.pct}%) — aguardar receção</div>`).join('');
+        alert=`<span class="badge bwarn">⚠ ${r.totalSubutil} lote(s) — sem acção possível</span>${details}`;
+      } else {
+        alert='<span class="badge bok">✓ Posições cheias</span>';
+      }
     }
-    else{alert='<span class="badge bok">✓ Posições cheias</span>';}
     const posRealHtml=r.posReal>0?`<span style="font-weight:600;color:${r.posDiff!==null&&r.posDiff>0?'var(--red)':r.posDiff===0?'var(--green)':'var(--text)'}">${fmt(r.posReal)}${r.posDiff!==null&&r.posDiff>0?` <span style="font-size:10px">(+${r.posDiff})</span>`:''}</span>`:'—';
     const tr=document.createElement('tr');
     if(r.underutil)tr.style.background='#fffbeb';
@@ -1331,10 +1373,10 @@ function renderOccView(){
       <td style="font-size:11px">${r.subcat||'—'}</td>
       <td class="num">${fmt(r.qt)}</td>
       <td class="num">${r.param?fmt(r.param.qty_per_pos):'—'}</td>
-      <td class="num">${r.posicoes!==null?fmt(r.posicoes):'—'}</td>
-      <td class="num">${posRealHtml}</td>
-      <td style="min-width:100px">${pct!==null?`<div style="display:flex;align-items:center;gap:6px"><div class="pw" style="flex:1"><div class="pf" style="width:${Math.min(100,Math.round(Math.abs(pct)))}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono);width:28px">${Math.round(Math.abs(pct))}%</span></div>`:''}</td>
-      <td style="min-width:200px">${alert}</td>
+      <td class="num"><strong>${fmt(r.posReal)}</strong></td>
+      <td class="num">${r.posOtimizadas!==null?fmt(r.posOtimizadas):'—'}</td>
+      <td class="num ${r.poupanca>0?'neg':''}">${r.poupanca>0?`<strong>-${fmt(r.poupanca)}</strong>`:'—'}</td>
+      <td style="min-width:220px">${alert}</td>
     `;
     body.appendChild(tr);
   }
