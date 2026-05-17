@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Performance Logística — Delta Foods Brasil</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --red: #c8102e;
+    --red-dark: #9e0d24;
+    --red-dim: rgba(200,16,46,0.12);
+    --bg: #0e0e0f;
+    --bg2: #161618;
+    --bg3: #1e1e21;
+    --bg4: #26262a;
+    --border: rgba(255,255,255,0.08);
+    --text: #e8e8ea;
+    --muted: #888;
+    --green: #2ecc71;
+    --yellow: #f39c12;
+    --blue: #3498db;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 14px;
+  }
+
+  /* ── HEADER ── */
+  header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    height: 56px;
+    gap: 16px;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo-bar {
+    display: flex; align-items: center; gap: 10px;
+    flex: 1;
+  }
+  .logo-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--red);
+    box-shadow: 0 0 12px var(--red);
+  }
+  .logo-text {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--text);
+  }
+  .logo-sub { color: var(--muted); font-weight: 400; margin-left: 4px; }
+
+  .header-status {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+  .status-dot.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+  /* ── TABS ── */
+  .tab-bar {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex; gap: 0;
+  }
+  .tab {
+    padding: 12px 20px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--red); border-bottom-color: var(--red); }
+
+  /* ── LAYOUT ── */
+  .main { padding: 24px; max-width: 1600px; margin: 0 auto; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .card-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card-title::before {
+    content: ''; width: 3px; height: 14px;
+    background: var(--red); border-radius: 2px;
+  }
+
+  /* ── KPI ROW ── */
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .kpi {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+  }
+  .kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
+  .kpi-value { font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--text); }
+  .kpi-value.red { color: var(--red); }
+  .kpi-value.green { color: var(--green); }
+  .kpi-value.yellow { color: var(--yellow); }
+  .kpi-sub { font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+  /* ── UPLOAD ZONE ── */
+  .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .upload-grid { grid-template-columns: 1fr; } }
+
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .upload-zone:hover, .upload-zone.drag { border-color: var(--red); background: var(--red-dim); }
+  .upload-zone.loaded { border-color: var(--green); border-style: solid; }
+  .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .upload-icon { font-size: 28px; margin-bottom: 8px; }
+  .upload-label { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+  .upload-sub { font-size: 11px; color: var(--muted); }
+  .upload-file-name { font-family: var(--mono); font-size: 11px; color: var(--green); margin-top: 8px; }
+
+  /* ── BUTTONS ── */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 18px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+  }
+  .btn-primary { background: var(--red); color: white; }
+  .btn-primary:hover { background: var(--red-dark); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--text); }
+  .btn-sm { padding: 5px 12px; font-size: 11px; }
+
+  /* ── TABLES ── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead tr { border-bottom: 1px solid var(--border); }
+  th {
+    padding: 8px 10px;
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  th:hover { color: var(--text); }
+  th.sort-asc::after { content: ' ↑'; color: var(--red); }
+  th.sort-desc::after { content: ' ↓'; color: var(--red); }
+  td { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+  tr:hover td { background: var(--bg3); }
+  .badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .badge-ok { background: rgba(46,204,113,0.15); color: var(--green); }
+  .badge-warn { background: rgba(243,156,18,0.15); color: var(--yellow); }
+  .badge-error { background: rgba(200,16,46,0.15); color: var(--red); }
+  .badge-info { background: rgba(52,152,219,0.15); color: var(--blue); }
+  .num { font-family: var(--mono); text-align: right; }
+  .num.pos { color: var(--green); }
+  .num.neg { color: var(--red); }
+
+  /* ── FILTER ROW ── */
+  .filter-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+  .filter-input {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 7px 12px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: var(--sans);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .filter-input:focus { border-color: var(--red); }
+  select.filter-input { cursor: pointer; }
+
+  /* ── PROGRESS BAR ── */
+  .prog-bar-wrap { background: var(--bg4); border-radius: 4px; height: 6px; overflow: hidden; }
+  .prog-bar { height: 100%; border-radius: 4px; transition: width 0.3s; }
+
+  /* ── TOAST ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 12px;
+    max-width: 320px;
+    z-index: 9999;
+    display: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  #toast.show { display: block; animation: slideIn 0.2s ease; }
+  #toast.error { border-color: var(--red); }
+  #toast.success { border-color: var(--green); }
+  @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  /* ── SPINNER ── */
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--red);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── OCCUPATION ── */
+  .occ-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .occ-card {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    transition: border-color 0.15s;
+  }
+  .occ-card:hover { border-color: rgba(200,16,46,0.4); }
+  .occ-card-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .occ-ean { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .occ-desc { font-size: 12px; font-weight: 500; margin-bottom: 2px; line-height: 1.3; }
+  .occ-cat { font-size: 10px; color: var(--muted); }
+  .occ-qty { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--red); }
+  .occ-qty-label { font-size: 9px; color: var(--muted); text-transform: uppercase; }
+
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    width: 480px;
+    max-width: 95vw;
+  }
+  .modal-title { font-family: var(--mono); font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+  .form-row { margin-bottom: 12px; }
+  .form-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 5px; display: block; }
+  .form-input {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 9px 12px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: var(--sans);
+    outline: none;
+  }
+  .form-input:focus { border-color: var(--red); }
+  .modal-btns { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.4; }
+  .empty-text { font-size: 14px; }
+
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  .diff-highlight td:first-child { border-left: 2px solid var(--red); }
+
+  .company-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    background: var(--red-dim);
+    color: var(--red);
+  }
+
+  .last-upload-info {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px 12px;
+    display: inline-flex;
+    gap: 16px;
+    align-items: center;
+  }
+  .last-upload-info span { color: var(--text); }
+
+  .row-detail { background: var(--bg3); border-left: 3px solid var(--red-dim); }
+  .row-detail td { padding: 6px 10px 6px 20px; font-size: 11px; color: var(--muted); }
+
+  /* Reconciliation by depot pills */
+  .depot-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .depot-pill {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    transition: all 0.15s;
+    font-family: var(--mono);
+  }
+  .depot-pill:hover { color: var(--text); }
+  .depot-pill.active { background: var(--red); color: white; border-color: var(--red); }
+
+  /* Tabs within page */
+  .inner-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .inner-tab {
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .inner-tab:hover { color: var(--text); }
+  .inner-tab.active { color: var(--red); border-bottom-color: var(--red); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-bar">
+    <div class="logo-dot"></div>
+    <div class="logo-text">DELTA<span class="logo-sub">// performance logística</span></div>
+  </div>
+  <div id="companyBadge"></div>
+  <div class="header-status">
+    <div class="status-dot" id="dbDot"></div>
+    <span id="dbStatus">conectando...</span>
+  </div>
+</header>
+
+<div class="tab-bar">
+  <div class="tab active" onclick="showPage('upload')">📁 Dados</div>
+  <div class="tab" onclick="showPage('recon')">⚖️ Conciliação</div>
+  <div class="tab" onclick="showPage('occupation')">📦 Ocupação</div>
+  <div class="tab" onclick="showPage('history')">📋 Histórico</div>
+</div>
+
+<div class="main">
+
+  <!-- ══════════ PAGE: UPLOAD ══════════ -->
+  <div class="page active" id="page-upload">
+
+    <div class="card">
+      <div class="card-title">Carregar ficheiros de stock</div>
+
+      <div class="filter-row" style="margin-bottom:16px;">
+        <select class="filter-input" id="companySelect">
+          <option value="DFB">DFB — Delta Foods Brasil</option>
+          <option value="QB">QB — Quality Brands</option>
+        </select>
+      </div>
+
+      <div class="upload-grid">
+        <div>
+          <div class="section-label" style="margin-bottom:8px;">Stock SAP</div>
+          <div class="upload-zone" id="sapZone" onclick="document.getElementById('sapFile').click()">
+            <div class="upload-icon">🗄️</div>
+            <div class="upload-label">Ficheiro SAP</div>
+            <div class="upload-sub">xlsx — colunas: Centro, Depósito, EAN11, Material, Lote, Quantidade…</div>
+            <div class="upload-file-name" id="sapFileName"></div>
+            <input type="file" id="sapFile" accept=".xlsx,.xls" style="display:none" onchange="loadSapFile(this)">
+          </div>
+        </div>
+        <div>
+          <div class="section-label" style="margin-bottom:8px;">Stock Unilog</div>
+          <div class="upload-zone" id="unilogZone" onclick="document.getElementById('unilogFile').click()">
+            <div class="upload-icon">🏭</div>
+            <div class="upload-label">Ficheiro Unilog</div>
+            <div class="upload-sub">xlsx — colunas: Classe, Produto Codigo, Lote, Qtd Un…</div>
+            <div class="upload-file-name" id="unilogFileName"></div>
+            <input type="file" id="unilogFile" accept=".xlsx,.xls" style="display:none" onchange="loadUnilogFile(this)">
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="processBtn" onclick="processAndSave()" disabled>
+          ⚡ Processar e Guardar
+        </button>
+        <button class="btn btn-ghost" onclick="loadFromDB()">
+          ☁️ Carregar último guardado
+        </button>
+        <span id="processSpinner" style="display:none;"><span class="spinner"></span></span>
+      </div>
+    </div>
+
+    <div id="lastUploadCard" style="display:none;">
+      <div class="card-title">Dados em memória</div>
+      <div id="lastUploadInfo" class="last-upload-info"></div>
+    </div>
+
+    <div id="uploadKpis" style="display:none;">
+      <div class="kpi-row" id="uploadKpiRow"></div>
+    </div>
+
+  </div>
+
+  <!-- ══════════ PAGE: RECONCILIATION ══════════ -->
+  <div class="page" id="page-recon">
+
+    <div class="card">
+      <div class="card-title">Conciliação SAP vs Unilog por Depósito</div>
+
+      <div class="depot-pills" id="depotPills"></div>
+
+      <div class="filter-row">
+        <input class="filter-input" id="reconSearch" placeholder="Filtrar por EAN ou descrição…" oninput="renderReconTable()" style="flex:1; min-width:200px;">
+        <select class="filter-input" id="reconFilter" onchange="renderReconTable()">
+          <option value="all">Todos</option>
+          <option value="diff">Com diferença</option>
+          <option value="only_sap">Só no SAP</option>
+          <option value="only_uni">Só no Unilog</option>
+        </select>
+      </div>
+
+      <div class="kpi-row" id="reconKpis"></div>
+
+      <div class="table-wrap">
+        <table id="reconTable">
+          <thead>
+            <tr>
+              <th onclick="sortTable('recon','EAN_norm')">EAN</th>
+              <th onclick="sortTable('recon','desc')">Descrição</th>
+              <th onclick="sortTable('recon','Lote_norm')">Lote</th>
+              <th onclick="sortTable('recon','qt_sap')" class="num">SAP</th>
+              <th onclick="sortTable('recon','qt_uni')" class="num">Unilog</th>
+              <th onclick="sortTable('recon','diff')" class="num">Diferença</th>
+              <th>Estado</th>
+              <th>Noutros depósitos</th>
+            </tr>
+          </thead>
+          <tbody id="reconBody"></tbody>
+        </table>
+      </div>
+      <div id="reconEmpty" class="empty-state" style="display:none;">
+        <div class="empty-icon">⚖️</div>
+        <div class="empty-text">Carrega os ficheiros para ver a conciliação</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════ PAGE: OCCUPATION ══════════ -->
+  <div class="page" id="page-occupation">
+
+    <div class="inner-tabs">
+      <div class="inner-tab active" onclick="showInnerTab('occ','view')">Vista de Stock</div>
+      <div class="inner-tab" onclick="showInnerTab('occ','base')">Base de Ocupação</div>
+    </div>
+
+    <!-- Vista stock c/ ocupação -->
+    <div id="occ-view">
+      <div class="card">
+        <div class="card-title">Stock vs Ocupação de Posições</div>
+        <div class="filter-row">
+          <input class="filter-input" id="occSearch" placeholder="EAN ou descrição…" oninput="renderOccView()" style="flex:1; min-width:200px;">
+          <select class="filter-input" id="occCatFilter" onchange="renderOccView()">
+            <option value="">Todas as categorias</option>
+          </select>
+        </div>
+        <div class="kpi-row" id="occKpis"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>EAN</th>
+                <th>Descrição</th>
+                <th>Categoria / Sub</th>
+                <th class="num">Stock Total</th>
+                <th class="num">Un/Posição</th>
+                <th class="num">Posições Estimadas</th>
+                <th>Cobertura</th>
+              </tr>
+            </thead>
+            <tbody id="occViewBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Base de Ocupação -->
+    <div id="occ-base" style="display:none;">
+      <div class="card">
+        <div class="card-title">Base de Parâmetros de Ocupação</div>
+        <div class="filter-row">
+          <input class="filter-input" id="occBaseSearch" placeholder="EAN ou descrição…" oninput="renderOccBase()" style="flex:1; min-width:200px;">
+          <select class="filter-input" id="occBaseCatFilter" onchange="renderOccBase()">
+            <option value="">Todas as categorias</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="openOccModal()">+ Novo Parâmetro</button>
+        </div>
+        <div class="occ-grid" id="occBaseGrid"></div>
+        <div id="occBaseEmpty" class="empty-state" style="display:none;">
+          <div class="empty-icon">📦</div>
+          <div class="empty-text">Sem parâmetros definidos.<br>Clica em "+ Novo Parâmetro" para começar.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════ PAGE: HISTORY ══════════ -->
+  <div class="page" id="page-history">
+    <div class="card">
+      <div class="card-title">Histórico de Uploads</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Data/Hora</th>
+              <th>Empresa</th>
+              <th>Items SAP</th>
+              <th>Items Unilog</th>
+              <th>Com Diferença</th>
+              <th>% OK</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+      <div id="historyEmpty" class="empty-state" style="display:none;">
+        <div class="empty-icon">📋</div>
+        <div class="empty-text">Nenhum upload registado ainda</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- OCCUPATION MODAL -->
+<div class="modal-overlay" id="occModal" onclick="if(event.target===this)closeOccModal()">
+  <div class="modal">
+    <div class="modal-title">Parâmetro de Ocupação</div>
+    <div class="form-row">
+      <label class="form-label">EAN</label>
+      <input class="form-input" id="occ_ean" placeholder="Ex: 5609060803016" oninput="lookupEan()">
+      <div id="ean_lookup" style="font-size:11px;color:var(--muted);margin-top:4px;"></div>
+    </div>
+    <div class="form-row">
+      <label class="form-label">Descrição</label>
+      <input class="form-input" id="occ_desc" placeholder="Descrição do artigo">
+    </div>
+    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div>
+        <label class="form-label">Categoria</label>
+        <input class="form-input" id="occ_cat" placeholder="Ex: EQUIPAMENTO PROFISSIONAL" list="cat_list">
+        <datalist id="cat_list"></datalist>
+      </div>
+      <div>
+        <label class="form-label">Subcategoria</label>
+        <input class="form-input" id="occ_subcat" placeholder="Ex: MINIQOOL" list="subcat_list">
+        <datalist id="subcat_list"></datalist>
+      </div>
+    </div>
+    <div class="form-row">
+      <label class="form-label">Unidades por Posição</label>
+      <input class="form-input" id="occ_qty" type="number" placeholder="Ex: 80" min="1">
+    </div>
+    <div class="form-row">
+      <label class="form-label">Notas</label>
+      <input class="form-input" id="occ_notes" placeholder="Opcional">
+    </div>
+    <div id="occ_modal_err" style="font-size:11px;color:var(--red);display:none;margin-top:8px;"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closeOccModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveOccParam()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://qnscwppgljobelplgbkp.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFuc2N3cHBnbGpvYmVscGxnYmtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzI4MTczNzQsImV4cCI6MjA0ODM5MzM3NH0.YJwFwxb_bVXaX4EMdNhL0VVjt_wRjMekBBF-oBGYqbA';
+
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// DE-PARA
+const DEPOT_MAP = {
+  '8':  { classe: '07', label: 'Dep 0008 — B2C', color: '#3498db' },
+  '11': { classe: '00', label: 'Dep 0011 — Disponível', color: '#2ecc71' },
+  '9':  { classe: '104', label: 'Dep 0009 — Vencidos', color: '#e74c3c' },
+  '22': { classe: '96', label: 'Dep 0022 — Quarentena', color: '#f39c12' },
+  '44': { classe: ['A1','A2'], label: 'Dep 0044 — Avarias', color: '#9b59b6' },
+};
+const ALL_DEPOT_KEYS = Object.keys(DEPOT_MAP);
+
+// STATE
+let sapData = null, unilogData = null;
+let reconData = {};      // { depotKey: [{EAN_norm, Lote_norm, qt_sap, qt_uni, diff, desc, ...}] }
+let occParams = [];      // [{ean, desc, cat, subcat, qty_per_pos, notes}]
+let historyList = [];
+let activeDepot = '11';
+let sortState = {};
+let editingOccId = null;
+let currentCompany = 'DFB';
+
+// ═══════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════
+async function init() {
+  try {
+    const { error } = await db.from('logistica_meta').select('id').limit(1);
+    if (!error) {
+      setDbStatus(true);
+      await loadFromDB(true);
+    } else {
+      setDbStatus(false);
+    }
+  } catch(e) {
+    setDbStatus(false);
+  }
+  await loadOccParams();
+  renderHistory();
+}
+
+function setDbStatus(ok) {
+  document.getElementById('dbDot').className = 'status-dot' + (ok ? ' ok' : '');
+  document.getElementById('dbStatus').textContent = ok ? 'Supabase OK' : 'offline';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════════════════
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'recon') renderReconPage();
+  if (name === 'occupation') { renderOccView(); renderOccBase(); }
+  if (name === 'history') renderHistory();
+}
+
+function showInnerTab(group, name) {
+  document.querySelectorAll(`#page-occupation .inner-tab`).forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  if (group === 'occ') {
+    document.getElementById('occ-view').style.display = name === 'view' ? '' : 'none';
+    document.getElementById('occ-base').style.display = name === 'base' ? '' : 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FILE LOADING
+// ═══════════════════════════════════════════════════════════════
+function loadSapFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      sapData = normalizeSap(rows);
+      document.getElementById('sapFileName').textContent = '✓ ' + file.name;
+      document.getElementById('sapZone').classList.add('loaded');
+      checkEnableProcess();
+      toast('SAP carregado: ' + sapData.length + ' linhas', 'success');
+    } catch(err) { toast('Erro ao ler SAP: ' + err.message, 'error'); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function loadUnilogFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      unilogData = normalizeUnilog(rows);
+      document.getElementById('unilogFileName').textContent = '✓ ' + file.name;
+      document.getElementById('unilogZone').classList.add('loaded');
+      checkEnableProcess();
+      toast('Unilog carregado: ' + unilogData.length + ' linhas', 'success');
+    } catch(err) { toast('Erro ao ler Unilog: ' + err.message, 'error'); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function checkEnableProcess() {
+  document.getElementById('processBtn').disabled = !(sapData && unilogData);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NORMALIZATION
+// ═══════════════════════════════════════════════════════════════
+function normEan(val) {
+  if (val === null || val === undefined || val === '') return '';
+  const s = String(val).trim();
+  if (s === '') return '';
+  // handle scientific notation
+  if (s.includes('e') || s.includes('E') || s.includes('.')) {
+    try { return String(Math.round(parseFloat(s))); } catch(e) {}
+  }
+  return s.replace(/\.0+$/, '');
+}
+
+function normLote(val) {
+  if (val === null || val === undefined || val === '') return '';
+  return String(val).trim();
+}
+
+function normQty(val) {
+  if (val === null || val === undefined || val === '') return 0;
+  const n = parseFloat(String(val).replace(',', '.'));
+  return isNaN(n) ? 0 : n;
+}
+
+function normalizeSap(rows) {
+  return rows
+    .filter(r => r['Centro'] && r['Depósito'] !== undefined && r['Depósito'] !== '')
+    .map(r => ({
+      centro: String(r['Centro'] || '').trim(),
+      deposito: String(Math.round(normQty(r['Depósito']))),
+      ncm: String(r['NCM'] || '').trim(),
+      EAN_norm: normEan(r['EAN11']),
+      material: String(r['Material'] || '').trim(),
+      desc: String(r['Descrição'] || '').trim(),
+      Lote_norm: normLote(r['Lote.']),
+      preco: normQty(r['Preço']),
+      qt: normQty(r['Quantidade']),
+      validade: String(r['Validade Lote'] || '').trim(),
+    }));
+}
+
+function normalizeUnilog(rows) {
+  const EXCLUDE_CLASSES = ['93', 'FI', 'SI', 'Total', ''];
+  return rows
+    .filter(r => r['Classe'] && !EXCLUDE_CLASSES.includes(String(r['Classe']).trim()))
+    .map(r => ({
+      classe: String(r['Classe'] || '').trim(),
+      desc_classe: String(r['Descrição Classe'] || '').trim(),
+      EAN_norm: normEan(r['Produto Codigo']),
+      produto: String(r['Produto'] || '').trim(),
+      Lote_norm: normLote(r['Lote']),
+      dt_venc: r['Dt Venc'] ? String(r['Dt Venc']).trim() : '',
+      qt: normQty(r['Qtd Un']),
+      endereco: String(r['Endereço'] || '').trim(),
+      grupo: String(r['Grupo'] || '').trim(),
+      subgrupo: String(r['Subgrupo'] || '').trim(),
+    }));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RECONCILIATION BUILD
+// ═══════════════════════════════════════════════════════════════
+function buildRecon() {
+  reconData = {};
+  const descMap = buildDescMap();
+
+  for (const depKey of ALL_DEPOT_KEYS) {
+    const { classe } = DEPOT_MAP[depKey];
+    const classes = Array.isArray(classe) ? classe : [classe];
+
+    // SAP for this depot
+    const sapDep = sapData.filter(r => r.deposito === depKey);
+    // Unilog for these classes
+    const uniDep = unilogData.filter(r => classes.includes(r.classe));
+
+    // Aggregate SAP by EAN+Lote
+    const sapAgg = {};
+    for (const r of sapDep) {
+      const k = r.EAN_norm + '|' + r.Lote_norm;
+      if (!sapAgg[k]) sapAgg[k] = { EAN_norm: r.EAN_norm, Lote_norm: r.Lote_norm, qt: 0, desc: r.desc, material: r.material, validade: r.validade };
+      sapAgg[k].qt += r.qt;
+    }
+
+    // Aggregate Unilog by EAN+Lote
+    const uniAgg = {};
+    for (const r of uniDep) {
+      const k = r.EAN_norm + '|' + r.Lote_norm;
+      if (!uniAgg[k]) uniAgg[k] = { EAN_norm: r.EAN_norm, Lote_norm: r.Lote_norm, qt: 0, produto: r.produto, dt_venc: r.dt_venc };
+      uniAgg[k].qt += r.qt;
+    }
+
+    // Merge
+    const allKeys = new Set([...Object.keys(sapAgg), ...Object.keys(uniAgg)]);
+    const rows = [];
+    for (const k of allKeys) {
+      const s = sapAgg[k];
+      const u = uniAgg[k];
+      const qt_sap = s ? s.qt : 0;
+      const qt_uni = u ? u.qt : 0;
+      const diff = qt_sap - qt_uni;
+      const ean = (s || u).EAN_norm;
+      const lote = (s || u).Lote_norm;
+      const desc = (s ? s.desc : '') || (u ? u.produto : '') || descMap[ean] || '';
+      rows.push({ EAN_norm: ean, Lote_norm: lote, qt_sap, qt_uni, diff, desc, validade: s?.validade || u?.dt_venc || '' });
+    }
+    reconData[depKey] = rows;
+  }
+}
+
+function buildDescMap() {
+  const m = {};
+  if (sapData) sapData.forEach(r => { if (r.EAN_norm && r.desc) m[r.EAN_norm] = r.desc; });
+  if (unilogData) unilogData.forEach(r => { if (r.EAN_norm && r.produto) m[r.EAN_norm] = m[r.EAN_norm] || r.produto; });
+  return m;
+}
+
+// For "noutros depósitos" column
+function findInOtherDepots(ean, lote, currentDepot) {
+  const found = [];
+  for (const depKey of ALL_DEPOT_KEYS) {
+    if (depKey === currentDepot) continue;
+    const rows = reconData[depKey] || [];
+    const match = rows.find(r => r.EAN_norm === ean && r.Lote_norm === lote);
+    if (match && (match.qt_sap > 0 || match.qt_uni > 0)) {
+      found.push({ depot: DEPOT_MAP[depKey].label.split('—')[1].trim(), qt_sap: match.qt_sap, qt_uni: match.qt_uni });
+    }
+  }
+  return found;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PROCESS & SAVE
+// ═══════════════════════════════════════════════════════════════
+async function processAndSave() {
+  if (!sapData || !unilogData) return;
+  currentCompany = document.getElementById('companySelect').value;
+
+  document.getElementById('processSpinner').style.display = '';
+  document.getElementById('processBtn').disabled = true;
+
+  buildRecon();
+  renderUploadKpis();
+  updateCompanyBadge();
+
+  // Save to Supabase
+  try {
+    const payload = {
+      company: currentCompany,
+      uploaded_at: new Date().toISOString(),
+      sap_rows: sapData.length,
+      unilog_rows: unilogData.length,
+      sap_data: JSON.stringify(sapData),
+      unilog_data: JSON.stringify(unilogData),
+      recon_summary: JSON.stringify(buildSummary()),
+    };
+
+    // Upsert (1 row per company — replace on new upload)
+    const { error } = await db.from('logistica_stock')
+      .upsert({ ...payload, id: currentCompany }, { onConflict: 'id' });
+
+    if (!error) {
+      // Also insert history row
+      await db.from('logistica_history').insert({
+        company: currentCompany,
+        uploaded_at: payload.uploaded_at,
+        sap_rows: sapData.length,
+        unilog_rows: unilogData.length,
+        summary: JSON.stringify(buildSummary()),
+      });
+      toast('Dados guardados no Supabase ✓', 'success');
+    } else {
+      toast('Guardado localmente (DB error: ' + error.message + ')', 'error');
+    }
+  } catch(e) {
+    toast('Modo offline — dados em memória', 'error');
+  }
+
+  document.getElementById('processSpinner').style.display = 'none';
+  document.getElementById('processBtn').disabled = false;
+  document.getElementById('lastUploadCard').style.display = 'none';
+}
+
+function buildSummary() {
+  const s = {};
+  for (const depKey of ALL_DEPOT_KEYS) {
+    const rows = reconData[depKey] || [];
+    s[depKey] = {
+      total: rows.length,
+      diffs: rows.filter(r => r.diff !== 0).length,
+      only_sap: rows.filter(r => r.qt_uni === 0 && r.qt_sap > 0).length,
+      only_uni: rows.filter(r => r.qt_sap === 0 && r.qt_uni > 0).length,
+    };
+  }
+  return s;
+}
+
+async function loadFromDB(silent = false) {
+  try {
+    currentCompany = document.getElementById('companySelect').value;
+    const { data, error } = await db.from('logistica_stock')
+      .select('*').eq('id', currentCompany).single();
+
+    if (error || !data) {
+      if (!silent) toast('Nenhum dado guardado para ' + currentCompany, 'error');
+      return;
+    }
+
+    sapData = JSON.parse(data.sap_data);
+    unilogData = JSON.parse(data.unilog_data);
+    currentCompany = data.company;
+    buildRecon();
+    updateCompanyBadge();
+    renderUploadKpis();
+
+    const dt = new Date(data.uploaded_at);
+    document.getElementById('lastUploadCard').style.display = 'block';
+    document.getElementById('lastUploadInfo').innerHTML =
+      `<span>Empresa:</span> ${data.company} &nbsp;|&nbsp;
+       <span>Upload:</span> ${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'})} &nbsp;|&nbsp;
+       <span>SAP:</span> ${data.sap_rows} linhas &nbsp;|&nbsp;
+       <span>Unilog:</span> ${data.unilog_rows} linhas`;
+
+    if (!silent) toast('Dados carregados: ' + data.company + ' — ' + dt.toLocaleDateString('pt-BR'), 'success');
+  } catch(e) {
+    if (!silent) toast('Erro ao carregar: ' + e.message, 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UPLOAD KPIs
+// ═══════════════════════════════════════════════════════════════
+function renderUploadKpis() {
+  document.getElementById('uploadKpis').style.display = 'block';
+  let totalItems = 0, totalDiffs = 0, totalOnlySap = 0, totalOnlyUni = 0;
+  for (const depKey of ALL_DEPOT_KEYS) {
+    const rows = reconData[depKey] || [];
+    totalItems += rows.length;
+    totalDiffs += rows.filter(r => r.diff !== 0).length;
+    totalOnlySap += rows.filter(r => r.qt_uni === 0 && r.qt_sap > 0).length;
+    totalOnlyUni += rows.filter(r => r.qt_sap === 0 && r.qt_uni > 0).length;
+  }
+  const pct = totalItems > 0 ? Math.round((totalItems - totalDiffs) / totalItems * 100) : 0;
+
+  document.getElementById('uploadKpiRow').innerHTML = `
+    <div class="kpi"><div class="kpi-label">Combinações EAN+Lote</div><div class="kpi-value">${totalItems}</div></div>
+    <div class="kpi"><div class="kpi-label">Em conformidade</div><div class="kpi-value green">${totalItems - totalDiffs}</div><div class="kpi-sub">${pct}% do total</div></div>
+    <div class="kpi"><div class="kpi-label">Com diferença</div><div class="kpi-value red">${totalDiffs}</div></div>
+    <div class="kpi"><div class="kpi-label">Só no SAP</div><div class="kpi-value yellow">${totalOnlySap}</div></div>
+    <div class="kpi"><div class="kpi-label">Só no Unilog</div><div class="kpi-value yellow">${totalOnlyUni}</div></div>
+    <div class="kpi"><div class="kpi-label">Linhas SAP</div><div class="kpi-value">${sapData.length}</div></div>
+    <div class="kpi"><div class="kpi-label">Linhas Unilog</div><div class="kpi-value">${unilogData.length}</div></div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RECONCILIATION PAGE
+// ═══════════════════════════════════════════════════════════════
+function renderReconPage() {
+  if (!reconData || Object.keys(reconData).length === 0) {
+    document.getElementById('reconEmpty').style.display = 'block';
+    return;
+  }
+  document.getElementById('reconEmpty').style.display = 'none';
+  renderDepotPills();
+  renderReconTable();
+}
+
+function renderDepotPills() {
+  const container = document.getElementById('depotPills');
+  container.innerHTML = '';
+  for (const depKey of ALL_DEPOT_KEYS) {
+    const info = DEPOT_MAP[depKey];
+    const rows = reconData[depKey] || [];
+    const diffs = rows.filter(r => r.diff !== 0).length;
+    const div = document.createElement('div');
+    div.className = 'depot-pill' + (depKey === activeDepot ? ' active' : '');
+    div.innerHTML = `${info.label} <span style="opacity:0.6;font-size:9px;">${diffs > 0 ? '⚠ ' + diffs : '✓'}</span>`;
+    div.onclick = () => { activeDepot = depKey; renderDepotPills(); renderReconTable(); };
+    container.appendChild(div);
+  }
+}
+
+function renderReconTable() {
+  if (!reconData[activeDepot]) return;
+  let rows = [...(reconData[activeDepot] || [])];
+
+  // Filter
+  const search = document.getElementById('reconSearch').value.toLowerCase();
+  const filter = document.getElementById('reconFilter').value;
+  if (search) rows = rows.filter(r => r.EAN_norm.includes(search) || r.desc.toLowerCase().includes(search) || r.Lote_norm.toLowerCase().includes(search));
+  if (filter === 'diff') rows = rows.filter(r => r.diff !== 0);
+  if (filter === 'only_sap') rows = rows.filter(r => r.qt_uni === 0 && r.qt_sap > 0);
+  if (filter === 'only_uni') rows = rows.filter(r => r.qt_sap === 0 && r.qt_uni > 0);
+
+  // Sort
+  const ss = sortState['recon'];
+  if (ss) rows.sort((a, b) => {
+    const va = a[ss.col] ?? '', vb = b[ss.col] ?? '';
+    return ss.dir * (typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb)));
+  });
+
+  // KPIs
+  const all = reconData[activeDepot] || [];
+  const diffs = all.filter(r => r.diff !== 0).length;
+  const pct = all.length > 0 ? Math.round((all.length - diffs) / all.length * 100) : 0;
+  document.getElementById('reconKpis').innerHTML = `
+    <div class="kpi"><div class="kpi-label">Total combos</div><div class="kpi-value">${all.length}</div></div>
+    <div class="kpi"><div class="kpi-label">OK</div><div class="kpi-value green">${all.length - diffs}</div><div class="kpi-sub">${pct}%</div></div>
+    <div class="kpi"><div class="kpi-label">Com diferença</div><div class="kpi-value red">${diffs}</div></div>
+    <div class="kpi"><div class="kpi-label">Qt SAP total</div><div class="kpi-value">${fmt(all.reduce((s,r)=>s+r.qt_sap,0))}</div></div>
+    <div class="kpi"><div class="kpi-label">Qt Unilog total</div><div class="kpi-value">${fmt(all.reduce((s,r)=>s+r.qt_uni,0))}</div></div>
+  `;
+
+  // Rows
+  const body = document.getElementById('reconBody');
+  body.innerHTML = '';
+  for (const r of rows) {
+    const hasDiff = r.diff !== 0;
+    const others = hasDiff ? findInOtherDepots(r.EAN_norm, r.Lote_norm, activeDepot) : [];
+    const otherHtml = others.length > 0
+      ? others.map(o => `<span class="badge badge-info">${o.depot}: SAP ${fmt(o.qt_sap)} / Uni ${fmt(o.qt_uni)}</span>`).join(' ')
+      : '';
+
+    let badge = '<span class="badge badge-ok">OK</span>';
+    if (r.qt_uni === 0 && r.qt_sap > 0) badge = '<span class="badge badge-warn">Só SAP</span>';
+    else if (r.qt_sap === 0 && r.qt_uni > 0) badge = '<span class="badge badge-warn">Só Unilog</span>';
+    else if (hasDiff) badge = '<span class="badge badge-error">Divergência</span>';
+
+    const tr = document.createElement('tr');
+    if (hasDiff) tr.className = 'diff-highlight';
+    tr.innerHTML = `
+      <td><span class="badge" style="background:var(--bg4);color:var(--muted);font-family:var(--mono)">${r.EAN_norm || '—'}</span></td>
+      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.desc}">${r.desc || '—'}</td>
+      <td><span style="font-family:var(--mono);font-size:11px;">${r.Lote_norm || '—'}</span></td>
+      <td class="num">${fmt(r.qt_sap)}</td>
+      <td class="num">${fmt(r.qt_uni)}</td>
+      <td class="num ${r.diff > 0 ? 'pos' : r.diff < 0 ? 'neg' : ''}">${r.diff > 0 ? '+' : ''}${fmt(r.diff)}</td>
+      <td>${badge}</td>
+      <td style="font-size:11px;">${otherHtml}</td>
+    `;
+    body.appendChild(tr);
+  }
+
+  if (rows.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="8" style="text-align:center;color:var(--muted);padding:30px;">Nenhum resultado</td>';
+    body.appendChild(tr);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// OCCUPATION
+// ═══════════════════════════════════════════════════════════════
+async function loadOccParams() {
+  try {
+    const { data, error } = await db.from('logistica_occ_params').select('*').order('cat');
+    if (!error && data) {
+      occParams = data;
+      updateOccFilters();
+    }
+  } catch(e) {}
+}
+
+function updateOccFilters() {
+  const cats = [...new Set(occParams.map(p => p.cat).filter(Boolean))];
+  ['occCatFilter','occBaseCatFilter'].forEach(id => {
+    const sel = document.getElementById(id);
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Todas as categorias</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('');
+    sel.value = cur;
+  });
+  // Datalists for modal
+  const catDl = document.getElementById('cat_list');
+  catDl.innerHTML = cats.map(c => `<option value="${c}">`).join('');
+  const subcats = [...new Set(occParams.map(p => p.subcat).filter(Boolean))];
+  document.getElementById('subcat_list').innerHTML = subcats.map(c => `<option value="${c}">`).join('');
+}
+
+function renderOccView() {
+  if (!sapData) return;
+  const search = document.getElementById('occSearch').value.toLowerCase();
+  const catF = document.getElementById('occCatFilter').value;
+
+  // Build stock totals from dep 0011 (disponível) — can expand later
+  const stockByEan = {};
+  sapData.forEach(r => {
+    if (!r.EAN_norm) return;
+    if (!stockByEan[r.EAN_norm]) stockByEan[r.EAN_norm] = { desc: r.desc, qt: 0 };
+    stockByEan[r.EAN_norm].qt += r.qt;
+    if (!stockByEan[r.EAN_norm].desc) stockByEan[r.EAN_norm].desc = r.desc;
+  });
+
+  let rows = Object.entries(stockByEan).map(([ean, v]) => {
+    const param = occParams.find(p => p.ean === ean);
+    const posicoes = param && param.qty_per_pos > 0 ? Math.ceil(v.qt / param.qty_per_pos) : null;
+    return { ean, desc: v.desc, qt: v.qt, param, posicoes };
+  });
+
+  if (search) rows = rows.filter(r => r.ean.includes(search) || r.desc.toLowerCase().includes(search));
+  if (catF) rows = rows.filter(r => r.param?.cat === catF);
+
+  const totalPosicoes = rows.reduce((s, r) => s + (r.posicoes || 0), 0);
+  const paramCoverage = rows.filter(r => r.param).length;
+
+  document.getElementById('occKpis').innerHTML = `
+    <div class="kpi"><div class="kpi-label">EANs com stock</div><div class="kpi-value">${rows.length}</div></div>
+    <div class="kpi"><div class="kpi-label">Com parâmetro</div><div class="kpi-value green">${paramCoverage}</div><div class="kpi-sub">${rows.length>0?Math.round(paramCoverage/rows.length*100):0}%</div></div>
+    <div class="kpi"><div class="kpi-label">Posições estimadas</div><div class="kpi-value">${fmt(totalPosicoes)}</div></div>
+  `;
+
+  const body = document.getElementById('occViewBody');
+  body.innerHTML = '';
+  for (const r of rows) {
+    const cat = r.param ? `${r.param.cat || '—'} / ${r.param.subcat || '—'}` : '<span style="color:var(--muted)">Sem parâmetro</span>';
+    const qpp = r.param ? fmt(r.param.qty_per_pos) : '—';
+    const pos = r.posicoes !== null ? fmt(r.posicoes) : '—';
+    const pct = r.param && r.param.qty_per_pos ? Math.min(100, Math.round((r.qt % r.param.qty_per_pos) / r.param.qty_per_pos * 100)) : 0;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><span style="font-family:var(--mono);font-size:10px;color:var(--muted)">${r.ean}</span></td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.desc}</td>
+      <td style="font-size:11px;">${cat}</td>
+      <td class="num">${fmt(r.qt)}</td>
+      <td class="num">${qpp}</td>
+      <td class="num">${pos}</td>
+      <td style="min-width:80px;">
+        ${r.param ? `<div class="prog-bar-wrap" title="${pct}% da última posição">
+          <div class="prog-bar" style="width:${pct}%;background:${pct<30?'var(--green)':pct<80?'var(--yellow)':'var(--red)'};"></div>
+        </div>` : ''}
+      </td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+function renderOccBase() {
+  const search = document.getElementById('occBaseSearch').value.toLowerCase();
+  const catF = document.getElementById('occBaseCatFilter').value;
+
+  let params = [...occParams];
+  if (search) params = params.filter(p => p.ean.includes(search) || (p.descricao||'').toLowerCase().includes(search));
+  if (catF) params = params.filter(p => p.cat === catF);
+
+  const grid = document.getElementById('occBaseGrid');
+  grid.innerHTML = '';
+  document.getElementById('occBaseEmpty').style.display = params.length === 0 ? 'block' : 'none';
+
+  for (const p of params) {
+    const card = document.createElement('div');
+    card.className = 'occ-card';
+    card.innerHTML = `
+      <div class="occ-card-head">
+        <div>
+          <div class="occ-desc">${p.descricao || p.ean}</div>
+          <div class="occ-ean">${p.ean}</div>
+          <div class="occ-cat">${p.cat || '—'} ${p.subcat ? '/ ' + p.subcat : ''}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="occ-qty">${fmt(p.qty_per_pos)}</div>
+          <div class="occ-qty-label">un/posição</div>
+        </div>
+      </div>
+      ${p.notes ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;">${p.notes}</div>` : ''}
+      <div style="display:flex;gap:6px;margin-top:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="editOcc(${JSON.stringify(p).replace(/"/g,'&quot;')})">✏️ Editar</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteOcc('${p.id}')">🗑️</button>
+      </div>
+    `;
+    grid.appendChild(card);
+  }
+}
+
+function openOccModal(prefill) {
+  document.getElementById('occ_ean').value = prefill?.ean || '';
+  document.getElementById('occ_desc').value = prefill?.descricao || '';
+  document.getElementById('occ_cat').value = prefill?.cat || '';
+  document.getElementById('occ_subcat').value = prefill?.subcat || '';
+  document.getElementById('occ_qty').value = prefill?.qty_per_pos || '';
+  document.getElementById('occ_notes').value = prefill?.notes || '';
+  document.getElementById('occ_modal_err').style.display = 'none';
+  editingOccId = prefill?.id || null;
+  if (prefill?.ean) lookupEan();
+  document.getElementById('occModal').classList.add('open');
+}
+function closeOccModal() { document.getElementById('occModal').classList.remove('open'); editingOccId = null; }
+
+function editOcc(p) { openOccModal(p); }
+
+async function deleteOcc(id) {
+  if (!confirm('Eliminar este parâmetro?')) return;
+  await db.from('logistica_occ_params').delete().eq('id', id);
+  await loadOccParams();
+  renderOccBase();
+  toast('Eliminado', 'success');
+}
+
+function lookupEan() {
+  const ean = document.getElementById('occ_ean').value.trim();
+  const el = document.getElementById('ean_lookup');
+  if (!ean || !sapData) { el.textContent = ''; return; }
+  const found = sapData.find(r => r.EAN_norm === ean);
+  if (found) {
+    el.textContent = '✓ ' + found.desc;
+    if (!document.getElementById('occ_desc').value) document.getElementById('occ_desc').value = found.desc;
+  } else {
+    el.textContent = 'EAN não encontrado no SAP';
+  }
+}
+
+async function saveOccParam() {
+  const ean = document.getElementById('occ_ean').value.trim();
+  const desc = document.getElementById('occ_desc').value.trim();
+  const cat = document.getElementById('occ_cat').value.trim();
+  const subcat = document.getElementById('occ_subcat').value.trim();
+  const qty_per_pos = parseInt(document.getElementById('occ_qty').value);
+  const notes = document.getElementById('occ_notes').value.trim();
+  const errEl = document.getElementById('occ_modal_err');
+
+  if (!ean || !qty_per_pos || qty_per_pos < 1) {
+    errEl.textContent = 'EAN e Unidades/Posição são obrigatórios';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const payload = { ean, descricao: desc, cat, subcat, qty_per_pos, notes };
+
+  let error;
+  if (editingOccId) {
+    ({ error } = await db.from('logistica_occ_params').update(payload).eq('id', editingOccId));
+  } else {
+    ({ error } = await db.from('logistica_occ_params').insert(payload));
+  }
+
+  if (error) {
+    errEl.textContent = 'Erro: ' + error.message;
+    errEl.style.display = 'block';
+    return;
+  }
+
+  closeOccModal();
+  await loadOccParams();
+  renderOccBase();
+  renderOccView();
+  toast('Parâmetro guardado ✓', 'success');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// HISTORY
+// ═══════════════════════════════════════════════════════════════
+async function renderHistory() {
+  try {
+    const { data, error } = await db.from('logistica_history').select('*').order('uploaded_at', { ascending: false }).limit(50);
+    const body = document.getElementById('historyBody');
+    body.innerHTML = '';
+    const empty = document.getElementById('historyEmpty');
+
+    if (error || !data || data.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+
+    for (const row of data) {
+      const dt = new Date(row.uploaded_at);
+      const summary = row.summary ? JSON.parse(row.summary) : {};
+      const totalDiffs = Object.values(summary).reduce((s, d) => s + (d.diffs || 0), 0);
+      const totalItems = Object.values(summary).reduce((s, d) => s + (d.total || 0), 0);
+      const pct = totalItems > 0 ? Math.round((totalItems - totalDiffs) / totalItems * 100) : 0;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-family:var(--mono);font-size:11px;">${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td>
+        <td><span class="company-badge">${row.company}</span></td>
+        <td class="num">${fmt(row.sap_rows)}</td>
+        <td class="num">${fmt(row.unilog_rows)}</td>
+        <td class="num ${totalDiffs>0?'neg':''}">${fmt(totalDiffs)}</td>
+        <td class="num ${pct>=95?'pos':pct>=80?'':'neg'}">${pct}%</td>
+        <td style="font-size:11px;color:var(--muted);">${row.id || ''}</td>
+      `;
+      body.appendChild(tr);
+    }
+  } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SORT
+// ═══════════════════════════════════════════════════════════════
+function sortTable(table, col) {
+  const ss = sortState[table];
+  if (ss && ss.col === col) {
+    sortState[table] = { col, dir: ss.dir * -1 };
+  } else {
+    sortState[table] = { col, dir: 1 };
+  }
+  if (table === 'recon') renderReconTable();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════════════
+function fmt(n) {
+  if (n === null || n === undefined) return '—';
+  return Number(n).toLocaleString('pt-BR');
+}
+
+function toast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + type;
+  setTimeout(() => { el.className = ''; }, 3500);
+}
+
+function updateCompanyBadge() {
+  document.getElementById('companyBadge').innerHTML = `<span class="company-badge">${currentCompany}</span>`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// START
+// ═══════════════════════════════════════════════════════════════
+init();
+</script>
+</body>
+</html>
