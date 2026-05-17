@@ -1265,39 +1265,36 @@ function renderOccView(){
   // ── Build rows ──
   let rows=Object.entries(byEan).map(([ean,v])=>{
     const param=occParams.find(p=>p.ean===ean);
-    const qpp=param?.qty_per_pos||0;
-    let posOtimizadas=null,loteDetail=[],totalSubutil=0,totalConsolidavel=0;
-    // posReal = sum of actual physical positions per lote in Unilog
+    const qpp=param&&param.qty_per_pos>1?param.qty_per_pos:0; // only meaningful if >1 un/pos
+    let posOtimizadas=0,loteDetail=[],totalSubutil=0,totalConsolidavel=0;
+    // posReal = total lines in Unilog for this EAN (each line = 1 position, Qtd End=1)
     const posReal=v.lotes.reduce((s,l)=>s+l.nEnderecos,0);
-    if(qpp>0){
-      posOtimizadas=0;
-      v.lotes.forEach(l=>{
-        const posMinima=Math.ceil(l.qt/qpp); // min positions if fully consolidated
+
+    v.lotes.forEach(l=>{
+      let posMinima=l.nEnderecos; // default: keep as-is
+      let posExcesso=0,pct=100,faltam=0,subutil=false,consolidacao=null;
+      if(qpp>0){
+        posMinima=Math.ceil(l.qt/qpp);
         const resto=l.qt%qpp;
-        const pct=resto===0?100:Math.round(resto/qpp*100);
-        const faltam=resto===0?0:qpp-resto;
-        const subutil=resto>0&&pct<50; // last position less than 50% full
-        const posExcesso=Math.max(0,l.nEnderecos-posMinima); // positions that can be freed
-        posOtimizadas+=posMinima;
-        if(subutil)totalSubutil++;
+        pct=resto===0?100:Math.round(resto/qpp*100);
+        faltam=resto===0?0:qpp-resto;
+        subutil=resto>0&&pct<50;
+        posExcesso=Math.max(0,l.nEnderecos-posMinima);
         if(posExcesso>0)totalConsolidavel+=posExcesso;
-        // Build consolidation instructions if same lote is spread across too many positions
-        let consolidacao=null;
+        if(subutil)totalSubutil++;
+        // Consolidation instructions
         if(posExcesso>0&&l.enderecos&&l.enderecos.length>1){
           const endSorted=[...l.enderecos].sort((a,b)=>a.qt-b.qt);
-          // Doadores: the smallest positions that together can be emptied
-          const doadores=[];let remaining=0;
-          for(let i=0;i<endSorted.length-1&&doadores.length<posExcesso;i++){
-            doadores.push(endSorted[i]);
-            remaining+=endSorted[i].qt;
-          }
+          const doadores=endSorted.slice(0,posExcesso);
           const receptor=endSorted[endSorted.length-1];
-          consolidacao={posExcesso,doadores,receptor,totalMover:remaining};
+          consolidacao={posExcesso,doadores,receptor};
         }
-        loteDetail.push({lote:l.lote,qt:l.qt,posMinima,posReais:l.nEnderecos,posExcesso,pct,faltam,subutil,consolidacao});
-      });
-    }
-    const poupanca=posOtimizadas!==null?posReal-posOtimizadas:null;
+      }
+      posOtimizadas+=posMinima;
+      loteDetail.push({lote:l.lote,qt:l.qt,posMinima,posReais:l.nEnderecos,posExcesso,pct,faltam,subutil,consolidacao});
+    });
+
+    const poupanca=totalConsolidavel>0?totalConsolidavel:0;
     return{ean,desc:v.desc,qt:v.qt,param,posReal,posOtimizadas,poupanca,
       underutil:totalSubutil>0||totalConsolidavel>0,loteDetail,totalSubutil,totalConsolidavel,
       nLotes:v.lotes.length,cat:param?.cat||'',subcat:param?.subcat||''};
@@ -1319,14 +1316,14 @@ function renderOccView(){
 
   // ── KPIs ──
   const wP=rows.filter(r=>r.param).length;
-  const tP=rows.reduce((s,r)=>s+(r.posReal||0),0);const tOpt=rows.reduce((s,r)=>s+(r.posOtimizadas||0),0);const tPoup=tP-tOpt;
+  const tP=rows.reduce((s,r)=>s+(r.posReal||0),0);const tOpt=rows.reduce((s,r)=>s+(r.posOtimizadas||0),0);const tPoup=rows.reduce((s,r)=>s+(r.poupanca||0),0);
   const uC=rows.reduce((s,r)=>s+(r.totalSubutil||0)+(r.totalConsolidavel||0),0);
   document.getElementById('ovKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com parâmetro</div><div class="kv g">${fmt(wP)}</div><div class="ks">${rows.length?Math.round(wP/rows.length*100):0}%</div></div>
-    <div class="kpi"><div class="kl">Posições Reais</div><div class="kv b">${fmt(tP)}</div></div>
-    <div class="kpi"><div class="kl">Pos. Optimizadas</div><div class="kv">${fmt(tOpt)}</div></div>
-    <div class="kpi"><div class="kl">Poupança possível</div><div class="kv r">${fmt(tPoup)}</div><div class="ks">posições libertáveis</div></div>
+    <div class="kpi"><div class="kl">Posições Reais</div><div class="kv b">${fmt(tP)}</div><div class="ks">endereços Unilog</div></div>
+    <div class="kpi"><div class="kl">Após Optimização</div><div class="kv">${fmt(tOpt)}</div></div>
+    <div class="kpi"><div class="kl">Posições a Libertar</div><div class="kv ${tPoup>0?'r':''}">${fmt(tPoup)}</div><div class="ks">${tP>0?Math.round(tPoup/tP*100):0}% do total</div></div>
     <div class="kpi"><div class="kl">Lotes Subaproveit.</div><div class="kv y">${fmt(uC)}</div></div>
   `;
 
@@ -1375,7 +1372,7 @@ function renderOccView(){
       <td class="num">${r.param?fmt(r.param.qty_per_pos):'—'}</td>
       <td class="num"><strong>${fmt(r.posReal)}</strong></td>
       <td class="num">${r.posOtimizadas!==null?fmt(r.posOtimizadas):'—'}</td>
-      <td class="num ${r.poupanca>0?'neg':''}">${r.poupanca>0?`<strong>-${fmt(r.poupanca)}</strong>`:'—'}</td>
+      <td class="num">${r.poupanca>0?`<strong>-${fmt(r.poupanca)}</strong>`:'—'}</td>
       <td style="min-width:220px">${alert}</td>
     `;
     body.appendChild(tr);
