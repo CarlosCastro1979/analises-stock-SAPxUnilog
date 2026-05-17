@@ -344,7 +344,7 @@ select.cad-inp{cursor:pointer;}
         <div class="ct">Cadastro de Artigos</div>
         <div style="display:flex;gap:8px;">
           <button class="btn bg bs" onclick="exportCadastroXlsx()">⬇ Excel</button>
-          <button class="btn bp bs" onclick="saveCadastroAll()">💾 Guardar Alterações</button>
+          <button class="btn bg bs" onclick="saveCadastroAll()" title="Guardar alterações pendentes em massa">💾 Guardar Pendentes</button>
         </div>
       </div>
       <div class="tb">
@@ -600,7 +600,7 @@ function buildRecon(){
     for(const r of uniDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,classes:new Set(),enderecos:[]};uA[k].qt+=r.qt;uA[k].classes.add(r.classe);if(r.endereco&&!uA[k].enderecos.includes(r.endereco))uA[k].enderecos.push(r.endereco);}
     const keys=new Set([...Object.keys(sA),...Object.keys(uA)]);
     reconData[dk]=[];
-    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[],cat:param?.cat||''});}
+    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[]});}
   }
 }
 
@@ -796,7 +796,8 @@ function renderReconPage(){
   // Update cat filter
   const cats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
   const sel=document.getElementById('reconCat');const cur=sel.value;
-  sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;
+  sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  if(cats.includes(cur))sel.value=cur;else sel.value='';
   renderDepotPills();renderRecon();
 }
 
@@ -819,7 +820,6 @@ function renderRecon(){
   const estado=document.getElementById('reconEstado').value;
   const catF=document.getElementById('reconCat').value;
   const valF=document.getElementById('reconValidade').value;
-  const minDiff=parseInt(document.getElementById('reconMinDiff').value)||0;
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(!showAll)rows=rows.filter(r=>r.diff!==0);
   if(estado==='diff')rows=rows.filter(r=>r.diff!==0);
@@ -827,20 +827,25 @@ function renderRecon(){
   else if(estado==='only_uni')rows=rows.filter(r=>r.qt_sap===0&&r.qt_uni>0);
   else if(estado==='diverg')rows=rows.filter(r=>r.qt_sap>0&&r.qt_uni>0&&r.diff!==0);
   else if(estado==='ok')rows=rows.filter(r=>r.diff===0);
-  if(catF)rows=rows.filter(r=>r.cat===catF);
-  if(minDiff>0)rows=rows.filter(r=>Math.abs(r.diff)>=minDiff);
+  if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===(catF);});}
+  const minDiffVal=parseFloat(document.getElementById('reconMinDiff').value)||0;if(minDiffVal>0)rows=rows.filter(r=>Math.abs(r.diff)>=minDiffVal);
   if(valF){
-    const today=new Date();
+    const today=new Date();today.setHours(0,0,0,0);
     rows=rows.filter(r=>{
-      if(!r.validade)return false;
-      const parts=r.validade.split('/');if(parts.length!==3)return false;
-      const d=new Date(parts[2],parts[1]-1,parts[0]);
+      if(!r.validade||r.validade===''||r.validade==='—')return false;
+      // Try DD/MM/YYYY or YYYY-MM-DD
+      let d;
+      const p=r.validade.split('/');
+      if(p.length===3)d=new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0]));
+      else{d=new Date(r.validade);}
+      if(isNaN(d.getTime()))return false;
+      d.setHours(0,0,0,0);
       if(valF==='vencido')return d<today;
-      const days=parseInt(valF);return d>=today&&(d-today)/(1000*86400)<=days;
+      const days=parseInt(valF);const diff=(d-today)/(1000*86400);return diff>=0&&diff<=days;
     });
   }
-  // Default secondary sort: cat → subcat → desc
-  if(!sorts['recon']){rows.sort((a,b)=>{const cc=String(a.cat||'').localeCompare(String(b.cat||''));if(cc!==0)return cc;return String(a.desc||'').localeCompare(String(b.desc||''));});}
+  // Default sort: desc alphabetical
+  if(!sorts['recon']){rows.sort((a,b)=>String(a.desc||'').localeCompare(String(b.desc||'')));}
   else applySort('recon',rows);
 
   const all=reconData[activeDepot]||[];const diffs=all.filter(r=>r.diff!==0).length;const pct=all.length>0?Math.round((all.length-diffs)/all.length*100):0;
@@ -899,7 +904,7 @@ function renderSusp(){
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(flt==='similar')rows=rows.filter(r=>r.similar);
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
-  if(catF)rows=rows.filter(r=>r.cat===catF);
+  if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===(catF);});}
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
   if(!sorts['susp']){rows.sort((a,b)=>{const cc=String(a.cat||'').localeCompare(String(b.cat||''));if(cc!==0)return cc;return String(a.desc||'').localeCompare(String(b.desc||''));});}
   else applySort('susp',rows);
@@ -1015,22 +1020,59 @@ function renderCadastro(){
     tr.innerHTML=`
       <td><span class="badge bneu">${item.ean}</span></td>
       <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(item.desc)}">${item.desc}</td>
-      <td><input class="cad-inp" list="cad_cat_dl" value="${esc(item.cat)}" onchange="cadEdit('${item.ean}','cat',this.value)" placeholder="Categoria…"><datalist id="cad_cat_dl">${allCats.map(c=>`<option value="${c}">`).join('')}</datalist></td>
-      <td><input class="cad-inp" list="cad_sub_dl" value="${esc(item.subcat)}" onchange="cadEdit('${item.ean}','subcat',this.value)" placeholder="Subcategoria…"><datalist id="cad_sub_dl">${allSubs.map(c=>`<option value="${c}">`).join('')}</datalist></td>
-      <td><input class="cad-inp" type="number" min="1" value="${item.qty_per_pos||''}" onchange="cadEdit('${item.ean}','qty_per_pos',parseInt(this.value)||null)" placeholder="0" style="width:70px"></td>
+      <td><input class="cad-inp" list="cad_cat_dl" value="${esc(item.cat)}" onblur="cadAutoSave('${item.ean}','cat',this.value)" placeholder="Categoria…"><datalist id="cad_cat_dl">${allCats.map(c=>`<option value="${c}">`).join('')}</datalist></td>
+      <td><input class="cad-inp" list="cad_sub_dl" value="${esc(item.subcat)}" onblur="cadAutoSave('${item.ean}','subcat',this.value)" placeholder="Subcategoria…"><datalist id="cad_sub_dl">${allSubs.map(c=>`<option value="${c}">`).join('')}</datalist></td>
+      <td><input class="cad-inp" type="number" min="1" value="${item.qty_per_pos||''}" onblur="cadAutoSave('${item.ean}','qty_per_pos',parseInt(this.value)||null)" placeholder="0" style="width:70px"></td>
       <td class="cad-toggle">
         <div class="tw" onclick="cadToggleLote('${item.ean}',this)">
           <div class="tg ${item.lote_obrigatorio?'on':''}"><div class="tk"></div></div>
           <span style="font-size:11px">${item.lote_obrigatorio?'Sim':'Não'}</span>
         </div>
       </td>
-      <td><input class="cad-inp" value="${esc(item.notes)}" onchange="cadEdit('${item.ean}','notes',this.value)" placeholder="Notas…"></td>
+      <td><input class="cad-inp" value="${esc(item.notes)}" onblur="cadAutoSave('${item.ean}','notes',this.value)" placeholder="Notas…"></td>
     `;
     body.appendChild(tr);
   }
   if(!items.length)eRow(body,7,'Nenhum resultado');
 }
 
+async function cadAutoSave(ean,field,value){
+  cadEdit(ean,field,value);
+  const p=occParams.find(x=>x.ean===ean);
+  const sapRow=sapData?.find(r=>r.EAN_norm===ean);
+  const existing=p||{};
+  const edits=cadEdits[ean]||{};
+  const payload={
+    ean,
+    descricao:existing.descricao||sapRow?.desc||'',
+    cat:edits.cat!==undefined?edits.cat:(existing.cat||''),
+    subcat:edits.subcat!==undefined?edits.subcat:(existing.subcat||''),
+    qty_per_pos:edits.qty_per_pos!==undefined?edits.qty_per_pos:(existing.qty_per_pos||1),
+    lote_obrigatorio:edits.lote_obrigatorio!==undefined?edits.lote_obrigatorio:(existing.lote_obrigatorio!==undefined?existing.lote_obrigatorio:true),
+    notes:edits.notes!==undefined?edits.notes:(existing.notes||''),
+    updated_at:new Date().toISOString(),
+  };
+  try{
+    const{error}=await db.from('logistica_occ_params').upsert(payload,{onConflict:'ean'});
+    if(!error){
+      delete cadEdits[ean];
+      await loadOccParams();
+      // Update row background to saved state
+      const rows=[...document.getElementById('cadBody').querySelectorAll('tr')];
+      rows.forEach(tr=>{
+        const badge=tr.querySelector('.badge.bneu');
+        if(badge&&badge.textContent===ean){tr.style.background='';tr.style.transition='background 0.5s';}
+      });
+      showSaveIndicator();
+    }
+  }catch(e){}
+}
+function showSaveIndicator(){
+  let ind=document.getElementById('saveInd');
+  if(!ind){ind=document.createElement('div');ind.id='saveInd';ind.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#16a34a;color:#fff;padding:6px 16px;border-radius:20px;font-size:11px;font-weight:600;z-index:999;transition:opacity .4s';document.body.appendChild(ind);}
+  ind.textContent='✓ Guardado';ind.style.opacity='1';
+  clearTimeout(ind._t);ind._t=setTimeout(()=>ind.style.opacity='0',1500);
+}
 function cadEdit(ean,field,value){
   if(!cadEdits[ean])cadEdits[ean]={};
   cadEdits[ean][field]=value;
@@ -1040,12 +1082,12 @@ function cadEdit(ean,field,value){
 
 function cadToggleLote(ean,el){
   const p=occParams.find(x=>x.ean===ean);
-  const cur=cadEdits[ean]?.lote_obrigatorio!==undefined?cadEdits[ean].lote_obrigatorio:(p?.lote_obrigatorio||false);
+  const cur=cadEdits[ean]?.lote_obrigatorio!==undefined?cadEdits[ean].lote_obrigatorio:(p?.lote_obrigatorio!==undefined?p.lote_obrigatorio:true);
   const next=!cur;
-  cadEdit(ean,'lote_obrigatorio',next);
   const tg=el.querySelector('.tg');const sp=el.querySelector('span');
   tg.classList.toggle('on',next);sp.textContent=next?'Sim':'Não';
-  el.closest('tr').style.background='#fffbeb';
+  el.closest('tr').style.background='#f0fdf4';
+  cadAutoSave(ean,'lote_obrigatorio',next);
 }
 
 async function saveCadastroAll(){
@@ -1148,7 +1190,7 @@ function renderOccView(){
     return{ean,desc:v.desc,qt:v.qt,param,posicoes,lastPct,underutil,cat:param?.cat||'',subcat:param?.subcat||''};
   });
   if(srch)rows=rows.filter(r=>r.ean.includes(srch)||r.desc.toLowerCase().includes(srch));
-  if(catF)rows=rows.filter(r=>r.cat===catF);
+  if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===(catF);});}
   if(subF)rows=rows.filter(r=>r.subcat===subF);
   if(alertF==='sub')rows=rows.filter(r=>r.underutil);
   else if(alertF==='sem')rows=rows.filter(r=>!r.param);
