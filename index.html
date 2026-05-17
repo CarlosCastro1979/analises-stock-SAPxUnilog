@@ -7,163 +7,181 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
 :root {
-  --red:#e8192c; --red-dark:#b5121f; --red-glow:rgba(232,25,44,0.18);
+  --red:#c8102e; --red-dark:#a00d24; --red-glow:rgba(200,16,46,0.12);
+  --navy:#1a2332; --navy2:#243044; --navy3:#2d3748;
   --bg:#f0f2f5; --bg2:#ffffff; --bg3:#f7f9fc; --bg4:#edf0f5;
-  --border:rgba(0,0,0,0.07); --border2:rgba(0,0,0,0.13);
+  --border:#e2e8f0; --border2:#cbd5e0;
   --text:#1a202c; --text2:#4a5568; --muted:#718096;
-  --green:#22c55e; --yellow:#f59e0b; --blue:#3b82f6; --purple:#a855f7;
-  --mono:'JetBrains Mono',monospace; --sans:'Space Grotesk',sans-serif;
+  --green:#16a34a; --yellow:#d97706; --blue:#2563eb; --purple:#7c3aed;
+  --mono:'JetBrains Mono',monospace; --sans:'Inter',sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:var(--sans);background:#f0f2f5;color:#1a202c;min-height:100vh;font-size:14px;}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;}
 ::-webkit-scrollbar{width:5px;height:5px;}
-::-webkit-scrollbar-track{background:var(--bg);}
-::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px;}
+::-webkit-scrollbar-track{background:var(--bg4);}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
 
 /* HEADER */
-header{background:#1a2332;border-bottom:none;padding:0 24px;display:flex;align-items:center;height:54px;gap:16px;position:sticky;top:0;z-index:100;}
+header{background:var(--navy);border-bottom:none;padding:0 24px;display:flex;align-items:center;height:52px;gap:16px;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,0.2);}
 .logo{display:flex;align-items:center;gap:10px;flex:1;}
-.logo-mark{width:28px;height:28px;background:#c8102e;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;}
-.logo-name{font-size:15px;font-weight:600;letter-spacing:-0.3px;color:#ffffff;}
+.logo-mark{width:28px;height:28px;background:var(--red);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;}
+.logo-name{font-size:15px;font-weight:600;color:#fff;}
 .logo-name span{color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px;}
-.hdr-right{display:flex;align-items:center;gap:12px;}
-.co-chip{padding:3px 10px;border-radius:4px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);font-size:11px;font-weight:700;color:#ffffff;font-family:var(--mono);}
+.hdr-r{display:flex;align-items:center;gap:12px;}
+.co-chip{padding:3px 10px;border-radius:4px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);font-size:11px;font-weight:700;color:#fff;font-family:var(--mono);}
 .db-st{display:flex;align-items:center;gap:5px;font-size:11px;color:#94a3b8;}
-.db-dot{width:6px;height:6px;border-radius:50%;background:var(--muted);transition:all .3s;}
-.db-dot.ok{background:var(--green);box-shadow:0 0 8px var(--green);}
+.db-dot{width:6px;height:6px;border-radius:50%;background:#64748b;transition:all .3s;}
+.db-dot.ok{background:#22c55e;box-shadow:0 0 6px #22c55e;}
 
 /* NAV */
-.nav{background:#1a2332;border-bottom:1px solid #243044;padding:0 24px;display:flex;gap:2px;overflow-x:auto;}
-.nt{padding:11px 18px;font-size:12px;font-weight:500;color:#94a3b8;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;transition:all .15s;}
-.nt:hover{color:#ffffff;}
-.nt.active{color:#ffffff;border-bottom-color:var(--red);}
+.nav{background:var(--navy);border-bottom:2px solid var(--navy2);padding:0 24px;display:flex;gap:0;overflow-x:auto;}
+.nt{padding:10px 18px;font-size:12px;font-weight:500;color:#94a3b8;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;}
+.nt:hover{color:#e2e8f0;}
+.nt.active{color:#fff;border-bottom-color:var(--red);}
 .bc{display:inline-block;margin-left:5px;background:var(--red);color:#fff;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:700;}
 
 /* LAYOUT */
-.main{padding:20px 24px;max-width:1700px;margin:0 auto;}
+.main{padding:20px 24px;max-width:1800px;margin:0 auto;}
 .page{display:none;}.page.active{display:block;}
 
 /* CARD */
-.card{background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,0.08);}
+.card{background:#fff;border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);}
 .ch{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
-.ct{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#1a202c;display:flex;align-items:center;gap:8px;}
-.ct::before{content:'';width:3px;height:13px;background:#c8102e;border-radius:2px;display:block;}
+.ct{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text);display:flex;align-items:center;gap:8px;}
+.ct::before{content:'';width:3px;height:13px;background:var(--red);border-radius:2px;display:block;}
 
 /* KPI */
 .kr{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px;}
-.kpi{background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,0.05);}
-.kl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#718096;margin-bottom:6px;font-weight:600;}
-.kv{font-family:var(--mono);font-size:24px;font-weight:700;color:#1a1d23;}
-.kv.g{color:var(--green);} .kv.r{color:var(--red);} .kv.y{color:var(--yellow);} .kv.b{color:var(--blue);}
-.ks{font-size:10px;color:#8492a6;margin-top:3px;}
-
-/* UPLOAD */
-.upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
-@media(max-width:600px){.upload-grid{grid-template-columns:1fr;}}
-.uz{border:2px dashed #cbd5e0;border-radius:8px;padding:28px 20px;text-align:center;cursor:pointer;transition:all .2s;position:relative;background:#ffffff;}
-.uz:hover{border-color:var(--red);background:#fff5f5;}
-.uz.loaded{border-color:var(--green);border-style:solid;background:#f0fdf4;}
-.uz input{display:none;}
-.ui{font-size:26px;margin-bottom:8px;}
-.ul{font-size:13px;font-weight:600;margin-bottom:4px;color:#1a202c;}
-.us{font-size:11px;color:#64748b;}
-.uf{font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px;}
-.sl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#718096;margin-bottom:8px;}
+.kpi{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,0.05);}
+.kl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px;font-weight:600;}
+.kv{font-family:var(--mono);font-size:24px;font-weight:700;color:var(--text);}
+.kv.g{color:var(--green);}.kv.r{color:var(--red);}.kv.y{color:var(--yellow);}.kv.b{color:var(--blue);}
+.ks{font-size:10px;color:var(--muted);margin-top:3px;}
 
 /* BUTTONS */
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;border:none;transition:all .15s;font-family:var(--sans);}
-.bp{background:var(--red);color:#fff;}.bp:hover{background:var(--red-dark);box-shadow:0 0 14px var(--red-glow);}.bp:disabled{opacity:.4;cursor:not-allowed;}
-.bg{background:transparent;color:#4a5568;border:1px solid #d1d9e0;}.bg:hover{color:#1a202c;border-color:#9aacb8;}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:none;transition:all .15s;font-family:var(--sans);}
+.bp{background:var(--red);color:#fff;}.bp:hover{background:var(--red-dark);}.bp:disabled{opacity:.4;cursor:not-allowed;}
+.bg{background:#fff;color:var(--text2);border:1px solid var(--border2);}.bg:hover{color:var(--text);border-color:#9aacb8;}
+.bb{background:var(--blue);color:#fff;}.bb:hover{background:#1d4ed8;}
 .bs{padding:5px 11px;font-size:11px;}
+
+/* INPUTS */
+.inp{background:#fff;border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:12px;font-family:var(--sans);outline:none;transition:all .15s;}
+.inp:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,0.1);}
+select.inp{cursor:pointer;}
+.is{flex:1;min-width:160px;}
 
 /* TOOLBAR */
 .tb{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
-.inp{background:#ffffff;border:1px solid #d1d9e0;border-radius:6px;padding:7px 12px;color:#1a202c;font-size:12px;font-family:var(--sans);outline:none;transition:border-color .15s;}
-.inp:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,0.1);}
-select.inp{cursor:pointer;}
-.is{flex:1;min-width:180px;}
 
 /* TOGGLE */
-.tw{display:flex;align-items:center;gap:8px;font-size:12px;color:#4a5568;}
-.tg{position:relative;width:36px;height:20px;background:#d1d9e0;border-radius:10px;cursor:pointer;border:1px solid #b0bec5;transition:background .2s;}
-.tg.on{background:var(--red);border-color:var(--red);}
-.tk{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .2s;}
+.tw{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2);cursor:pointer;}
+.tg{position:relative;width:34px;height:18px;background:var(--border2);border-radius:9px;transition:background .2s;flex-shrink:0;}
+.tg.on{background:var(--red);}
+.tk{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,0.2);}
 .tg.on .tk{transform:translateX(16px);}
 
 /* DEPOT PILLS */
 .dp{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;}
-.dpl{padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid #d1d9e0;color:#4a5568;transition:all .15s;font-family:var(--mono);background:#ffffff;}
-.dpl:hover{color:#1a1d23;border-color:#9aacb8;}
-.dpl.active{background:#c8102e;color:#fff;border-color:#c8102e;}
+.dpl{padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--border2);color:var(--text2);transition:all .15s;font-family:var(--mono);background:#fff;}
+.dpl:hover{color:var(--text);border-color:#9aacb8;}
+.dpl.active{background:var(--red);color:#fff;border-color:var(--red);}
 
 /* TABLE */
-.tw2{overflow-x:auto;}tbody tr:nth-child(even) td{background:#f7f9fc;}
-table{width:100%;border-collapse:collapse;font-size:12px;}
-thead tr{border-bottom:1px solid #2d3748;background:#2d3748;}
-th{padding:10px 10px;text-align:left;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#e2e8f0;white-space:nowrap;cursor:pointer;user-select:none;background:#2d3748;}
-th:hover{color:#ffffff;}
+.tw2{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+thead tr{border-bottom:1px solid var(--navy3);background:var(--navy3);}
+th{padding:10px 10px;text-align:left;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#e2e8f0;white-space:nowrap;cursor:pointer;user-select:none;}
+th:hover{color:#fff;}
 th.asc::after{content:' ↑';color:#fca5a5;}
 th.desc::after{content:' ↓';color:#fca5a5;}
-td{padding:9px 10px;border-bottom:1px solid #edf0f5;vertical-align:middle;color:#1a202c;font-size:13px;}
-tr:hover td{background:#ebf4ff;}
-tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;}
-.num{font-family:var(--mono);text-align:right;}
-.num.pos{color:var(--green);} .num.neg{color:var(--red);}
+td{padding:8px 10px;border-bottom:1px solid #edf0f5;vertical-align:middle;color:var(--text);}
+tbody tr:nth-child(even) td{background:#f7f9fc;}
+tr:hover td{background:#ebf4ff !important;}
+tr.dr td{background:#fff5f5 !important;}
+tr.dr td:first-child{border-left:3px solid var(--red);}
 
 /* BADGES */
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-family:var(--mono);font-size:10px;font-weight:600;white-space:nowrap;}
-.bok{background:rgba(34,197,94,.12);color:var(--green);}
-.bwarn{background:rgba(245,158,11,.12);color:var(--yellow);}
-.berr{background:rgba(232,25,44,.12);color:var(--red);}
-.binfo{background:rgba(59,130,246,.12);color:var(--blue);}
-.bneu{background:#1a2332;color:#e2e8f0;border:none;font-size:10px;}
+.bok{background:#dcfce7;color:#15803d;}
+.bwarn{background:#fef3c7;color:#92400e;}
+.berr{background:#fee2e2;color:#b91c1c;}
+.binfo{background:#dbeafe;color:#1d4ed8;}
+.bpurple{background:#ede9fe;color:#6d28d9;}
+.bneu{background:var(--navy);color:#e2e8f0;font-size:10px;}
+.bgray{background:#f1f5f9;color:#475569;border:1px solid var(--border);}
 
-/* SIM BAR */
-.sb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
-.pw{background:#e2e8f0;border-radius:3px;height:6px;overflow:hidden;min-width:60px;}
-.pf{height:100%;border-radius:3px;transition:width .3s;}
+.num{font-family:var(--mono);text-align:right;}
+.num.pos{color:var(--green);font-weight:600;}
+.num.neg{color:var(--red);font-weight:600;}
 
-/* OCC CARDS */
-.og{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:10px;}
-.oc{background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:14px;transition:all .15s;box-shadow:0 1px 3px rgba(0,0,0,0.05);}
-.oc:hover{border-color:#c8102e;box-shadow:0 2px 8px rgba(200,16,46,0.1);}
-.od{font-size:12px;font-weight:600;margin-bottom:2px;line-height:1.3;}
-.oe{font-family:var(--mono);font-size:10px;color:#8492a6;}
-.oca{font-size:10px;color:#64748b;margin-top:2px;}
-.oq{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--red);}
-.oql{font-size:9px;color:var(--muted);text-transform:uppercase;}
+/* INLINE EDIT */
+.nota-cell{min-width:160px;}
+.nota-inp{width:100%;background:transparent;border:1px solid transparent;border-radius:4px;padding:3px 6px;font-size:12px;color:var(--text);font-family:var(--sans);outline:none;transition:all .15s;}
+.nota-inp:hover{border-color:var(--border2);background:#fff;}
+.nota-inp:focus{border-color:var(--blue);background:#fff;box-shadow:0 0 0 2px rgba(37,99,235,0.1);}
+
+/* RECOMENDACAO */
+.rec-auto{font-size:10px;padding:2px 7px;border-radius:3px;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;font-style:italic;}
+
+/* PROGRESS */
+.pw{background:var(--bg4);border-radius:3px;height:6px;overflow:hidden;min-width:60px;}
+.pf{height:100%;border-radius:3px;}
+
+/* UPLOAD */
+.upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media(max-width:600px){.upload-grid{grid-template-columns:1fr;}}
+.uz{border:2px dashed var(--border2);border-radius:8px;padding:28px 20px;text-align:center;cursor:pointer;transition:all .2s;background:#fff;}
+.uz:hover{border-color:var(--red);background:#fff5f5;}
+.uz.loaded{border-color:var(--green);background:#f0fdf4;}
+.uz input{display:none;}
+
+/* CADASTRO TABLE */
+.cad-table td{padding:6px 8px;}
+.cad-inp{background:#fff;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;color:var(--text);font-family:var(--sans);outline:none;width:100%;}
+.cad-inp:focus{border-color:var(--blue);}
+select.cad-inp{cursor:pointer;}
+.cad-toggle{display:flex;align-items:center;justify-content:center;}
 
 /* INNER TABS */
-.its{display:flex;border-bottom:2px solid #e2e8f0;margin-bottom:16px;}
-.it{padding:8px 16px;font-size:12px;font-weight:600;color:#718096;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;margin-bottom:-2px;}
+.its{display:flex;border-bottom:2px solid var(--border);margin-bottom:16px;}
+.it{padding:8px 16px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;}
 .it:hover{color:var(--text2);}
-.it.active{color:#c8102e;border-bottom-color:#c8102e;}
+.it.active{color:var(--red);border-bottom-color:var(--red);}
+
+/* OCC CARDS */
+.og{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;}
+.oc{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;transition:all .15s;box-shadow:0 1px 3px rgba(0,0,0,0.04);}
+.oc:hover{border-color:var(--red);box-shadow:0 2px 8px rgba(200,16,46,0.1);}
 
 /* MODAL */
-.mb{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center;}
+.mb{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:none;align-items:center;justify-content:center;}
 .mb.open{display:flex;}
-.modal{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;width:500px;max-width:96vw;box-shadow:0 20px 60px rgba(0,0,0,0.15);}
-.mt{font-size:14px;font-weight:700;margin-bottom:18px;}
+.modal{background:#fff;border:1px solid var(--border);border-radius:10px;padding:24px;width:500px;max-width:96vw;box-shadow:0 20px 60px rgba(0,0,0,0.15);}
+.mt{font-size:15px;font-weight:700;margin-bottom:18px;color:var(--text);}
 .fr{margin-bottom:12px;}
-.fl{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#718096;margin-bottom:5px;display:block;}
-.fi{width:100%;background:#f8fafc;border:1px solid #d1d9e0;border-radius:7px;padding:9px 12px;color:#1a1d23;font-size:13px;font-family:var(--sans);outline:none;}
-.fi:focus{border-color:var(--red);}
+.fl{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:5px;display:block;}
+.fi{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:9px 12px;color:var(--text);font-size:13px;font-family:var(--sans);outline:none;}
+.fi:focus{border-color:var(--blue);}
 .fg{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 .mbb{display:flex;gap:8px;justify-content:flex-end;margin-top:20px;}
 
-/* TOAST */
-#toast{position:fixed;bottom:20px;right:20px;background:#ffffff;border:1px solid #e2e8f0;box-shadow:0 4px 20px rgba(0,0,0,0.12);border-radius:9px;padding:12px 18px;font-size:12px;max-width:300px;z-index:9999;display:none;box-shadow:0 8px 30px rgba(0,0,0,.5);}
-#toast.show{display:block;animation:fup .2s ease;}
-#toast.success{border-color:var(--green);}
-#toast.error{border-color:var(--red);}
-@keyframes fup{from{transform:translateY(8px);opacity:0}to{transform:translateY(0);opacity:1}}
-.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--border2);border-top-color:var(--red);border-radius:50%;animation:rot .6s linear infinite;}
-@keyframes rot{to{transform:rotate(360deg)}}
+/* MISC */
+.banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:12px;color:#1e40af;}
 .empty{text-align:center;padding:56px 20px;color:var(--muted);}
 .empty-i{font-size:36px;margin-bottom:10px;opacity:.5;}
-.banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:12px;color:#1e40af;}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--border2);border-top-color:var(--red);border-radius:50%;animation:rot .6s linear infinite;}
+@keyframes rot{to{transform:rotate(360deg)}}
+#toast{position:fixed;bottom:20px;right:20px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 18px;font-size:12px;max-width:300px;z-index:9999;display:none;box-shadow:0 4px 20px rgba(0,0,0,0.12);}
+#toast.show{display:block;animation:fup .2s ease;}
+#toast.success{border-left:3px solid var(--green);}
+#toast.error{border-left:3px solid var(--red);}
+@keyframes fup{from{transform:translateY(8px);opacity:0}to{transform:translateY(0);opacity:1}}
+.sl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px;}
+.sb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.sep{height:1px;background:var(--border);margin:16px 0;}
 </style>
 </head>
 <body>
@@ -172,7 +190,7 @@ tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;
     <div class="logo-mark">DF</div>
     <div class="logo-name">Performance Logística<span>Delta Foods Brasil</span></div>
   </div>
-  <div class="hdr-right">
+  <div class="hdr-r">
     <div id="coChip" class="co-chip" style="display:none"></div>
     <div class="db-st"><div class="db-dot" id="dbDot"></div><span id="dbLbl">conectando…</span></div>
   </div>
@@ -182,13 +200,14 @@ tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;
   <div class="nt active" data-page="upload">📁 Dados</div>
   <div class="nt" data-page="recon">⚖️ Conciliação</div>
   <div class="nt" data-page="suspeitos">🔍 Lotes Suspeitos<span id="suspBadge" class="bc" style="display:none"></span></div>
+  <div class="nt" data-page="cadastro">🗂️ Cadastro</div>
   <div class="nt" data-page="occupation">📦 Ocupação</div>
   <div class="nt" data-page="history">📋 Histórico</div>
 </div>
 
 <div class="main">
 
-<!-- DADOS -->
+<!-- ══ DADOS ══ -->
 <div class="page active" id="page-upload">
   <div class="card">
     <div class="ch"><div class="ct">Carregar Ficheiros de Stock</div></div>
@@ -199,18 +218,20 @@ tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;
       <div>
         <div class="sl">Stock SAP</div>
         <div class="uz" id="sapZone" onclick="document.getElementById('sapFile').click()">
-          <div class="ui">🗄️</div><div class="ul">Clica ou arrasta o ficheiro SAP</div>
-          <div class="us">xlsx — Centro, Depósito, EAN11, Lote, Quantidade…</div>
-          <div class="uf" id="sapFn"></div>
+          <div style="font-size:26px;margin-bottom:8px">🗄️</div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o ficheiro SAP</div>
+          <div style="font-size:11px;color:var(--muted)">xlsx — Centro, Depósito, EAN11, Lote, Quantidade…</div>
+          <div id="sapFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
           <input type="file" id="sapFile" accept=".xlsx,.xls" onchange="loadSap(this)">
         </div>
       </div>
       <div>
         <div class="sl">Stock Unilog</div>
         <div class="uz" id="uniZone" onclick="document.getElementById('uniFile').click()">
-          <div class="ui">🏭</div><div class="ul">Clica ou arrasta o ficheiro Unilog</div>
-          <div class="us">xlsx — Classe, Produto Codigo, Lote, Qtd Un…</div>
-          <div class="uf" id="uniFn"></div>
+          <div style="font-size:26px;margin-bottom:8px">🏭</div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o ficheiro Unilog</div>
+          <div style="font-size:11px;color:var(--muted)">xlsx — Classe, Produto Codigo, Lote, Qtd Un…</div>
+          <div id="uniFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
           <input type="file" id="uniFile" accept=".xlsx,.xls" onchange="loadUni(this)">
         </div>
       </div>
@@ -218,27 +239,47 @@ tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;
     <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
       <button class="btn bp" id="procBtn" onclick="processAll()" disabled>⚡ Processar e Guardar</button>
       <button class="btn bg" onclick="loadFromDB()">☁️ Carregar último guardado</button>
-      <span id="procSpin" style="display:none;"><span class="spin"></span></span>
+      <span id="procSpin" style="display:none"><span class="spin"></span></span>
     </div>
   </div>
-  <div id="loadBanner" style="display:none;" class="banner"></div>
-  <div id="upKpis" style="display:none;"><div class="kr" id="upKpiRow"></div></div>
+  <div id="loadBanner" style="display:none" class="banner"></div>
+  <div id="upKpis" style="display:none"><div class="kr" id="upKpiRow"></div></div>
 </div>
 
-<!-- CONCILIAÇÃO -->
+<!-- ══ CONCILIAÇÃO ══ -->
 <div class="page" id="page-recon">
   <div class="card">
-    <div class="ch"><div class="ct">Conciliação SAP vs Unilog</div></div>
+    <div class="ch">
+      <div class="ct">Conciliação SAP vs Unilog</div>
+      <button class="btn bg bs" onclick="exportReconXlsx()">⬇ Excel</button>
+    </div>
     <div class="dp" id="depotPills"></div>
     <div class="tb">
-      <input class="inp is" id="reconSrch" placeholder="Filtrar por EAN, lote ou descrição…" oninput="renderRecon()">
-      <div class="tw">
-        <div class="tg" id="showAllTg" onclick="toggleShowAll()"><div class="tk"></div></div>
+      <input class="inp is" id="reconSrch" placeholder="EAN, lote ou descrição…" oninput="renderRecon()">
+      <select class="inp" id="reconEstado" onchange="renderRecon()">
+        <option value="">Todos os estados</option>
+        <option value="diff">Com diferença</option>
+        <option value="only_sap">Só SAP</option>
+        <option value="only_uni">Só Unilog</option>
+        <option value="diverg">Divergência (ambos têm)</option>
+        <option value="ok">OK</option>
+      </select>
+      <select class="inp" id="reconCat" onchange="renderRecon()"><option value="">Todas as categorias</option></select>
+      <select class="inp" id="reconValidade" onchange="renderRecon()">
+        <option value="">Toda a validade</option>
+        <option value="vencido">Vencidos</option>
+        <option value="30">A vencer em 30 dias</option>
+        <option value="60">A vencer em 60 dias</option>
+        <option value="90">A vencer em 90 dias</option>
+      </select>
+      <input class="inp" id="reconMinDiff" type="number" placeholder="Dif. mínima" style="width:110px" min="0" oninput="renderRecon()">
+      <div class="tw" onclick="toggleShowAll()">
+        <div class="tg" id="showAllTg"><div class="tk"></div></div>
         <span id="tgLbl">Só diferenças</span>
       </div>
     </div>
     <div class="kr" id="reconKpis"></div>
-    <div class="tw2"><table>
+    <div class="tw2"><table id="reconTable">
       <thead><tr>
         <th onclick="doSort('recon','EAN_norm')">EAN</th>
         <th onclick="doSort('recon','desc')">Descrição</th>
@@ -248,19 +289,21 @@ tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;
         <th onclick="doSort('recon','diff')" class="num">Diferença</th>
         <th>Estado</th>
         <th>Localização Unilog</th>
+        <th>Recomendação</th>
         <th>Noutros depósitos</th>
+        <th>Acção / Notas</th>
       </tr></thead>
       <tbody id="reconBody"></tbody>
     </table></div>
-    <div id="reconEmpty" class="empty" style="display:none;"><div class="empty-i">⚖️</div><div>Carrega os ficheiros para ver a conciliação</div></div>
+    <div id="reconEmpty" class="empty" style="display:none"><div class="empty-i">⚖️</div><div>Carrega os ficheiros para ver a conciliação</div></div>
   </div>
 </div>
 
-<!-- LOTES SUSPEITOS -->
+<!-- ══ LOTES SUSPEITOS ══ -->
 <div class="page" id="page-suspeitos">
   <div class="card">
     <div class="ch"><div class="ct">Lotes só no Unilog — Potencialmente Errados</div></div>
-    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">EAN+Lote presentes no Unilog mas <strong>ausentes no SAP</strong>. A coluna Observações identifica lotes SAP similares que podem indicar erro de digitação.</p>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">EAN+Lote presentes no Unilog mas <strong>ausentes no SAP</strong>. Observações identificam lotes SAP similares (provável erro de digitação).</p>
     <div class="tb">
       <input class="inp is" id="suspSrch" placeholder="EAN, lote ou descrição…" oninput="renderSusp()">
       <select class="inp" id="suspFlt" onchange="renderSusp()">
@@ -268,6 +311,8 @@ tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;
         <option value="similar">Com similar no SAP</option>
         <option value="no_sim">Sem similar</option>
       </select>
+      <select class="inp" id="suspCat" onchange="renderSusp()"><option value="">Todas as categorias</option></select>
+      <input class="inp" type="number" id="suspMinQt" placeholder="Qt mínima" style="width:100px" min="1" oninput="renderSusp()">
     </div>
     <div class="kr" id="suspKpis"></div>
     <div class="tw2"><table>
@@ -275,17 +320,58 @@ tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;
         <th onclick="doSort('susp','EAN_norm')">EAN</th>
         <th onclick="doSort('susp','desc')">Descrição</th>
         <th onclick="doSort('susp','Lote_norm')">Lote Unilog</th>
-        <th class="num" onclick="doSort('susp','qt')">Qt Unilog</th>
+        <th onclick="doSort('susp','qt')" class="num">Qt Unilog</th>
         <th>Depósito / Classe</th>
-        <th>Observações</th>
+        <th>Lote SAP Similar</th>
       </tr></thead>
       <tbody id="suspBody"></tbody>
     </table></div>
-    <div id="suspEmpty" class="empty" style="display:none;"><div class="empty-i">🔍</div><div>Nenhum lote suspeito</div></div>
+    <div id="suspEmpty" class="empty" style="display:none"><div class="empty-i">🔍</div><div>Nenhum lote suspeito</div></div>
   </div>
 </div>
 
-<!-- OCUPAÇÃO -->
+<!-- ══ CADASTRO ══ -->
+<div class="page" id="page-cadastro">
+  <div class="card">
+    <div class="ch">
+      <div class="ct">Cadastro de Artigos</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn bg bs" onclick="exportCadastroXlsx()">⬇ Excel</button>
+        <button class="btn bp bs" onclick="saveCadastroAll()">💾 Guardar Alterações</button>
+      </div>
+    </div>
+    <div class="tb">
+      <input class="inp is" id="cadSrch" placeholder="EAN ou descrição…" oninput="renderCadastro()">
+      <select class="inp" id="cadCat" onchange="renderCadastro()"><option value="">Todas as categorias</option></select>
+      <select class="inp" id="cadLote" onchange="renderCadastro()">
+        <option value="">Lote — todos</option>
+        <option value="1">Lote obrigatório</option>
+        <option value="0">Sem lote</option>
+        <option value="vazio">Sem parâmetro definido</option>
+      </select>
+      <select class="inp" id="cadSemParam" onchange="renderCadastro()">
+        <option value="">Todos</option>
+        <option value="sem_cat">Sem categoria</option>
+        <option value="sem_qpp">Sem un/posição</option>
+      </select>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;" id="cadCount"></div>
+    <div class="tw2"><table id="cadTable">
+      <thead><tr>
+        <th>EAN</th>
+        <th>Descrição SAP</th>
+        <th style="min-width:160px">Categoria</th>
+        <th style="min-width:140px">Subcategoria</th>
+        <th style="min-width:80px">Un/Posição</th>
+        <th>Lote Obrig.</th>
+        <th style="min-width:120px">Notas</th>
+      </tr></thead>
+      <tbody id="cadBody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ══ OCUPAÇÃO ══ -->
 <div class="page" id="page-occupation">
   <div class="its">
     <div class="it active" onclick="innerTab('view',this)">Vista de Stock</div>
@@ -297,6 +383,7 @@ tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;
       <div class="tb">
         <input class="inp is" id="ovSrch" placeholder="EAN ou descrição…" oninput="renderOccView()">
         <select class="inp" id="ovCat" onchange="renderOccView()"><option value="">Todas as categorias</option></select>
+        <select class="inp" id="ovSub" onchange="renderOccView()"><option value="">Todas as subcategorias</option></select>
         <select class="inp" id="ovDep" onchange="renderOccView()">
           <option value="">Todos os depósitos</option>
           <option value="11">0011 — Disponível</option>
@@ -305,13 +392,18 @@ tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;
           <option value="22">0022 — Quarentena</option>
           <option value="44">0044 — Avarias</option>
         </select>
+        <select class="inp" id="ovAlerta" onchange="renderOccView()">
+          <option value="">Todos</option>
+          <option value="sub">Subaproveitadas</option>
+          <option value="sem">Sem parâmetro</option>
+        </select>
       </div>
       <div class="kr" id="ovKpis"></div>
       <div class="tw2"><table>
         <thead><tr>
-          <th>EAN</th><th>Descrição</th><th>Categoria / Sub</th>
+          <th>EAN</th><th>Descrição</th><th>Categoria</th><th>Subcategoria</th>
           <th class="num">Stock</th><th class="num">Un/Pos</th><th class="num">Posições</th>
-          <th>Última Pos.</th><th>Alerta</th>
+          <th>Ocup. Última Pos.</th><th>Alerta</th>
         </tr></thead>
         <tbody id="ovBody"></tbody>
       </table></div>
@@ -320,53 +412,54 @@ tr.dr td:first-child{border-left:3px solid #c8102e;}tr.dr td{background:#fff5f5;
   <div id="occBase" style="display:none;">
     <div class="card">
       <div class="ch">
-        <div class="ct">Base de Parâmetros de Ocupação</div>
-        <button class="btn bp bs" onclick="openOccModal()">+ Novo Parâmetro</button>
+        <div class="ct">Base de Parâmetros</div>
+        <button class="btn bp bs" onclick="openOccModal()">+ Novo</button>
       </div>
       <div class="tb">
         <input class="inp is" id="obSrch" placeholder="EAN ou descrição…" oninput="renderOccBase()">
         <select class="inp" id="obCat" onchange="renderOccBase()"><option value="">Todas as categorias</option></select>
       </div>
       <div class="og" id="occBaseGrid"></div>
-      <div id="occBaseEmpty" class="empty" style="display:none;"><div class="empty-i">📦</div><div>Sem parâmetros definidos.</div></div>
+      <div id="occBaseEmpty" class="empty" style="display:none"><div class="empty-i">📦</div><div>Sem parâmetros.</div></div>
     </div>
   </div>
 </div>
 
-<!-- HISTÓRICO -->
+<!-- ══ HISTÓRICO ══ -->
 <div class="page" id="page-history">
   <div class="card">
     <div class="ch"><div class="ct">Histórico de Uploads</div></div>
     <div class="tw2"><table>
-      <thead><tr>
-        <th>Data/Hora</th><th>Empresa</th>
-        <th class="num">SAP</th><th class="num">Unilog</th>
-        <th class="num">Diferenças</th><th class="num">% OK</th>
-      </tr></thead>
+      <thead><tr><th>Data/Hora</th><th>Empresa</th><th class="num">SAP</th><th class="num">Unilog</th><th class="num">Diferenças</th><th class="num">% OK</th></tr></thead>
       <tbody id="histBody"></tbody>
     </table></div>
-    <div id="histEmpty" class="empty" style="display:none;"><div class="empty-i">📋</div><div>Nenhum registo</div></div>
+    <div id="histEmpty" class="empty" style="display:none"><div class="empty-i">📋</div><div>Nenhum registo</div></div>
   </div>
 </div>
-
 </div><!-- /main -->
 
-<!-- MODAL -->
+<!-- MODAL OCC -->
 <div class="mb" id="occModal" onclick="if(event.target===this)closeOccModal()">
   <div class="modal">
     <div class="mt">Parâmetro de Ocupação</div>
-    <div class="fr"><label class="fl">EAN</label><input class="fi" id="m_ean" placeholder="Ex: 5609060803016" oninput="lookupEAN()"><div id="m_ean_info" style="font-size:11px;color:var(--text2);margin-top:4px;"></div></div>
+    <div class="fr"><label class="fl">EAN</label><input class="fi" id="m_ean" placeholder="Ex: 5609060803016" oninput="lookupEAN()"><div id="m_ean_info" style="font-size:11px;color:var(--text2);margin-top:4px"></div></div>
     <div class="fr"><label class="fl">Descrição</label><input class="fi" id="m_desc" placeholder="Descrição"></div>
     <div class="fg">
-      <div class="fr"><label class="fl">Categoria</label><input class="fi" id="m_cat" list="m_cat_dl" placeholder="Ex: Café em Cápsulas"><datalist id="m_cat_dl"></datalist></div>
-      <div class="fr"><label class="fl">Subcategoria</label><input class="fi" id="m_subcat" list="m_sub_dl" placeholder="Ex: Caps 10"><datalist id="m_sub_dl"></datalist></div>
+      <div class="fr"><label class="fl">Categoria</label><input class="fi" id="m_cat" list="m_cat_dl"><datalist id="m_cat_dl"></datalist></div>
+      <div class="fr"><label class="fl">Subcategoria</label><input class="fi" id="m_subcat" list="m_sub_dl"><datalist id="m_sub_dl"></datalist></div>
     </div>
-    <div class="fr"><label class="fl">Unidades por Posição</label><input class="fi" id="m_qty" type="number" min="1" placeholder="Ex: 80"></div>
+    <div class="fg">
+      <div class="fr"><label class="fl">Unidades por Posição</label><input class="fi" id="m_qty" type="number" min="1" placeholder="Ex: 80"></div>
+      <div class="fr"><label class="fl">Lote Obrigatório</label>
+        <select class="fi" id="m_lote_obrig"><option value="false">Não</option><option value="true">Sim</option></select>
+      </div>
+    </div>
     <div class="fr"><label class="fl">Notas</label><input class="fi" id="m_notes" placeholder="Opcional"></div>
-    <div id="m_err" style="font-size:11px;color:var(--red);display:none;margin-top:6px;"></div>
+    <div id="m_err" style="font-size:11px;color:var(--red);display:none;margin-top:6px"></div>
     <div class="mbb"><button class="btn bg" onclick="closeOccModal()">Cancelar</button><button class="btn bp" onclick="saveOcc()">Guardar</button></div>
   </div>
 </div>
+
 <div id="toast"></div>
 
 <script>
@@ -374,17 +467,11 @@ const SB_URL='https://qnscwppgljobelplgbkp.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFuc2N3cHBnbGpvYmVscGxnYmtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxMDc3NzgsImV4cCI6MjA5MTY4Mzc3OH0.9ysq0ibsn3qDPHe5WYF-yyq9-vEKjc_hIn9BNKZccYY';
 const db=supabase.createClient(SB_URL,SB_KEY);
 
-const DEPOT_MAP={
-  '8':{classes:['07'],label:'0008 — B2C'},
-  '11':{classes:['00'],label:'0011 — Disponível'},
-  '9':{classes:['104'],label:'0009 — Vencidos'},
-  '22':{classes:['96'],label:'0022 — Quarentena'},
-  '44':{classes:['A1','A2'],label:'0044 — Avarias'},
-};
+const DEPOT_MAP={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2'],label:'0044 — Avarias'}};
 const DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','FI','SI','Total',''];
 
-let sapData=null,uniData=null,reconData={},suspData=[],occParams=[];
+let sapData=null,uniData=null,reconData={},suspData=[],occParams=[],reconNotas={},cadEdits={};
 let showAll=false,activeDepot='11',editOccId=null,company='DFB',sorts={};
 
 // ── INIT ──
@@ -397,6 +484,7 @@ async function init(){
       document.getElementById('page-'+t.dataset.page).classList.add('active');
       if(t.dataset.page==='recon')renderReconPage();
       if(t.dataset.page==='suspeitos')renderSusp();
+      if(t.dataset.page==='cadastro')renderCadastro();
       if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
       if(t.dataset.page==='history')renderHistory();
     };
@@ -404,56 +492,62 @@ async function init(){
   try{
     const{error}=await db.from('logistica_stock').select('id').limit(1);
     setDB(!error);
-    if(!error){await loadFromDB(true);await loadOccParams();}
+    if(!error){await loadFromDB(true);await loadOccParams();await loadReconNotas();}
   }catch(e){setDB(false);}
 }
-function setDB(ok){
-  document.getElementById('dbDot').className='db-dot'+(ok?' ok':'');
-  document.getElementById('dbLbl').textContent=ok?'Supabase OK':'offline';
-}
+function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok':'');document.getElementById('dbLbl').textContent=ok?'Supabase OK':'offline';}
 
-// ── FILE LOAD ──
+// ── FILES ──
 function loadSap(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{sapData=normSap(rows);document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
 function loadUni(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{uniData=normUni(rows);document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
 function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast('Erro: '+err.message,'error');}};r.readAsArrayBuffer(file);}
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
 
 // ── NORMALIZE ──
-function nEAN(v){if(v===null||v===undefined||v==='')return '';const s=String(v).trim();if(s.includes('e')||s.includes('E')||(s.includes('.')&&s.length>5)){try{return String(Math.round(parseFloat(s)));}catch(e){}}return s.replace(/\.0+$/,'');}
-function nLote(v){if(v===null||v===undefined)return '';const s=String(v).trim();return(s===''||s==='nan'||s==='None')?'':s;}
+function nEAN(v){if(v===null||v===undefined||v==='')return'';const s=String(v).trim();if(s.includes('e')||s.includes('E')||(s.includes('.')&&s.length>5)){try{return String(Math.round(parseFloat(s)));}catch(e){}}return s.replace(/\.0+$/,'');}
+function nLote(v){if(v===null||v===undefined)return'';const s=String(v).trim();return(s===''||s==='nan'||s==='None')?'':s;}
 function nQty(v){if(v===null||v===undefined||v==='')return 0;const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?0:n;}
 function normSap(rows){return rows.filter(r=>r['Centro']&&r['Depósito']!==undefined&&r['Depósito']!=='').map(r=>({deposito:String(Math.round(nQty(r['Depósito']))),EAN_norm:nEAN(r['EAN11']),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(r['Lote.']),qt:nQty(r['Quantidade']),validade:String(r['Validade Lote']||'').trim()}));}
 function normUni(rows){return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),endereco:String(r['Endereço']||'').trim()}));}
 
 // ── AUTO CATEGORY ──
 function autoCat(desc){
-  if(!desc)return{cat:'',subcat:''};
-  const d=desc.toUpperCase();
-  if(d.includes('CAP')){
-    const s=d.includes('100CAP')||d.includes('100 CAP')?'Caps 100':d.includes('40CAP')||d.includes('40 CAP')||d.includes('XL40')?'Caps 40':'Caps 10';
-    return{cat:'Café em Cápsulas',subcat:s};
-  }
-  if(/\bGR\b/.test(d)){const s=(d.includes('KG')||d.includes(' KG'))?'1 Kg':'500g';return{cat:'Café em Grão',subcat:s};}
-  if(d.startsWith('VRA')||d.includes('CATRAIO')||d.includes('CATRAIÃO'))return{cat:'Vinho',subcat:''};
+  if(!desc)return{cat:'',subcat:''};const d=desc.toUpperCase();
+  if(d.includes('CAP')){const s=d.includes('100CAP')||d.includes('100 CAP')?'Caps 100':d.includes('40CAP')||d.includes('40 CAP')||d.includes('XL40')?'Caps 40':'Caps 10';return{cat:'Café em Cápsulas',subcat:s};}
+  if(/\bGR\b/.test(d)){return{cat:'Café em Grão',subcat:(d.includes('KG')||d.includes(' KG'))?'1 Kg':'500g'};}
+  if(d.startsWith('VRA')||d.includes('CATRAIO'))return{cat:'Vinho',subcat:''};
   if(d.includes('MINI MILKQOOL'))return{cat:'Máquinas Domésticas',subcat:'Mini Milkqool'};
   if(d.includes('MILKQOOL')&&d.includes('EVOLUTION'))return{cat:'Máquinas Domésticas',subcat:'Milkqool Evolution'};
   if(d.includes('MILKQOOL'))return{cat:'Máquinas Domésticas',subcat:'Milkqool'};
   if(d.includes('MINIQOOL'))return{cat:'Máquinas Domésticas',subcat:'Miniqool'};
   if(d.includes('QUICK'))return{cat:'Máquinas Domésticas',subcat:'Quick'};
-  if(d.includes('QOOL EVOLUTION')||d.includes('MAQ. QOOL'))return{cat:'Máquinas Domésticas',subcat:'Evolution'};
+  if(d.includes('EVOLUTION'))return{cat:'Máquinas Domésticas',subcat:'Evolution'};
   if(d.includes('ICONIQ'))return{cat:'Máquinas Domésticas',subcat:'Iconiq'};
   if(d.includes('QUORUM'))return{cat:'Máquinas Profissionais',subcat:'Quorum'};
   return{cat:'',subcat:''};
 }
-function guessQPP(desc,cat,subcat){
-  if(cat==='Máquinas Domésticas')return 80;
-  if(cat==='Máquinas Profissionais')return 10;
-  if(subcat==='Caps 10')return 200;
-  if(subcat==='Caps 40')return 50;
-  if(subcat==='Caps 100')return 20;
-  if(cat==='Café em Grão')return 50;
-  if(cat==='Vinho')return 60;
-  return 1;
+function guessQPP(cat,subcat){
+  if(cat==='Máquinas Domésticas')return 80;if(cat==='Máquinas Profissionais')return 10;
+  if(subcat==='Caps 10')return 200;if(subcat==='Caps 40')return 50;if(subcat==='Caps 100')return 20;
+  if(cat==='Café em Grão')return 50;if(cat==='Vinho')return 60;return 1;
+}
+
+// ── RECOMENDAÇÃO ──
+function autoRecomendacao(r){
+  const param=occParams.find(p=>p.ean===r.EAN_norm);
+  // Lote SAP vazio, Unilog tem lote → erro de registo
+  if(r.qt_sap>0&&r.qt_uni>0&&r.Lote_norm!==''&&r.diff!==0){
+    const sapSemLote=reconData[activeDepot]?.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm===''&&x.qt_sap>0);
+    if(sapSemLote)return'Corrigir lote no Unilog (SAP sem lote)';
+  }
+  if(r.qt_sap===0&&r.qt_uni>0&&r.Lote_norm!==''){
+    const sapSemLote=reconData[activeDepot]?.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm===''&&x.qt_sap>0);
+    if(sapSemLote)return'Corrigir lote no Unilog (SAP sem lote)';
+  }
+  if(param&&param.lote_obrigatorio===false&&r.Lote_norm!=='')return'Remover lote no Unilog (produto sem lote)';
+  if(r.qt_sap>0&&r.qt_uni===0)return'Verificar receção no Unilog';
+  if(r.qt_sap===0&&r.qt_uni>0)return'Verificar lançamento no SAP';
+  return'';
 }
 
 // ── BUILD RECON ──
@@ -472,7 +566,7 @@ function buildRecon(){
     for(const r of uniDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,classes:new Set(),enderecos:[]};uA[k].qt+=r.qt;uA[k].classes.add(r.classe);if(r.endereco&&!uA[k].enderecos.includes(r.endereco))uA[k].enderecos.push(r.endereco);}
     const keys=new Set([...Object.keys(sA),...Object.keys(uA)]);
     reconData[dk]=[];
-    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[]});}
+    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[],cat:param?.cat||''});}
   }
 }
 
@@ -480,44 +574,30 @@ function buildRecon(){
 function buildSusp(){
   if(!sapData||!uniData)return;
   const dm={};sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});uniData.forEach(r=>{if(r.EAN_norm&&r.produto&&!dm[r.EAN_norm])dm[r.EAN_norm]=r.produto;});
-  const sapLotes={};
-  sapData.forEach(r=>{if(!r.Lote_norm)return;if(!sapLotes[r.EAN_norm])sapLotes[r.EAN_norm]={};if(!sapLotes[r.EAN_norm][r.Lote_norm])sapLotes[r.EAN_norm][r.Lote_norm]=0;sapLotes[r.EAN_norm][r.Lote_norm]+=r.qt;});
-  const classeToDepot={};
-  for(const dk of DKS){DEPOT_MAP[dk].classes.forEach(cl=>{classeToDepot[cl]=DEPOT_MAP[dk].label;});}
-  const uA={};
-  uniData.forEach(r=>{if(!r.Lote_norm)return;const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,classes:new Set()};uA[k].qt+=r.qt;uA[k].classes.add(r.classe);});
-  const sapSet=new Set();
-  sapData.forEach(r=>{if(r.Lote_norm)sapSet.add(r.EAN_norm+'|'+r.Lote_norm);});
+  const sapLotes={};sapData.forEach(r=>{if(!r.Lote_norm)return;if(!sapLotes[r.EAN_norm])sapLotes[r.EAN_norm]={};if(!sapLotes[r.EAN_norm][r.Lote_norm])sapLotes[r.EAN_norm][r.Lote_norm]=0;sapLotes[r.EAN_norm][r.Lote_norm]+=r.qt;});
+  const uA={};uniData.forEach(r=>{if(!r.Lote_norm)return;const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,classes:new Set()};uA[k].qt+=r.qt;uA[k].classes.add(r.classe);});
+  const sapSet=new Set();sapData.forEach(r=>{if(r.Lote_norm)sapSet.add(r.EAN_norm+'|'+r.Lote_norm);});
   suspData=[];
   for(const[k,v]of Object.entries(uA)){
     if(sapSet.has(k))continue;
-    const{EAN_norm,Lote_norm,qt,classes}=v;
-    const desc=dm[EAN_norm]||'';
-    const depots=[...classes].map(cl=>{const dk=Object.keys(DEPOT_MAP).find(k=>DEPOT_MAP[k].classes.includes(cl));const depLabel=dk?'Dep '+dk.padStart(4,'0'):'?';return`${depLabel} / Classe ${cl}`;});
+    const{EAN_norm,Lote_norm,qt,classes}=v;const desc=dm[EAN_norm]||'';
+    const param=occParams.find(p=>p.ean===EAN_norm);const cat=param?.cat||autoCat(desc).cat||'';
+    const depots=[...classes].map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));return dk?`Dep ${dk.padStart(4,'0')} / Cl.${cl}`:cl;});
     const sapL=Object.keys(sapLotes[EAN_norm]||{});
-    let best=null;
-    for(const sl of sapL){const r=sim(Lote_norm,sl);if(r>=0.7&&r<1.0){if(!best||r>best.ratio)best={lote:sl,ratio:r,qt:sapLotes[EAN_norm][sl]};}}
-    suspData.push({EAN_norm,Lote_norm,qt,desc,similar:best,depots});
+    let best=null;for(const sl of sapL){const r=simRatio(Lote_norm,sl);if(r>=0.7&&r<1.0){if(!best||r>best.ratio)best={lote:sl,ratio:r,qt:sapLotes[EAN_norm][sl]};}}
+    suspData.push({EAN_norm,Lote_norm,qt,desc,similar:best,depots,cat});
   }
-  const badge=document.getElementById('suspBadge');
-  badge.textContent=suspData.length;badge.style.display=suspData.length>0?'':'none';
+  const badge=document.getElementById('suspBadge');badge.textContent=suspData.length;badge.style.display=suspData.length>0?'':'none';
 }
 
-function sim(a,b){
-  const la=a.length,lb=b.length;if(!la||!lb)return 0;
-  const dp=Array.from({length:la+1},(_,i)=>Array.from({length:lb+1},(_,j)=>i===0?j:j===0?i:0));
-  for(let i=1;i<=la;i++)for(let j=1;j<=lb;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
-  return 1-dp[la][lb]/Math.max(la,lb);
-}
+function simRatio(a,b){const la=a.length,lb=b.length;if(!la||!lb)return 0;const dp=Array.from({length:la+1},(_,i)=>Array.from({length:lb+1},(_,j)=>i===0?j:j===0?i:0));for(let i=1;i<=la;i++)for(let j=1;j<=lb;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return 1-dp[la][lb]/Math.max(la,lb);}
 
 // ── PROCESS ──
 async function processAll(){
   if(!sapData||!uniData)return;
   company=document.getElementById('coSel').value;
   document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
-  buildRecon();buildSusp();
-  await autoSeedOcc();
-  renderUpKpis();updateChip();
+  buildRecon();buildSusp();await autoSeedOcc();renderUpKpis();updateChip();
   try{
     const payload={id:company,company,uploaded_at:new Date().toISOString(),sap_rows:sapData.length,unilog_rows:uniData.length,sap_data:JSON.stringify(sapData),unilog_data:JSON.stringify(uniData),recon_summary:JSON.stringify(buildSummary())};
     const{error}=await db.from('logistica_stock').upsert(payload,{onConflict:'id'});
@@ -543,6 +623,22 @@ async function loadFromDB(silent=false){
   }catch(e){if(!silent)toast('Erro: '+e.message,'error');}
 }
 
+// ── NOTAS (inline recon) ──
+async function loadReconNotas(){
+  try{
+    const{data}=await db.from('logistica_recon_notas').select('*').eq('company',company);
+    reconNotas={};
+    if(data)data.forEach(r=>{reconNotas[r.deposito+'|'+r.EAN_norm+'|'+(r.Lote_norm||'')]=r;});
+  }catch(e){}
+}
+async function saveNota(deposito,EAN_norm,Lote_norm,nota){
+  const key=deposito+'|'+EAN_norm+'|'+(Lote_norm||'');
+  try{
+    await db.from('logistica_recon_notas').upsert({company,deposito,EAN_norm,Lote_norm:Lote_norm||'',nota,acao:nota,updated_at:new Date().toISOString()},{onConflict:'company,deposito,EAN_norm,Lote_norm'});
+    reconNotas[key]={nota};
+  }catch(e){}
+}
+
 // ── AUTO SEED OCC ──
 async function autoSeedOcc(){
   if(!sapData)return;
@@ -552,14 +648,14 @@ async function autoSeedOcc(){
     if(!r.EAN_norm||seen.has(r.EAN_norm)||existing.has(r.EAN_norm))continue;
     seen.add(r.EAN_norm);
     const{cat,subcat}=autoCat(r.desc);
-    if(cat)toIns.push({ean:r.EAN_norm,descricao:r.desc,cat,subcat,qty_per_pos:guessQPP(r.desc,cat,subcat),notes:'Auto-detectado'});
+    if(cat)toIns.push({ean:r.EAN_norm,descricao:r.desc,cat,subcat,qty_per_pos:guessQPP(cat,subcat),lote_obrigatorio:false,notes:'Auto-detectado'});
   }
   if(toIns.length>0){
     try{for(let i=0;i<toIns.length;i+=50)await db.from('logistica_occ_params').upsert(toIns.slice(i,i+50),{onConflict:'ean',ignoreDuplicates:true});await loadOccParams();toast('Auto-detectados: '+toIns.length+' artigos','success');}catch(e){}
   }
 }
 
-// ── RENDER UPLOAD KPIs ──
+// ── UPLOAD KPIs ──
 function renderUpKpis(){
   document.getElementById('upKpis').style.display='block';
   let tot=0,diffs=0,oSap=0,oUni=0;
@@ -575,12 +671,17 @@ function renderUpKpis(){
   `;
 }
 
-// ── RENDER RECON ──
+// ── RECON ──
 function renderReconPage(){
   if(!Object.keys(reconData).length){document.getElementById('reconEmpty').style.display='block';return;}
   document.getElementById('reconEmpty').style.display='none';
+  // Update cat filter
+  const cats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
+  const sel=document.getElementById('reconCat');const cur=sel.value;
+  sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;
   renderDepotPills();renderRecon();
 }
+
 function renderDepotPills(){
   const c=document.getElementById('depotPills');c.innerHTML='';
   for(const dk of DKS){
@@ -590,14 +691,38 @@ function renderDepotPills(){
     el.onclick=()=>{activeDepot=dk;renderDepotPills();renderRecon();};c.appendChild(el);
   }
 }
+
 function toggleShowAll(){showAll=!showAll;document.getElementById('showAllTg').classList.toggle('on',showAll);document.getElementById('tgLbl').textContent=showAll?'Mostrar tudo':'Só diferenças';renderRecon();}
+
 function renderRecon(){
   if(!reconData[activeDepot])return;
   let rows=[...(reconData[activeDepot]||[])];
   const srch=document.getElementById('reconSrch').value.toLowerCase();
+  const estado=document.getElementById('reconEstado').value;
+  const catF=document.getElementById('reconCat').value;
+  const valF=document.getElementById('reconValidade').value;
+  const minDiff=parseInt(document.getElementById('reconMinDiff').value)||0;
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(!showAll)rows=rows.filter(r=>r.diff!==0);
+  if(estado==='diff')rows=rows.filter(r=>r.diff!==0);
+  else if(estado==='only_sap')rows=rows.filter(r=>r.qt_uni===0&&r.qt_sap>0);
+  else if(estado==='only_uni')rows=rows.filter(r=>r.qt_sap===0&&r.qt_uni>0);
+  else if(estado==='diverg')rows=rows.filter(r=>r.qt_sap>0&&r.qt_uni>0&&r.diff!==0);
+  else if(estado==='ok')rows=rows.filter(r=>r.diff===0);
+  if(catF)rows=rows.filter(r=>r.cat===catF);
+  if(minDiff>0)rows=rows.filter(r=>Math.abs(r.diff)>=minDiff);
+  if(valF){
+    const today=new Date();
+    rows=rows.filter(r=>{
+      if(!r.validade)return false;
+      const parts=r.validade.split('/');if(parts.length!==3)return false;
+      const d=new Date(parts[2],parts[1]-1,parts[0]);
+      if(valF==='vencido')return d<today;
+      const days=parseInt(valF);return d>=today&&(d-today)/(1000*86400)<=days;
+    });
+  }
   applySort('recon',rows);
+
   const all=reconData[activeDepot]||[];const diffs=all.filter(r=>r.diff!==0).length;const pct=all.length>0?Math.round((all.length-diffs)/all.length*100):0;
   document.getElementById('reconKpis').innerHTML=`
     <div class="kpi"><div class="kl">Total combos</div><div class="kv">${fmt(all.length)}</div></div>
@@ -605,103 +730,264 @@ function renderRecon(){
     <div class="kpi"><div class="kl">Com diferença</div><div class="kv r">${fmt(diffs)}</div></div>
     <div class="kpi"><div class="kl">Qt SAP</div><div class="kv">${fmt(all.reduce((s,r)=>s+r.qt_sap,0))}</div></div>
     <div class="kpi"><div class="kl">Qt Unilog</div><div class="kv">${fmt(all.reduce((s,r)=>s+r.qt_uni,0))}</div></div>
+    <div class="kpi"><div class="kl">A mostrar</div><div class="kv b">${fmt(rows.length)}</div></div>
   `;
+
   const body=document.getElementById('reconBody');body.innerHTML='';
   for(const r of rows){
     const hasDiff=r.diff!==0;
+    const notaKey=activeDepot+'|'+r.EAN_norm+'|'+r.Lote_norm;
+    const notaVal=reconNotas[notaKey]?.nota||'';
     const others=findOther(r.EAN_norm,r.Lote_norm,activeDepot);
-    const otherHtml=others.map(o=>`<span class="badge binfo">${o.label}: S${fmt(o.qt_sap)} U${fmt(o.qt_uni)}</span> `).join('');
+    const otherHtml=others.map(o=>`<span class="badge binfo" style="margin-right:2px">${o.label}: S${fmt(o.qt_sap)} U${fmt(o.qt_uni)}</span>`).join('');
+    const uniLocHtml=(r.uni_classes||[]).map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));const depNum=dk?'Dep '+dk.padStart(4,'0'):'?';return`<span class="badge binfo" style="margin-right:2px;margin-bottom:2px">${depNum}/Cl.${cl}</span>`;}).join('');
+    const endHtml=r.qt_uni>0&&r.uni_enderecos?.length?`<div style="font-size:10px;color:var(--muted);margin-top:2px">${r.uni_enderecos.slice(0,3).join(', ')}${r.uni_enderecos.length>3?' +'+(r.uni_enderecos.length-3)+' pos.':''}</div>`:'';
     let badge='<span class="badge bok">OK</span>';
     if(r.qt_uni===0&&r.qt_sap>0)badge='<span class="badge bwarn">Só SAP</span>';
-    else if(r.qt_sap===0&&r.qt_uni>0)badge='<span class="badge bwarn">Só Unilog</span>';
+    else if(r.qt_sap===0&&r.qt_uni>0)badge='<span class="badge berr">Só Unilog</span>';
     else if(hasDiff)badge='<span class="badge berr">Divergência</span>';
+    const rec=autoRecomendacao(r);
+    const recHtml=rec?`<span class="rec-auto">${rec}</span>`:'—';
     const tr=document.createElement('tr');if(hasDiff)tr.className='dr';
-    const uniLocHtml=(r.uni_classes||[]).map(cl=>{const dk=Object.keys(DEPOT_MAP).find(k=>DEPOT_MAP[k].classes.includes(cl));const depNum=dk?'Dep '+dk.padStart(4,'0'):'?';return`<span class="badge binfo" style="margin-right:3px;margin-bottom:2px">${depNum} / Cl.${cl}</span>`;}).join('');
-    const endHtml=r.qt_uni>0&&r.uni_enderecos&&r.uni_enderecos.length?`<div style="font-size:10px;color:#64748b;margin-top:3px">${r.uni_enderecos.slice(0,3).join(', ')}${r.uni_enderecos.length>3?' +'+( r.uni_enderecos.length-3)+' pos.':''}</div>`:'';
-    tr.innerHTML=`<td><span class="badge bneu" style="font-size:10px">${r.EAN_norm||'—'}</span></td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td><td><span style="font-family:var(--mono);font-size:10px;color:#64748b">${r.Lote_norm||'—'}</span></td><td class="num">${fmt(r.qt_sap)}</td><td class="num">${fmt(r.qt_uni)}</td><td class="num ${r.diff>0?'pos':r.diff<0?'neg':''}">${r.diff>0?'+':''}${fmt(r.diff)}</td><td>${badge}</td><td style="font-size:11px">${uniLocHtml||'—'}${endHtml}</td><td style="font-size:11px">${otherHtml||'—'}</td>`;
+    tr.innerHTML=`
+      <td><span class="badge bneu">${r.EAN_norm||'—'}</span></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.Lote_norm||'—'}</span></td>
+      <td class="num">${fmt(r.qt_sap)}</td>
+      <td class="num">${fmt(r.qt_uni)}</td>
+      <td class="num ${r.diff>0?'pos':r.diff<0?'neg':''}">${r.diff>0?'+':''}${fmt(r.diff)}</td>
+      <td>${badge}</td>
+      <td style="font-size:11px">${uniLocHtml}${endHtml}</td>
+      <td>${recHtml}</td>
+      <td style="font-size:11px">${otherHtml||'—'}</td>
+      <td class="nota-cell"><input class="nota-inp" placeholder="Escreve aqui…" value="${esc(notaVal)}" onblur="saveNota('${activeDepot}','${r.EAN_norm}','${r.Lote_norm}',this.value)"></td>
+    `;
     body.appendChild(tr);
   }
-  if(!rows.length)eRow(body,8,'Nenhum resultado');
+  if(!rows.length)eRow(body,11,'Nenhum resultado');
 }
+
 function findOther(ean,lote,curDk){const found=[];for(const dk of DKS){if(dk===curDk)continue;const m=(reconData[dk]||[]).find(r=>r.EAN_norm===ean&&r.Lote_norm===lote);if(m&&(m.qt_sap>0||m.qt_uni>0))found.push({label:DEPOT_MAP[dk].label.split('—')[1].trim(),qt_sap:m.qt_sap,qt_uni:m.qt_uni});}return found;}
 
-// ── RENDER SUSPICIOUS ──
+// ── SUSPICIOUS ──
 function renderSusp(){
   let rows=[...suspData];
   const srch=document.getElementById('suspSrch').value.toLowerCase();
   const flt=document.getElementById('suspFlt').value;
+  const catF=document.getElementById('suspCat').value;
+  const minQt=parseInt(document.getElementById('suspMinQt').value)||0;
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(flt==='similar')rows=rows.filter(r=>r.similar);
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
+  if(catF)rows=rows.filter(r=>r.cat===catF);
+  if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
   applySort('susp',rows);
   const withSim=suspData.filter(r=>r.similar).length;
   document.getElementById('suspKpis').innerHTML=`
     <div class="kpi"><div class="kl">Lotes suspeitos</div><div class="kv r">${fmt(suspData.length)}</div></div>
-    <div class="kpi"><div class="kl">Com similar no SAP</div><div class="kv y">${fmt(withSim)}</div><div class="ks">provável erro digitação</div></div>
+    <div class="kpi"><div class="kl">Com similar SAP</div><div class="kv y">${fmt(withSim)}</div><div class="ks">provável erro digitação</div></div>
     <div class="kpi"><div class="kl">Sem correspondência</div><div class="kv">${fmt(suspData.length-withSim)}</div></div>
+    <div class="kpi"><div class="kl">A mostrar</div><div class="kv b">${fmt(rows.length)}</div></div>
   `;
+  // Update cat filter
+  const cats=[...new Set(suspData.map(r=>r.cat).filter(Boolean))].sort();
+  const sel=document.getElementById('suspCat');const cur=sel.value;
+  sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;
+
   const body=document.getElementById('suspBody');body.innerHTML='';
   document.getElementById('suspEmpty').style.display=rows.length===0?'block':'none';
   for(const r of rows){
-    let obs='<span style="color:var(--muted);font-size:11px">Sem lote similar no SAP</span>';
+    const depotHtml=r.depots.map(d=>`<span class="badge binfo" style="margin-right:2px">${d}</span>`).join('');
+    let simHtml='<span style="color:var(--muted);font-size:11px">Sem similar</span>';
     if(r.similar){
       const pct=Math.round(r.similar.ratio*100);
       const col=pct>=90?'var(--red)':pct>=80?'var(--yellow)':'var(--blue)';
-      obs=`<div class="sb"><span class="badge bwarn">Lote SAP: <strong>${r.similar.lote}</strong></span><div class="pw" style="width:50px"><div class="pf" style="width:${pct}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono)">${pct}%</span><span style="font-size:10px;color:var(--muted)">Qt SAP: ${fmt(r.similar.qt)}</span></div>`;
+      simHtml=`<div class="sb"><span class="badge bwarn">Lote SAP: <strong>${r.similar.lote}</strong></span><div class="pw" style="width:50px"><div class="pf" style="width:${pct}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono)">${pct}%</span><span style="font-size:10px;color:var(--muted)">Qt:${fmt(r.similar.qt)}</span></div>`;
     }
     const tr=document.createElement('tr');
-    const depotHtml=(r.depots||[]).map(d=>`<span class="badge binfo" style="margin-right:3px">${d}</span>`).join('');
-    tr.innerHTML=`<td><span class="badge bneu">${r.EAN_norm}</span></td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td><td><span class="badge berr">${r.Lote_norm}</span></td><td class="num">${fmt(r.qt)}</td><td>${depotHtml||'—'}</td><td>${obs}</td>`;
+    tr.innerHTML=`<td><span class="badge bneu">${r.EAN_norm}</span></td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td><td><span class="badge berr">${r.Lote_norm}</span></td><td class="num">${fmt(r.qt)}</td><td>${depotHtml||'—'}</td><td>${simHtml}</td>`;
     body.appendChild(tr);
   }
 }
 
+// ── CADASTRO ──
+function renderCadastro(){
+  if(!sapData){document.getElementById('cadBody').innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros SAP primeiro</td></tr>';return;}
+  const srch=document.getElementById('cadSrch').value.toLowerCase();
+  const catF=document.getElementById('cadCat').value;
+  const loteF=document.getElementById('cadLote').value;
+  const semF=document.getElementById('cadSemParam').value;
+
+  // Build EAN list from SAP
+  const eanMap={};
+  sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};});
+  let items=Object.values(eanMap).map(e=>{
+    const p=occParams.find(x=>x.ean===e.ean);
+    const edited=cadEdits[e.ean];
+    return{ean:e.ean,desc:e.desc,cat:edited?.cat!==undefined?edited.cat:(p?.cat||''),subcat:edited?.subcat!==undefined?edited.subcat:(p?.subcat||''),qty_per_pos:edited?.qty_per_pos!==undefined?edited.qty_per_pos:(p?.qty_per_pos||''),lote_obrigatorio:edited?.lote_obrigatorio!==undefined?edited.lote_obrigatorio:(p?.lote_obrigatorio||false),notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),hasParam:!!p};
+  });
+
+  if(srch)items=items.filter(i=>i.ean.includes(srch)||i.desc.toLowerCase().includes(srch));
+  if(catF)items=items.filter(i=>i.cat===catF);
+  if(loteF==='1')items=items.filter(i=>i.lote_obrigatorio===true);
+  else if(loteF==='0')items=items.filter(i=>i.lote_obrigatorio===false&&i.hasParam);
+  else if(loteF==='vazio')items=items.filter(i=>!i.hasParam);
+  if(semF==='sem_cat')items=items.filter(i=>!i.cat);
+  else if(semF==='sem_qpp')items=items.filter(i=>!i.qty_per_pos||i.qty_per_pos<=1);
+
+  document.getElementById('cadCount').textContent=`${items.length} artigos`;
+
+  // Update cat filter
+  const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
+  const sel=document.getElementById('cadCat');const cur=sel.value;
+  sel.innerHTML='<option value="">Todas as categorias</option>'+allCats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;
+
+  const body=document.getElementById('cadBody');body.innerHTML='';
+  for(const item of items){
+    const edited=!!cadEdits[item.ean];
+    const tr=document.createElement('tr');
+    if(edited)tr.style.background='#fffbeb';
+    tr.innerHTML=`
+      <td><span class="badge bneu">${item.ean}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(item.desc)}">${item.desc}</td>
+      <td><input class="cad-inp" list="cad_cat_dl" value="${esc(item.cat)}" onchange="cadEdit('${item.ean}','cat',this.value)" placeholder="Categoria…"><datalist id="cad_cat_dl">${allCats.map(c=>`<option value="${c}">`).join('')}</datalist></td>
+      <td><input class="cad-inp" value="${esc(item.subcat)}" onchange="cadEdit('${item.ean}','subcat',this.value)" placeholder="Subcategoria…"></td>
+      <td><input class="cad-inp" type="number" min="1" value="${item.qty_per_pos||''}" onchange="cadEdit('${item.ean}','qty_per_pos',parseInt(this.value)||null)" placeholder="0" style="width:70px"></td>
+      <td class="cad-toggle">
+        <div class="tw" onclick="cadToggleLote('${item.ean}',this)">
+          <div class="tg ${item.lote_obrigatorio?'on':''}"><div class="tk"></div></div>
+          <span style="font-size:11px">${item.lote_obrigatorio?'Sim':'Não'}</span>
+        </div>
+      </td>
+      <td><input class="cad-inp" value="${esc(item.notes)}" onchange="cadEdit('${item.ean}','notes',this.value)" placeholder="Notas…"></td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!items.length)eRow(body,7,'Nenhum resultado');
+}
+
+function cadEdit(ean,field,value){
+  if(!cadEdits[ean])cadEdits[ean]={};
+  cadEdits[ean][field]=value;
+  // highlight row
+  const rows=[...document.getElementById('cadBody').querySelectorAll('tr')];
+}
+
+function cadToggleLote(ean,el){
+  const p=occParams.find(x=>x.ean===ean);
+  const cur=cadEdits[ean]?.lote_obrigatorio!==undefined?cadEdits[ean].lote_obrigatorio:(p?.lote_obrigatorio||false);
+  const next=!cur;
+  cadEdit(ean,'lote_obrigatorio',next);
+  const tg=el.querySelector('.tg');const sp=el.querySelector('span');
+  tg.classList.toggle('on',next);sp.textContent=next?'Sim':'Não';
+  el.closest('tr').style.background='#fffbeb';
+}
+
+async function saveCadastroAll(){
+  const keys=Object.keys(cadEdits);if(!keys.length){toast('Nenhuma alteração pendente','error');return;}
+  let saved=0;
+  for(const ean of keys){
+    const edit=cadEdits[ean];
+    const p=occParams.find(x=>x.ean===ean);
+    const existing=p||{};
+    const sapRow=sapData?.find(r=>r.EAN_norm===ean);
+    const payload={
+      ean,
+      descricao:existing.descricao||sapRow?.desc||'',
+      cat:edit.cat!==undefined?edit.cat:existing.cat||'',
+      subcat:edit.subcat!==undefined?edit.subcat:existing.subcat||'',
+      qty_per_pos:edit.qty_per_pos!==undefined?edit.qty_per_pos:existing.qty_per_pos||1,
+      lote_obrigatorio:edit.lote_obrigatorio!==undefined?edit.lote_obrigatorio:existing.lote_obrigatorio||false,
+      notes:edit.notes!==undefined?edit.notes:existing.notes||'',
+      updated_at:new Date().toISOString(),
+    };
+    const{error}=await db.from('logistica_occ_params').upsert(payload,{onConflict:'ean'});
+    if(!error)saved++;
+  }
+  cadEdits={};
+  await loadOccParams();
+  renderCadastro();
+  toast(`${saved} artigos guardados ✓`,'success');
+}
+
+function exportCadastroXlsx(){
+  if(!sapData)return;
+  const rows=[];
+  const eanMap={};sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]=r.desc;});
+  for(const[ean,desc]of Object.entries(eanMap)){
+    const p=occParams.find(x=>x.ean===ean);
+    rows.push({EAN:ean,Descricao:desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',UnPosicao:p?.qty_per_pos||'',LoteObrigatorio:p?.lote_obrigatorio?'Sim':'Não',Notas:p?.notes||''});
+  }
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Cadastro');
+  XLSX.writeFile(wb,`cadastro_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 // ── OCC PARAMS ──
-async function loadOccParams(){try{const{data,error}=await db.from('logistica_occ_params').select('*').order('cat');if(!error&&data){occParams=data;updateOccFilters();}}catch(e){}}
+async function loadOccParams(){
+  try{const{data,error}=await db.from('logistica_occ_params').select('*').order('cat');if(!error&&data){occParams=data;updateOccFilters();}}catch(e){}
+}
 function updateOccFilters(){
   const cats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
-  ['ovCat','obCat'].forEach(id=>{const sel=document.getElementById(id);const cur=sel.value;sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;});
-  document.getElementById('m_cat_dl').innerHTML=cats.map(c=>`<option value="${c}">`).join('');
   const subs=[...new Set(occParams.map(p=>p.subcat).filter(Boolean))].sort();
+  ['ovCat','obCat'].forEach(id=>{const sel=document.getElementById(id);const cur=sel.value;sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;});
+  const ovSub=document.getElementById('ovSub');const curSub=ovSub.value;
+  ovSub.innerHTML='<option value="">Todas as subcategorias</option>'+subs.map(c=>`<option value="${c}">${c}</option>`).join('');ovSub.value=curSub;
+  document.getElementById('m_cat_dl').innerHTML=cats.map(c=>`<option value="${c}">`).join('');
   document.getElementById('m_sub_dl').innerHTML=subs.map(c=>`<option value="${c}">`).join('');
 }
 
+// ── OCC VIEW ──
 function renderOccView(){
   if(!sapData)return;
   const srch=document.getElementById('ovSrch').value.toLowerCase();
   const catF=document.getElementById('ovCat').value;
+  const subF=document.getElementById('ovSub').value;
   const depF=document.getElementById('ovDep').value;
+  const alertF=document.getElementById('ovAlerta').value;
   const filtered=depF?sapData.filter(r=>r.deposito===depF):sapData;
-  const byEan={};
-  filtered.forEach(r=>{if(!r.EAN_norm)return;if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={desc:r.desc,qt:0};byEan[r.EAN_norm].qt+=r.qt;if(!byEan[r.EAN_norm].desc)byEan[r.EAN_norm].desc=r.desc;});
+  const byEan={};filtered.forEach(r=>{if(!r.EAN_norm)return;if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={desc:r.desc,qt:0};byEan[r.EAN_norm].qt+=r.qt;});
   let rows=Object.entries(byEan).map(([ean,v])=>{
     const param=occParams.find(p=>p.ean===ean);
     const posicoes=param&&param.qty_per_pos>0?Math.ceil(v.qt/param.qty_per_pos):null;
     const lastPct=param&&param.qty_per_pos>0?(v.qt%param.qty_per_pos)/param.qty_per_pos*100:null;
     const underutil=lastPct!==null&&lastPct>0&&lastPct<50;
-    return{ean,desc:v.desc,qt:v.qt,param,posicoes,lastPct,underutil};
+    return{ean,desc:v.desc,qt:v.qt,param,posicoes,lastPct,underutil,cat:param?.cat||'',subcat:param?.subcat||''};
   });
   if(srch)rows=rows.filter(r=>r.ean.includes(srch)||r.desc.toLowerCase().includes(srch));
-  if(catF)rows=rows.filter(r=>r.param?.cat===catF);
+  if(catF)rows=rows.filter(r=>r.cat===catF);
+  if(subF)rows=rows.filter(r=>r.subcat===subF);
+  if(alertF==='sub')rows=rows.filter(r=>r.underutil);
+  else if(alertF==='sem')rows=rows.filter(r=>!r.param);
   rows.sort((a,b)=>(b.posicoes||0)-(a.posicoes||0));
   const wP=rows.filter(r=>r.param).length;const tP=rows.reduce((s,r)=>s+(r.posicoes||0),0);const uC=rows.filter(r=>r.underutil).length;
   document.getElementById('ovKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com parâmetro</div><div class="kv g">${fmt(wP)}</div><div class="ks">${rows.length?Math.round(wP/rows.length*100):0}%</div></div>
     <div class="kpi"><div class="kl">Posições estimadas</div><div class="kv b">${fmt(tP)}</div></div>
-    <div class="kpi"><div class="kl">Subaproveitadas</div><div class="kv y">${fmt(uC)}</div><div class="ks">&lt;50% da posição</div></div>
+    <div class="kpi"><div class="kl">Subaproveitadas</div><div class="kv y">${fmt(uC)}</div></div>
   `;
   const body=document.getElementById('ovBody');body.innerHTML='';
   for(const r of rows){
-    const cat=r.param?`${r.param.cat||'—'}${r.param.subcat?' / '+r.param.subcat:''}`:'<span style="color:var(--muted)">Sem parâmetro</span>';
     const pct=r.lastPct;const col=pct===null?'':pct<30?'var(--red)':pct<70?'var(--yellow)':'var(--green)';
-    let alert='';if(r.underutil)alert='<span class="badge bwarn">⚠ Subaproveitada</span>';
+    let alert='';if(r.underutil)alert='<span class="badge bwarn">⚠ Subaproveit.</span>';else if(!r.param)alert='<span class="badge bgray">Sem parâm.</span>';
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td><span class="badge bneu" style="font-size:10px">${r.ean}</span></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc}</td><td style="font-size:11px">${cat}</td><td class="num">${fmt(r.qt)}</td><td class="num">${r.param?fmt(r.param.qty_per_pos):'—'}</td><td class="num">${r.posicoes!==null?fmt(r.posicoes):'—'}</td><td style="min-width:90px">${pct!==null?`<div style="display:flex;align-items:center;gap:6px"><div class="pw" style="flex:1"><div class="pf" style="width:${Math.min(100,Math.round(pct))}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono);width:28px">${Math.round(pct)}%</span></div>`:''}</td><td>${alert}</td>`;
+    tr.innerHTML=`
+      <td><span class="badge bneu">${r.ean}</span></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc}</td>
+      <td style="font-size:11px">${r.cat||'—'}</td>
+      <td style="font-size:11px">${r.subcat||'—'}</td>
+      <td class="num">${fmt(r.qt)}</td>
+      <td class="num">${r.param?fmt(r.param.qty_per_pos):'—'}</td>
+      <td class="num">${r.posicoes!==null?fmt(r.posicoes):'—'}</td>
+      <td style="min-width:100px">${pct!==null?`<div style="display:flex;align-items:center;gap:6px"><div class="pw" style="flex:1"><div class="pf" style="width:${Math.min(100,Math.round(pct))}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono);width:28px">${Math.round(pct)}%</span></div>`:''}</td>
+      <td>${alert}</td>
+    `;
     body.appendChild(tr);
   }
 }
 
+// ── OCC BASE ──
 function renderOccBase(){
   const srch=document.getElementById('obSrch').value.toLowerCase();
   const catF=document.getElementById('obCat').value;
@@ -711,18 +997,41 @@ function renderOccBase(){
   const grid=document.getElementById('occBaseGrid');grid.innerHTML='';
   document.getElementById('occBaseEmpty').style.display=params.length===0?'block':'none';
   for(const p of params){
-    const needsReview=p.qty_per_pos===1;
     const card=document.createElement('div');card.className='oc';
-    if(needsReview)card.style.borderLeft='2px solid var(--yellow)';
-    card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><div style="flex:1;min-width:0;padding-right:8px"><div class="od">${p.descricao||p.ean}</div><div class="oe">${p.ean}</div><div class="oca">${p.cat||'—'}${p.subcat?' · '+p.subcat:''}</div></div><div style="text-align:right;flex-shrink:0"><div class="oq">${fmt(p.qty_per_pos)}</div><div class="oql">un/posição</div></div></div>${p.notes?`<div style="font-size:10px;color:var(--muted);margin-bottom:8px">${p.notes}</div>`:''}<div style="display:flex;gap:6px"><button class="btn bg bs" onclick='editOcc(${JSON.stringify(p)})'>✏️ Editar</button><button class="btn bg bs" onclick="delOcc(${p.id})">🗑️</button></div>`;
+    const needsReview=!p.qty_per_pos||p.qty_per_pos<=1;
+    if(needsReview)card.style.borderLeft='3px solid var(--yellow)';
+    card.innerHTML=`
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+        <div style="flex:1;min-width:0;padding-right:8px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:2px;line-height:1.3">${p.descricao||p.ean}</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">${p.ean}</div>
+          <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
+            ${p.cat?`<span class="badge bgray">${p.cat}</span>`:''}
+            ${p.subcat?`<span class="badge bgray">${p.subcat}</span>`:''}
+            ${p.lote_obrigatorio?'<span class="badge binfo">Lote obrig.</span>':''}
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--red)">${fmt(p.qty_per_pos)}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase">un/posição</div>
+        </div>
+      </div>
+      ${p.notes?`<div style="font-size:10px;color:var(--muted);margin-bottom:8px">${p.notes}</div>`:''}
+      <div style="display:flex;gap:6px">
+        <button class="btn bg bs" onclick='editOcc(${JSON.stringify(p)})'>✏️ Editar</button>
+        <button class="btn bg bs" onclick="delOcc(${p.id})">🗑️</button>
+      </div>
+    `;
     grid.appendChild(card);
   }
 }
 
+// ── OCC MODAL ──
 function openOccModal(pre){
   ['m_ean','m_desc','m_cat','m_subcat','m_notes'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('m_qty').value='';document.getElementById('m_err').style.display='none';document.getElementById('m_ean_info').textContent='';editOccId=null;
-  if(pre){document.getElementById('m_ean').value=pre.ean||'';document.getElementById('m_desc').value=pre.descricao||'';document.getElementById('m_cat').value=pre.cat||'';document.getElementById('m_subcat').value=pre.subcat||'';document.getElementById('m_qty').value=pre.qty_per_pos||'';document.getElementById('m_notes').value=pre.notes||'';editOccId=pre.id;lookupEAN();}
+  document.getElementById('m_qty').value='';document.getElementById('m_lote_obrig').value='false';
+  document.getElementById('m_err').style.display='none';document.getElementById('m_ean_info').textContent='';editOccId=null;
+  if(pre){document.getElementById('m_ean').value=pre.ean||'';document.getElementById('m_desc').value=pre.descricao||'';document.getElementById('m_cat').value=pre.cat||'';document.getElementById('m_subcat').value=pre.subcat||'';document.getElementById('m_qty').value=pre.qty_per_pos||'';document.getElementById('m_lote_obrig').value=String(pre.lote_obrigatorio||false);document.getElementById('m_notes').value=pre.notes||'';editOccId=pre.id;lookupEAN();}
   document.getElementById('occModal').classList.add('open');
 }
 function editOcc(p){openOccModal(p);}
@@ -736,9 +1045,9 @@ function lookupEAN(){
   else el.textContent='EAN não encontrado no SAP';
 }
 async function saveOcc(){
-  const ean=document.getElementById('m_ean').value.trim();const descricao=document.getElementById('m_desc').value.trim();const cat=document.getElementById('m_cat').value.trim();const subcat=document.getElementById('m_subcat').value.trim();const qty_per_pos=parseInt(document.getElementById('m_qty').value);const notes=document.getElementById('m_notes').value.trim();const errEl=document.getElementById('m_err');
+  const ean=document.getElementById('m_ean').value.trim();const descricao=document.getElementById('m_desc').value.trim();const cat=document.getElementById('m_cat').value.trim();const subcat=document.getElementById('m_subcat').value.trim();const qty_per_pos=parseInt(document.getElementById('m_qty').value);const lote_obrigatorio=document.getElementById('m_lote_obrig').value==='true';const notes=document.getElementById('m_notes').value.trim();const errEl=document.getElementById('m_err');
   if(!ean||!qty_per_pos||qty_per_pos<1){errEl.textContent='EAN e Unidades/Posição são obrigatórios';errEl.style.display='block';return;}
-  const payload={ean,descricao,cat,subcat,qty_per_pos,notes};let error;
+  const payload={ean,descricao,cat,subcat,qty_per_pos,lote_obrigatorio,notes,updated_at:new Date().toISOString()};let error;
   if(editOccId)({error}=await db.from('logistica_occ_params').update(payload).eq('id',editOccId));
   else({error}=await db.from('logistica_occ_params').insert(payload));
   if(error){errEl.textContent='Erro: '+error.message;errEl.style.display='block';return;}
@@ -755,6 +1064,18 @@ async function renderHistory(){
   }catch(e){}
 }
 
+// ── EXPORT RECON XLSX ──
+function exportReconXlsx(){
+  if(!reconData[activeDepot])return;
+  const rows=reconData[activeDepot].map(r=>{
+    const notaKey=activeDepot+'|'+r.EAN_norm+'|'+r.Lote_norm;
+    return{EAN:r.EAN_norm,Descricao:r.desc,Lote:r.Lote_norm,SAP:r.qt_sap,Unilog:r.qt_uni,Diferenca:r.diff,Estado:r.qt_uni===0&&r.qt_sap>0?'Só SAP':r.qt_sap===0&&r.qt_uni>0?'Só Unilog':r.diff!==0?'Divergência':'OK',Recomendacao:autoRecomendacao(r),LocalizacaoUnilog:(r.uni_classes||[]).map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));return dk?`Dep ${dk.padStart(4,'0')}/Cl.${cl}`:cl;}).join(', '),Notas:reconNotas[notaKey]?.nota||''};
+  });
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,DEPOT_MAP[activeDepot].label);
+  XLSX.writeFile(wb,`conciliacao_${company}_dep${activeDepot}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 // ── SORT ──
 function doSort(table,col){const s=sorts[table];sorts[table]=s&&s.col===col?{col,dir:-s.dir}:{col,dir:1};if(table==='recon')renderRecon();if(table==='susp')renderSusp();}
 function applySort(table,rows){const s=sorts[table];if(!s)return;rows.sort((a,b)=>{const va=a[s.col]??'',vb=b[s.col]??'';return s.dir*(typeof va==='number'?va-vb:String(va).localeCompare(String(vb)));});}
@@ -764,7 +1085,7 @@ function innerTab(name,el){el.closest('.page').querySelectorAll('.it').forEach(t
 
 // ── UTILS ──
 function fmt(n){if(n===null||n===undefined)return'—';return Number(n).toLocaleString('pt-BR');}
-function esc(s){return String(s||'').replace(/"/g,'&quot;');}
+function esc(s){return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function updateChip(){const c=document.getElementById('coChip');c.textContent=company;c.style.display='';}
 function eRow(body,cols,msg){const tr=document.createElement('tr');tr.innerHTML=`<td colspan="${cols}" style="text-align:center;color:var(--muted);padding:28px">${msg}</td>`;body.appendChild(tr);}
 function toast(msg,type='info'){const el=document.getElementById('toast');el.textContent=msg;el.className='show '+type;clearTimeout(el._t);el._t=setTimeout(()=>el.className='',3500);}
