@@ -247,6 +247,7 @@ tr.dr td:first-child{border-left:3px solid var(--red);}tr.dr td{background:#fff5
         <th onclick="doSort('recon','qt_uni')" class="num">Unilog</th>
         <th onclick="doSort('recon','diff')" class="num">Diferença</th>
         <th>Estado</th>
+        <th>Localização Unilog</th>
         <th>Noutros depósitos</th>
       </tr></thead>
       <tbody id="reconBody"></tbody>
@@ -468,10 +469,10 @@ function buildRecon(){
     const sA={};
     for(const r of sapDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!sA[k])sA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,desc:r.desc,validade:r.validade};sA[k].qt+=r.qt;}
     const uA={};
-    for(const r of uniDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0};uA[k].qt+=r.qt;}
+    for(const r of uniDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,classes:new Set(),enderecos:[]};uA[k].qt+=r.qt;uA[k].classes.add(r.classe);if(r.endereco&&!uA[k].enderecos.includes(r.endereco))uA[k].enderecos.push(r.endereco);}
     const keys=new Set([...Object.keys(sA),...Object.keys(uA)]);
     reconData[dk]=[];
-    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||''});}
+    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[]});}
   }
 }
 
@@ -615,7 +616,9 @@ function renderRecon(){
     else if(r.qt_sap===0&&r.qt_uni>0)badge='<span class="badge bwarn">Só Unilog</span>';
     else if(hasDiff)badge='<span class="badge berr">Divergência</span>';
     const tr=document.createElement('tr');if(hasDiff)tr.className='dr';
-    tr.innerHTML=`<td><span class="badge bneu" style="font-size:10px">${r.EAN_norm||'—'}</span></td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td><td><span style="font-family:var(--mono);font-size:10px;color:var(--text2)">${r.Lote_norm||'—'}</span></td><td class="num">${fmt(r.qt_sap)}</td><td class="num">${fmt(r.qt_uni)}</td><td class="num ${r.diff>0?'pos':r.diff<0?'neg':''}">${r.diff>0?'+':''}${fmt(r.diff)}</td><td>${badge}</td><td style="font-size:11px">${otherHtml||'—'}</td>`;
+    const uniLocHtml=(r.uni_classes||[]).map(cl=>{const dk=Object.keys(DEPOT_MAP).find(k=>DEPOT_MAP[k].classes.includes(cl));const depNum=dk?'Dep '+dk.padStart(4,'0'):'?';return`<span class="badge binfo" style="margin-right:3px;margin-bottom:2px">${depNum} / Cl.${cl}</span>`;}).join('');
+    const endHtml=r.qt_uni>0&&r.uni_enderecos&&r.uni_enderecos.length?`<div style="font-size:10px;color:#64748b;margin-top:3px">${r.uni_enderecos.slice(0,3).join(', ')}${r.uni_enderecos.length>3?' +'+( r.uni_enderecos.length-3)+' pos.':''}</div>`:'';
+    tr.innerHTML=`<td><span class="badge bneu" style="font-size:10px">${r.EAN_norm||'—'}</span></td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td><td><span style="font-family:var(--mono);font-size:10px;color:#64748b">${r.Lote_norm||'—'}</span></td><td class="num">${fmt(r.qt_sap)}</td><td class="num">${fmt(r.qt_uni)}</td><td class="num ${r.diff>0?'pos':r.diff<0?'neg':''}">${r.diff>0?'+':''}${fmt(r.diff)}</td><td>${badge}</td><td style="font-size:11px">${uniLocHtml||'—'}${endHtml}</td><td style="font-size:11px">${otherHtml||'—'}</td>`;
     body.appendChild(tr);
   }
   if(!rows.length)eRow(body,8,'Nenhum resultado');
