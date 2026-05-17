@@ -302,7 +302,7 @@ select.cad-inp{cursor:pointer;}
 <!-- ══ LOTES SUSPEITOS ══ -->
 <div class="page" id="page-suspeitos">
   <div class="card">
-    <div class="ch"><div class="ct">Lotes só no Unilog — Potencialmente Errados</div></div>
+    <div class="ch"><div class="ct">Lotes só no Unilog — Potencialmente Errados</div><button class="btn bg bs" onclick="exportSuspXlsx()">⬇ Excel</button></div>
     <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">EAN+Lote presentes no Unilog mas <strong>ausentes no SAP</strong>. Observações identificam lotes SAP similares (provável erro de digitação).</p>
     <div class="tb">
       <input class="inp is" id="suspSrch" placeholder="EAN, lote ou descrição…" oninput="renderSusp()">
@@ -389,7 +389,7 @@ select.cad-inp{cursor:pointer;}
   <!-- DUPLICADOS -->
   <div id="cad-duplicados" style="display:none">
     <div class="card">
-      <div class="ch"><div class="ct">EAN com Múltiplos Códigos SAP</div></div>
+      <div class="ch"><div class="ct">EAN com Múltiplos Códigos SAP</div><button class="btn bg bs" onclick="exportDupXlsx()">⬇ Excel</button></div>
       <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
         Um EAN deve corresponder a um único código de material SAP. Os casos abaixo indicam inconsistências na base de dados SAP que devem ser corrigidas com urgência.
       </p>
@@ -413,7 +413,7 @@ select.cad-inp{cursor:pointer;}
   </div>
   <div id="occView">
     <div class="card">
-      <div class="ch"><div class="ct">Stock vs Ocupação de Posições</div></div>
+      <div class="ch"><div class="ct">Stock vs Ocupação de Posições</div><button class="btn bg bs" onclick="exportOccXlsx()">⬇ Excel</button></div>
       <div class="tb">
         <input class="inp is" id="ovSrch" placeholder="EAN ou descrição…" oninput="renderOccView()">
         <select class="inp" id="ovCat" onchange="renderOccView()"><option value="">Todas as categorias</option></select>
@@ -485,7 +485,7 @@ select.cad-inp{cursor:pointer;}
     <div class="fg">
       <div class="fr"><label class="fl">Unidades por Posição</label><input class="fi" id="m_qty" type="number" min="1" placeholder="Ex: 80"></div>
       <div class="fr"><label class="fl">Lote Obrigatório</label>
-        <select class="fi" id="m_lote_obrig"><option value="false">Não</option><option value="true">Sim</option></select>
+        <select class="fi" id="m_lote_obrig"><option value="true">Sim</option><option value="false">Não</option></select>
       </div>
     </div>
     <div class="fr"><label class="fl">Notas</label><input class="fi" id="m_notes" placeholder="Opcional"></div>
@@ -766,7 +766,7 @@ async function autoSeedOcc(){
     if(!r.EAN_norm||seen.has(r.EAN_norm)||existing.has(r.EAN_norm))continue;
     seen.add(r.EAN_norm);
     const{cat,subcat}=autoCat(r.desc);
-    if(cat)toIns.push({ean:r.EAN_norm,descricao:r.desc,cat,subcat,qty_per_pos:guessQPP(cat,subcat),lote_obrigatorio:false,notes:'Auto-detectado'});
+    if(cat)toIns.push({ean:r.EAN_norm,descricao:r.desc,cat,subcat,qty_per_pos:guessQPP(cat,subcat),lote_obrigatorio:true,notes:'Auto-detectado'});
   }
   if(toIns.length>0){
     try{for(let i=0;i<toIns.length;i+=50)await db.from('logistica_occ_params').upsert(toIns.slice(i,i+50),{onConflict:'ean',ignoreDuplicates:true});await loadOccParams();toast('Auto-detectados: '+toIns.length+' artigos','success');}catch(e){}
@@ -961,7 +961,7 @@ function renderCadastro(){
       cat:edited?.cat!==undefined?edited.cat:(p?.cat||''),
       subcat:edited?.subcat!==undefined?edited.subcat:(p?.subcat||''),
       qty_per_pos:edited?.qty_per_pos!==undefined?edited.qty_per_pos:(p?.qty_per_pos||null),
-      lote_obrigatorio:edited?.lote_obrigatorio!==undefined?edited.lote_obrigatorio:(p?.lote_obrigatorio||false),
+      lote_obrigatorio:edited?.lote_obrigatorio!==undefined?edited.lote_obrigatorio:(p?.lote_obrigatorio!==undefined?p.lote_obrigatorio:true),
       notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),
       hasParam:!!p};
   });
@@ -1052,7 +1052,7 @@ async function saveCadastroAll(){
       cat:edit.cat!==undefined?edit.cat:existing.cat||'',
       subcat:edit.subcat!==undefined?edit.subcat:existing.subcat||'',
       qty_per_pos:edit.qty_per_pos!==undefined?edit.qty_per_pos:existing.qty_per_pos||1,
-      lote_obrigatorio:edit.lote_obrigatorio!==undefined?edit.lote_obrigatorio:existing.lote_obrigatorio||false,
+      lote_obrigatorio:edit.lote_obrigatorio!==undefined?edit.lote_obrigatorio:(existing.lote_obrigatorio!==undefined?existing.lote_obrigatorio:true),
       notes:edit.notes!==undefined?edit.notes:existing.notes||'',
       updated_at:new Date().toISOString(),
     };
@@ -1071,11 +1071,39 @@ function exportCadastroXlsx(){
   const eanMap={};sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]=r.desc;});
   for(const[ean,desc]of Object.entries(eanMap)){
     const p=occParams.find(x=>x.ean===ean);
-    rows.push({EAN:ean,Descricao:desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',UnPosicao:p?.qty_per_pos||'',LoteObrigatorio:p?.lote_obrigatorio?'Sim':'Não',Notas:p?.notes||''});
+    rows.push({EAN:ean,Descricao:desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',UnPosicao:p?.qty_per_pos||'',LoteObrigatorio:p?.lote_obrigatorio!==false?'Sim':'Não',Notas:p?.notes||''});
   }
   const ws=XLSX.utils.json_to_sheet(rows);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Cadastro');
   XLSX.writeFile(wb,`cadastro_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function exportDupXlsx(){
+  const dups=buildDuplicados();
+  if(!dups.length){toast('Sem duplicados para exportar','error');return;}
+  const rows=dups.map(d=>({EAN:d.ean,Descricao:d.desc,NrMateriais:d.mats.size,MateriaisSAP:[...d.mats].join(' / '),Depositos:[...d.deps].map(x=>x.padStart(4,'0')).join(', ')}));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'EAN Duplicados');
+  XLSX.writeFile(wb,`ean_duplicados_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function exportSuspXlsx(){
+  if(!suspData.length){toast('Sem dados para exportar','error');return;}
+  const rows=suspData.map(r=>({EAN:r.EAN_norm,Descricao:r.desc,LoteUnilog:r.Lote_norm,QtUnilog:r.qt,DepositoClasse:r.depots.join(' | '),LoteSAPSimilar:r.similar?.lote||'',Similaridade:r.similar?Math.round(r.similar.ratio*100)+'%':'',QtSAP:r.similar?.qt||''}));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Lotes Suspeitos');
+  XLSX.writeFile(wb,`lotes_suspeitos_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function exportOccXlsx(){
+  if(!sapData)return;
+  const byEan={};sapData.forEach(r=>{if(!r.EAN_norm)return;if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={desc:r.desc,qt:0};byEan[r.EAN_norm].qt+=r.qt;});
+  const rows=Object.entries(byEan).map(([ean,v])=>{
+    const p=occParams.find(x=>x.ean===ean);
+    const pos=p&&p.qty_per_pos>0?Math.ceil(v.qt/p.qty_per_pos):null;
+    const lastPct=p&&p.qty_per_pos>0?Math.round((v.qt%p.qty_per_pos)/p.qty_per_pos*100):null;
+    return{EAN:ean,Descricao:v.desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',StockTotal:v.qt,UnPosicao:p?.qty_per_pos||'',PosicoesEstimadas:pos||'',OcupacaoUltimaPosicao:lastPct!==null?lastPct+'%':'',Alerta:lastPct!==null&&lastPct>0&&lastPct<50?'Subaproveitada':''};
+  }).sort((a,b)=>(b.PosicoesEstimadas||0)-(a.PosicoesEstimadas||0));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Ocupação');
+  XLSX.writeFile(wb,`ocupacao_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 // ── OCC PARAMS ──
@@ -1184,7 +1212,7 @@ function renderOccBase(){
 // ── OCC MODAL ──
 function openOccModal(pre){
   ['m_ean','m_desc','m_cat','m_subcat','m_notes'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('m_qty').value='';document.getElementById('m_lote_obrig').value='false';
+  document.getElementById('m_qty').value='';document.getElementById('m_lote_obrig').value='true';
   document.getElementById('m_err').style.display='none';document.getElementById('m_ean_info').textContent='';editOccId=null;
   if(pre){document.getElementById('m_ean').value=pre.ean||'';document.getElementById('m_desc').value=pre.descricao||'';document.getElementById('m_cat').value=pre.cat||'';document.getElementById('m_subcat').value=pre.subcat||'';document.getElementById('m_qty').value=pre.qty_per_pos||'';document.getElementById('m_lote_obrig').value=String(pre.lote_obrigatorio||false);document.getElementById('m_notes').value=pre.notes||'';editOccId=pre.id;lookupEAN();}
   document.getElementById('occModal').classList.add('open');
