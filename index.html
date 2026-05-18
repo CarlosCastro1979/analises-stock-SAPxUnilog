@@ -1282,12 +1282,47 @@ function renderOccView(){
         posExcesso=Math.max(0,l.nEnderecos-posMinima);
         if(posExcesso>0)totalConsolidavel+=posExcesso;
         if(subutil)totalSubutil++;
-        // Consolidation instructions
+        // Consolidation instructions — respecting PK rules:
+        // PP→PP ✓, PP→PK ✓ (if space), PK→PK ✓ (if space), PK→PP ✗ (never)
         if(posExcesso>0&&l.enderecos&&l.enderecos.length>1){
+          const isPK=e=>e.end&&e.end.includes('PK');
           const endSorted=[...l.enderecos].sort((a,b)=>a.qt-b.qt);
-          const doadores=endSorted.slice(0,posExcesso);
-          const receptor=endSorted[endSorted.length-1];
-          consolidacao={posExcesso,doadores,receptor};
+          
+          // Separate PK and PP enderecos
+          const pkEnds=endSorted.filter(e=>isPK(e));
+          const ppEnds=endSorted.filter(e=>!isPK(e));
+          
+          // Receptor: prefer the fullest PK (if has space), else fullest PP
+          // A PK has space if its qt < qpp
+          const pkWithSpace=pkEnds.filter(e=>e.qt<qpp);
+          const receptor=pkWithSpace.length>0
+            ? pkWithSpace[pkWithSpace.length-1]  // fullest PK with space
+            : endSorted[endSorted.length-1];      // fullest overall (PP)
+          
+          const receptorIsPK=isPK(receptor);
+          const espacoReceptor=qpp-receptor.qt; // how much space receptor has
+          
+          // Doadores: never pick PK as doador if receptor is PP
+          // PK→PP is forbidden
+          const candidatosDoadores=endSorted.filter(e=>{
+            if(e.end===receptor.end)return false; // not the receptor itself
+            if(isPK(e)&&!receptorIsPK)return false; // PK→PP forbidden
+            return true;
+          });
+          
+          // Pick doadores that fit in receptor space (smallest first)
+          const doadores=[];let espacoUsado=0;
+          for(const e of candidatosDoadores){
+            if(doadores.length>=posExcesso)break;
+            if(espacoUsado+e.qt<=espacoReceptor||!receptorIsPK){
+              doadores.push(e);
+              espacoUsado+=e.qt;
+            }
+          }
+          
+          if(doadores.length>0){
+            consolidacao={posExcesso:doadores.length,doadores,receptor,receptorIsPK};
+          }
         }
       }
       // posMinima tracked per lote in loteDetail
@@ -1345,11 +1380,14 @@ function renderOccView(){
       if(consol.length>0){
         const consolHtml=consol.map(l=>{
           const {doadores,receptor,posExcesso}=l.consolidacao;
+          const tipoMov=l.consolidacao?.receptorIsPK?'PP→PK':'PP→PP';
+          const badgeColor=l.consolidacao?.receptorIsPK?'#dbeafe':'#dcfce7';
+          const badgeLabel=l.consolidacao?.receptorIsPK?'📦 PP→PK':'📦 Consolidar PP';
           return `<div style="font-size:10px;margin-top:3px">
-            <span class="badge binfo">📦 Lote ${l.lote||'—'} — consolidar ${posExcesso} pos.</span>
+            <span class="badge binfo" style="background:${badgeColor}">${badgeLabel} — Lote ${l.lote||'—'} (${posExcesso} pos.)</span>
             ${doadores.map(d=>`<div style="font-size:10px;color:var(--text2);margin-top:2px;padding-left:8px">
               ▸ Mover <strong>${fmt(d.qt)}</strong> un de <span style="font-family:var(--mono);background:#e2e8f0;padding:1px 5px;border-radius:3px">${d.end}</span>
-              → <span style="font-family:var(--mono);background:#dbeafe;padding:1px 5px;border-radius:3px">${receptor.end}</span>
+              → <span style="font-family:var(--mono);background:${badgeColor};padding:1px 5px;border-radius:3px">${receptor.end}</span>
               <span style="color:var(--muted)">(liberta ${posExcesso} posição${posExcesso>1?'s':''})</span>
             </div>`).join('')}
           </div>`;
