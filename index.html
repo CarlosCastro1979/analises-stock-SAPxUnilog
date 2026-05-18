@@ -1352,9 +1352,15 @@ function renderOccView(){
 
   // ── KPIs ──
   const wP=rows.filter(r=>r.param).length;
-  // Count globally unique enderecos across all filtered Unilog data
-  const globalEnderecos=new Set(uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!=='').map(r=>r.endereco));
-  const tP=globalEnderecos.size;const tPoup=rows.reduce((s,r)=>s+(r.poupanca||0),0);const tOpt=tP-tPoup;
+  // Count unique enderecos only for EANs in filtered rows
+  const filteredEANs=new Set(rows.map(r=>r.ean));
+  const filteredEnderecos=new Set(
+    uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!==''&&filteredEANs.has(r.EAN_norm))
+    .map(r=>r.endereco)
+  );
+  const tP=filteredEnderecos.size;
+  const tPoup=rows.reduce((s,r)=>s+(r.poupanca||0),0);
+  const tOpt=tP-tPoup;
   const uC=rows.reduce((s,r)=>s+(r.totalSubutil||0)+(r.totalConsolidavel||0),0);
   document.getElementById('ovKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmt(rows.length)}</div></div>
