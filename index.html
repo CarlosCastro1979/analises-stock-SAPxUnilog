@@ -1398,11 +1398,10 @@ function renderOccView(){
             </div>`).join('')}
           </div>`;
         }).join('');
-        const subHtml=subutil.map(l=>`<div style="font-size:10px;color:var(--muted);margin-top:2px">Lote ${l.lote||'—'}: ${fmt(l.qt)} un (${l.pct}%) — aguardar receção</div>`).join('');
-        alert=`<span class="badge binfo">🔧 ${consol.length} consolid.</span>${consolHtml}${subHtml}`;
+        alert=`<span class="badge binfo">🔧 ${consol.length} consolid.</span>${consolHtml}`;
       } else if(r.totalSubutil>0){
-        const details=subutil.map(l=>`<div style="font-size:10px;color:var(--muted);margin-top:2px">Lote ${l.lote||'—'}: ${fmt(l.qt)} un (${l.pct}%) — aguardar receção</div>`).join('');
-        alert=`<span class="badge bwarn">⚠ ${r.totalSubutil} lote(s) — sem acção possível</span>${details}`;
+        // Suboptimal positions but no action possible — show nothing
+        alert='';
       } else {
         alert='<span class="badge bok">✓ Posições cheias</span>';
       }
