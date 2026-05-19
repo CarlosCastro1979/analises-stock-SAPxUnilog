@@ -738,7 +738,7 @@ async function loadFromDB(silent=false){
     company=document.getElementById('coSel').value;
     const{data,error}=await db.from('logistica_stock').select('*').eq('id',company).single();
     if(error||!data){if(!silent)toast('Sem dados para '+company,'error');return;}
-    sapData=JSON.parse(data.sap_data);uniData=JSON.parse(data.unilog_data);company=data.company;
+    sapData=JSON.parse(data.sap_data).filter(r=>!EXCL_DEPOSITOS.includes(r.deposito));uniData=JSON.parse(data.unilog_data);company=data.company;
     buildRecon();buildSusp();checkDuplicadosAlert();renderUpKpis();updateChip();
     // Re-render active page if it needs data
     const activePage=document.querySelector('.page.active');
@@ -999,11 +999,11 @@ function renderCadastro(){
   const subF=document.getElementById('cadSub').value;
   const loteF=document.getElementById('cadLote').value;
   const semF=document.getElementById('cadSemParam').value;
-  // Only EANs with total stock > 0 across valid deposits
-  const eanStock={};
-  sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanStock[r.EAN_norm])eanStock[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc,total:0};eanStock[r.EAN_norm].total+=r.qt;});
+  // Only EANs with at least 1 row with qt > 0 in valid deposits
   const eanMap={};
-  Object.values(eanStock).forEach(e=>{if(e.total>0)eanMap[e.ean]=e;});
+  sapData.filter(r=>r.EAN_norm&&r.qt>0).forEach(r=>{
+    if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};
+  });
   let items=Object.values(eanMap).map(e=>{
     const p=occParams.find(x=>x.ean===e.ean);
     const edited=cadEdits[e.ean];
