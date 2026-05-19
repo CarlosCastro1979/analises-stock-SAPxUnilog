@@ -200,6 +200,7 @@ select.cad-inp{cursor:pointer;}
   <div class="nt active" data-page="upload">📁 Dados</div>
   <div class="nt" data-page="recon">⚖️ Conciliação</div>
   <div class="nt" data-page="suspeitos">🔍 Lotes Suspeitos<span id="suspBadge" class="bc" style="display:none"></span></div>
+  <div class="nt" data-page="somunilog">⚠️ Só Unilog<span id="suBadge" class="bc" style="display:none"></span></div>
   <div class="nt" data-page="cadastro">🗂️ Cadastro</div>
   <div class="nt" data-page="occupation">📦 Ocupação</div>
   <div class="nt" data-page="history">📋 Histórico</div>
@@ -331,6 +332,36 @@ select.cad-inp{cursor:pointer;}
       <tbody id="suspBody"></tbody>
     </table></div>
     <div id="suspEmpty" class="empty" style="display:none"><div class="empty-i">🔍</div><div>Nenhum lote suspeito</div></div>
+  </div>
+</div>
+
+<!-- ══ SÓ UNILOG ══ -->
+<div class="page" id="page-somunilog">
+  <div class="card">
+    <div class="ch">
+      <div class="ct">Produtos só no Unilog — EAN não encontrado no SAP</div>
+      <button class="btn bg bs" onclick="exportSoUnilogXlsx()">⬇ Excel</button>
+    </div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
+      EANs presentes no Unilog mas <strong>completamente ausentes no SAP</strong>. Podem ser produtos de outro depositante, artigos descontinuados ou erros de cadastro.
+    </p>
+    <div class="tb">
+      <input class="inp is" id="suSrch" placeholder="EAN, lote ou descrição…" oninput="renderSoUnilog()">
+      <select class="inp" id="suClasse" onchange="renderSoUnilog()"><option value="">Todas as classes</option></select>
+    </div>
+    <div class="kr" id="suKpis"></div>
+    <div class="tw2"><table>
+      <thead><tr>
+        <th onclick="doSort('su','classe')">Classe / Depósito</th>
+        <th onclick="doSort('su','EAN_norm')">EAN</th>
+        <th onclick="doSort('su','produto')">Descrição Unilog</th>
+        <th onclick="doSort('su','Lote_norm')">Lote</th>
+        <th onclick="doSort('su','qt')" class="num">Qt Unilog</th>
+        <th onclick="doSort('su','endereco')">Endereço</th>
+      </tr></thead>
+      <tbody id="suBody"></tbody>
+    </table></div>
+    <div id="suEmpty" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum produto exclusivo do Unilog</div></div>
   </div>
 </div>
 
@@ -523,6 +554,7 @@ async function init(){
       document.getElementById('page-'+t.dataset.page).classList.add('active');
       if(t.dataset.page==='recon')renderReconPage();
       if(t.dataset.page==='suspeitos')renderSusp();
+      if(t.dataset.page==='somunilog')renderSoUnilog();
       if(t.dataset.page==='cadastro')renderCadastro();
       if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
       if(t.dataset.page==='history')renderHistory();
@@ -622,10 +654,15 @@ function buildSusp(){
   const sapLotes={};sapData.forEach(r=>{if(!r.Lote_norm)return;if(!sapLotes[r.EAN_norm])sapLotes[r.EAN_norm]={};if(!sapLotes[r.EAN_norm][r.Lote_norm])sapLotes[r.EAN_norm][r.Lote_norm]=0;sapLotes[r.EAN_norm][r.Lote_norm]+=r.qt;});
   const uA={};uniData.forEach(r=>{if(!r.Lote_norm)return;const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,classes:new Set()};uA[k].qt+=r.qt;uA[k].classes.add(r.classe);});
   const sapSet=new Set();sapData.forEach(r=>{if(r.Lote_norm)sapSet.add(r.EAN_norm+'|'+r.Lote_norm);});
+  // SAP EANs set (any deposit)
+  const sapEANs=new Set(sapData.map(r=>r.EAN_norm).filter(Boolean));
   suspData=[];
   for(const[k,v]of Object.entries(uA)){
     if(sapSet.has(k))continue;
-    const{EAN_norm,Lote_norm,qt,classes}=v;const desc=dm[EAN_norm]||'';
+    const{EAN_norm,Lote_norm,qt,classes}=v;
+    // Only include if EAN exists in SAP (wrong lote) — unknown EANs go to "Só Unilog"
+    if(!sapEANs.has(EAN_norm))continue;
+    const desc=dm[EAN_norm]||'';
     const param=occParams.find(p=>p.ean===EAN_norm);const cat=param?.cat||autoCat(desc).cat||'';
     const depots=[...classes].map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));return dk?`Dep ${dk.padStart(4,'0')} / Cl.${cl}`:cl;});
     const sapL=Object.keys(sapLotes[EAN_norm]||{});
@@ -719,6 +756,87 @@ function renderDuplicados(){
   if(!dups.length)eRow(body,5,'');
 }
 
+// ── SÓ UNILOG ──
+let soUnilogData=[];
+function buildSoUnilog(){
+  if(!sapData||!uniData)return;
+  const sapEANs=new Set(sapData.map(r=>r.EAN_norm).filter(Boolean));
+  // Group unilog rows by EAN — only those NOT in SAP at all
+  const byEAN={};
+  uniData.forEach(r=>{
+    if(!r.EAN_norm||sapEANs.has(r.EAN_norm))return;
+    const k=r.EAN_norm+'|'+r.Lote_norm+'|'+r.classe;
+    if(!byEAN[k])byEAN[k]={EAN_norm:r.EAN_norm,produto:r.produto,Lote_norm:r.Lote_norm,classe:r.classe,qt:0,enderecos:[]};
+    byEAN[k].qt+=r.qt;
+    if(r.endereco&&!byEAN[k].enderecos.includes(r.endereco))byEAN[k].enderecos.push(r.endereco);
+  });
+  soUnilogData=Object.values(byEAN).sort((a,b)=>String(a.produto||'').localeCompare(String(b.produto||'')));
+  const badge=document.getElementById('suBadge');
+  const uniqueEANs=new Set(soUnilogData.map(r=>r.EAN_norm));
+  badge.textContent=uniqueEANs.size;
+  badge.style.display=uniqueEANs.size>0?'':'none';
+}
+
+function renderSoUnilog(){
+  let rows=[...soUnilogData];
+  const srch=document.getElementById('suSrch').value.toLowerCase();
+  const classeF=document.getElementById('suClasse').value;
+
+  // Update classe dropdown
+  const classes=[...new Set(soUnilogData.map(r=>r.classe).filter(Boolean))].sort();
+  const clSel=document.getElementById('suClasse');const clCur=clSel.value;
+  clSel.innerHTML='<option value="">Todas as classes</option>'+classes.map(c=>{
+    const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(c));
+    const label=dk?`${DEPOT_MAP[dk].label.split('—')[1].trim()} (Cl.${c})`:`Cl.${c}`;
+    return `<option value="${c}">${label}</option>`;
+  }).join('');
+  clSel.value=classes.includes(clCur)?clCur:'';
+  const classeActive=clSel.value;
+
+  if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||(r.produto||'').toLowerCase().includes(srch)||(r.Lote_norm||'').toLowerCase().includes(srch));
+  if(classeActive)rows=rows.filter(r=>r.classe===classeActive);
+  applySort('su',rows);
+
+  const uniqueEANs=new Set(rows.map(r=>r.EAN_norm)).size;
+  const totalQt=rows.reduce((s,r)=>s+r.qt,0);
+  document.getElementById('suKpis').innerHTML=`
+    <div class="kpi"><div class="kl">EANs desconhecidos</div><div class="kv r">${fmt(uniqueEANs)}</div></div>
+    <div class="kpi"><div class="kl">Linhas Unilog</div><div class="kv">${fmt(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Stock total</div><div class="kv y">${fmt(totalQt)}</div></div>
+  `;
+
+  const body=document.getElementById('suBody');body.innerHTML='';
+  document.getElementById('suEmpty').style.display=rows.length===0?'block':'none';
+  for(const r of rows){
+    const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
+    const depLabel=dk?`<span class="badge binfo">${DEPOT_MAP[dk].label.split('—')[1].trim()}/Cl.${r.classe}</span>`:`<span class="badge bgray">Cl.${r.classe}</span>`;
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td>${depLabel}</td>
+      <td><span class="badge bneu">${r.EAN_norm}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.produto||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm||'—'}</span></td>
+      <td class="num">${fmt(r.qt)}</td>
+      <td style="font-size:11px;font-family:var(--mono)">${(r.enderecos||[]).slice(0,3).join(', ')}${r.enderecos.length>3?' +'+(r.enderecos.length-3)+' pos.':''}</td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!rows.length)eRow(body,6,'Nenhum resultado');
+}
+
+function exportSoUnilogXlsx(){
+  let rows=[...soUnilogData];
+  const srch=document.getElementById('suSrch').value.toLowerCase();
+  const classeActive=document.getElementById('suClasse').value;
+  if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||(r.produto||'').toLowerCase().includes(srch));
+  if(classeActive)rows=rows.filter(r=>r.classe===classeActive);
+  const data=rows.map(r=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));return{Classe:r.classe,Deposito:dk?DEPOT_MAP[dk].label:'?',EAN:r.EAN_norm,Produto:r.produto||'',Lote:r.Lote_norm||'',QtUnilog:r.qt,Enderecos:(r.enderecos||[]).join(', ')};});
+  if(!data.length){toast('Sem dados','error');return;}
+  const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Só Unilog');
+  XLSX.writeFile(wb,`so_unilog_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+
 function simRatio(a,b){const la=a.length,lb=b.length;if(!la||!lb)return 0;const dp=Array.from({length:la+1},(_,i)=>Array.from({length:lb+1},(_,j)=>i===0?j:j===0?i:0));for(let i=1;i<=la;i++)for(let j=1;j<=lb;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return 1-dp[la][lb]/Math.max(la,lb);}
 
 // ── PROCESS ──
@@ -726,7 +844,7 @@ async function processAll(){
   if(!sapData||!uniData)return;
   company=document.getElementById('coSel').value;
   document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
-  buildRecon();buildSusp();checkDuplicadosAlert();await autoSeedOcc();renderUpKpis();updateChip();
+  buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();await autoSeedOcc();renderUpKpis();updateChip();
   try{
     const payload={id:company,company,uploaded_at:new Date().toISOString(),sap_rows:sapData.length,unilog_rows:uniData.length,sap_data:JSON.stringify(sapData),unilog_data:JSON.stringify(uniData),recon_summary:JSON.stringify(buildSummary())};
     const{error}=await db.from('logistica_stock').upsert(payload,{onConflict:'id'});
@@ -744,7 +862,7 @@ async function loadFromDB(silent=false){
     const{data,error}=await db.from('logistica_stock').select('*').eq('id',company).single();
     if(error||!data){if(!silent)toast('Sem dados para '+company,'error');return;}
     sapData=JSON.parse(data.sap_data).filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito));uniData=JSON.parse(data.unilog_data);company=data.company;
-    buildRecon();buildSusp();checkDuplicadosAlert();renderUpKpis();updateChip();
+    buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();renderUpKpis();updateChip();
     // Re-render active page if it needs data
     const activePage=document.querySelector('.page.active');
     if(activePage){
