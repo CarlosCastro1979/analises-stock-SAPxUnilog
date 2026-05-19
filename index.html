@@ -282,6 +282,8 @@ select.cad-inp{cursor:pointer;}
     <div class="kr" id="reconKpis"></div>
     <div class="tw2"><table id="reconTable">
       <thead><tr>
+        <th onclick="doSort('recon','cat')">Categoria</th>
+        <th onclick="doSort('recon','subcat')">Subcategoria</th>
         <th onclick="doSort('recon','EAN_norm')">EAN</th>
         <th onclick="doSort('recon','desc')">Descrição</th>
         <th onclick="doSort('recon','Lote_norm')">Lote</th>
@@ -318,8 +320,8 @@ select.cad-inp{cursor:pointer;}
     <div class="kr" id="suspKpis"></div>
     <div class="tw2"><table>
       <thead><tr>
-        <th onclick="doSort('susp','EAN_norm')">EAN</th>
         <th onclick="doSort('susp','cat')">Categoria</th>
+        <th onclick="doSort('susp','EAN_norm')">EAN</th>
         <th onclick="doSort('susp','desc')">Descrição</th>
         <th onclick="doSort('susp','Lote_norm')">Lote Unilog</th>
         <th onclick="doSort('susp','qt')" class="num">Qt Unilog</th>
@@ -375,11 +377,11 @@ select.cad-inp{cursor:pointer;}
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;" id="cadCount"></div>
       <div class="tw2"><table id="cadTable">
         <thead><tr>
+          <th onclick="cadSort('cat')" id="cadTh_cat" style="min-width:150px">Categoria</th>
+          <th onclick="cadSort('subcat')" id="cadTh_subcat" style="min-width:130px">Subcategoria</th>
           <th onclick="cadSort('ean')" id="cadTh_ean">EAN</th>
           <th onclick="cadSort('desc')" id="cadTh_desc">Descrição SAP</th>
           <th>Depósitos</th>
-          <th onclick="cadSort('cat')" id="cadTh_cat" style="min-width:160px">Categoria</th>
-          <th onclick="cadSort('subcat')" id="cadTh_subcat" style="min-width:140px">Subcategoria</th>
           <th onclick="cadSort('qty_per_pos')" id="cadTh_qty_per_pos" style="min-width:80px">Un/Posição</th>
           <th onclick="cadSort('lote_obrigatorio')" id="cadTh_lote_obrigatorio">Lote Obrig.</th>
           <th style="min-width:120px">Notas</th>
@@ -897,9 +899,12 @@ function renderRecon(){
     const rec=autoRecomendacao(r);
     const recHtml=rec?`<span class="rec-auto">${rec}</span>`:'—';
     const tr=document.createElement('tr');if(hasDiff)tr.className='dr';
+    const rParam=occParams.find(x=>x.ean===r.EAN_norm);
     tr.innerHTML=`
+      <td style="font-size:11px">${rParam?.cat||'—'}</td>
+      <td style="font-size:11px">${rParam?.subcat||'—'}</td>
       <td><span class="badge bneu">${r.EAN_norm||'—'}</span></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
       <td><span style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.Lote_norm||'—'}</span></td>
       <td class="num">${fmt(r.qt_sap)}</td>
       <td class="num">${fmt(r.qt_uni)}</td>
@@ -912,7 +917,7 @@ function renderRecon(){
     `;
     body.appendChild(tr);
   }
-  if(!rows.length)eRow(body,11,'Nenhum resultado');
+  if(!rows.length)eRow(body,13,'Nenhum resultado');
 }
 
 function findOther(ean,lote,curDk){const found=[];for(const dk of DKS){if(dk===curDk)continue;const m=(reconData[dk]||[]).find(r=>r.EAN_norm===ean&&r.Lote_norm===lote);if(m&&(m.qt_sap>0||m.qt_uni>0))found.push({label:DEPOT_MAP[dk].label.split('—')[1].trim(),qt_sap:m.qt_sap,qt_uni:m.qt_uni});}return found;}
@@ -960,8 +965,8 @@ function renderSusp(){
     }
     const tr=document.createElement('tr');
     tr.innerHTML=`
+      <td style="font-size:11px">${r.cat||'—'}</td>
       <td><span class="badge bneu">${r.EAN_norm}</span></td>
-      <td style="font-size:11px;color:var(--muted)">${r.cat||'—'}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
       <td><span class="badge berr">${r.Lote_norm}</span></td>
       <td class="num">${fmt(r.qt)}</td>
@@ -994,8 +999,9 @@ function renderCadastro(){
   const subF=document.getElementById('cadSub').value;
   const loteF=document.getElementById('cadLote').value;
   const semF=document.getElementById('cadSemParam').value;
+  // Only EANs with stock > 0 in valid deposits (dep 0033 already excluded in normSap)
   const eanMap={};
-  sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};});
+  sapData.forEach(r=>{if(!r.EAN_norm||r.qt<=0)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};});
   let items=Object.values(eanMap).map(e=>{
     const p=occParams.find(x=>x.ean===e.ean);
     const edited=cadEdits[e.ean];
@@ -1045,18 +1051,13 @@ function renderCadastro(){
     const cadDeps=DKS.filter(dk=>sapData&&sapData.some(r=>r.EAN_norm===item.ean&&r.deposito===dk));
     const cadDepHtml=cadDeps.length?cadDeps.map(dk=>`<span class="badge bgray" style="margin-right:2px;font-size:9px">${DEPOT_MAP[dk].label.split('—')[1].trim()}</span>`).join(''):'<span style="color:var(--muted);font-size:11px">—</span>';
     tr.innerHTML=`
+      <td><input class="cad-inp" list="cad_cat_dl" value="${esc(item.cat)}" onblur="cadAutoSave('${item.ean}','cat',this.value)" placeholder="Categoria…"><datalist id="cad_cat_dl">${allCats.map(c=>`<option value="${c}">`).join('')}</datalist></td>
+      <td><input class="cad-inp" list="cad_sub_dl" value="${esc(item.subcat)}" onblur="cadAutoSave('${item.ean}','subcat',this.value)" placeholder="Subcategoria…"><datalist id="cad_sub_dl">${allSubs.map(c=>`<option value="${c}">`).join('')}</datalist></td>
       <td><span class="badge bneu">${item.ean}</span></td>
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(item.desc)}">${item.desc}</td>
       <td style="white-space:nowrap">${cadDepHtml}</td>
-      <td><input class="cad-inp" list="cad_cat_dl" value="${esc(item.cat)}" onblur="cadAutoSave('${item.ean}','cat',this.value)" placeholder="Categoria…"><datalist id="cad_cat_dl">${allCats.map(c=>`<option value="${c}">`).join('')}</datalist></td>
-      <td><input class="cad-inp" list="cad_sub_dl" value="${esc(item.subcat)}" onblur="cadAutoSave('${item.ean}','subcat',this.value)" placeholder="Subcategoria…"><datalist id="cad_sub_dl">${allSubs.map(c=>`<option value="${c}">`).join('')}</datalist></td>
       <td><input class="cad-inp" type="number" min="1" value="${item.qty_per_pos||''}" onblur="cadAutoSave('${item.ean}','qty_per_pos',parseInt(this.value)||null)" placeholder="0" style="width:70px"></td>
-      <td class="cad-toggle">
-        <div class="tw" onclick="cadToggleLote('${item.ean}',this)">
-          <div class="tg ${item.lote_obrigatorio?'on':''}"><div class="tk"></div></div>
-          <span style="font-size:11px">${item.lote_obrigatorio?'Sim':'Não'}</span>
-        </div>
-      </td>
+      <td class="cad-toggle"><div class="tw" onclick="cadToggleLote('${item.ean}',this)"><div class="tg ${item.lote_obrigatorio?'on':''}"><div class="tk"></div></div><span style="font-size:11px">${item.lote_obrigatorio?'Sim':'Não'}</span></div></td>
       <td><input class="cad-inp" value="${esc(item.notes)}" onblur="cadAutoSave('${item.ean}','notes',this.value)" placeholder="Notas…"></td>
     `;
     body.appendChild(tr);
@@ -1286,7 +1287,7 @@ function renderOccView(){
     `;
     body.appendChild(tr);
   }
-  if(!rows.length)eRow(body,11,'Nenhum resultado');
+  if(!rows.length)eRow(body,13,'Nenhum resultado');
 }
 
 // ── OCC BASE ──
