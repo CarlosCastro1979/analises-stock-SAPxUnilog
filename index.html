@@ -438,7 +438,7 @@ select.cad-inp{cursor:pointer;}
         <thead><tr>
           <th>EAN</th><th>Descrição</th><th>Categoria</th><th>Subcategoria</th>
           <th class="num">Stock Unilog</th><th class="num">Un/Pos</th><th class="num">Pos. Reais</th><th class="num">Pos. Optimizadas</th><th class="num">Poupança</th>
-          <th>Recomendação</th>
+          <th>Depósito(s)</th><th>Recomendação</th>
         </tr></thead>
         <tbody id="ovBody"></tbody>
       </table></div>
@@ -883,7 +883,9 @@ function renderRecon(){
     const notaVal=reconNotas[notaKey]?.nota||'';
     const others=findOther(r.EAN_norm,r.Lote_norm,activeDepot);
     const otherHtml=others.map(o=>`<span class="badge binfo" style="margin-right:2px">${o.label}: S${fmt(o.qt_sap)} U${fmt(o.qt_uni)}</span>`).join('');
-    const uniLocHtml=(r.uni_classes||[]).map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));const depNum=dk?'Dep '+dk.padStart(4,'0'):'?';return`<span class="badge binfo" style="margin-right:2px;margin-bottom:2px">${depNum}/Cl.${cl}</span>`;}).join('');
+    // Show depot/class badge only if multiple classes (i.e. not filtered to single depot)
+    const uniClasses=r.uni_classes||[];
+    const uniLocHtml=uniClasses.length>1?uniClasses.map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));const depNum=dk?'Dep '+dk.padStart(4,'0'):'?';return`<span class="badge binfo" style="margin-right:2px;margin-bottom:2px">${depNum}/Cl.${cl}</span>`;}).join(''):'';
     const endHtml=r.qt_uni>0&&r.uni_enderecos?.length?`<div style="font-size:10px;color:var(--muted);margin-top:2px">${r.uni_enderecos.slice(0,3).join(', ')}${r.uni_enderecos.length>3?' +'+(r.uni_enderecos.length-3)+' pos.':''}</div>`:'';
     let badge='<span class="badge bok">OK</span>';
     if(r.qt_uni===0&&r.qt_sap>0)badge='<span class="badge bwarn">Só SAP</span>';
@@ -937,7 +939,9 @@ function renderSusp(){
   // Update cat filter
   const cats=[...new Set(suspData.map(r=>r.cat).filter(Boolean))].sort();
   const sel=document.getElementById('suspCat');const cur=sel.value;
-  sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;
+  sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  sel.value=cats.includes(cur)?cur:'';
+  const catFActive=sel.value;
 
   const body=document.getElementById('suspBody');body.innerHTML='';
   document.getElementById('suspEmpty').style.display=rows.length===0?'block':'none';
@@ -1138,12 +1142,34 @@ async function saveCadastroAll(){
 
 function exportCadastroXlsx(){
   if(!sapData)return;
-  const rows=[];
-  const eanMap={};sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]=r.desc;});
-  for(const[ean,desc]of Object.entries(eanMap)){
-    const p=occParams.find(x=>x.ean===ean);
-    rows.push({EAN:ean,Descricao:desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',UnPosicao:p?.qty_per_pos||'',LoteObrigatorio:p?.lote_obrigatorio!==false?'Sim':'Não',Notas:p?.notes||''});
-  }
+  // Apply same filters as renderCadastro
+  const srch=document.getElementById('cadSrch').value.toLowerCase();
+  const catF=document.getElementById('cadCat').value;
+  const subF=document.getElementById('cadSub').value;
+  const loteF=document.getElementById('cadLote').value;
+  const semF=document.getElementById('cadSemParam').value;
+  const eanMap={};
+  sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};});
+  let items=Object.values(eanMap).map(e=>{
+    const p=occParams.find(x=>x.ean===e.ean);
+    return{ean:e.ean,desc:e.desc,
+      cat:p?.cat||'',subcat:p?.subcat||'',
+      qty_per_pos:p?.qty_per_pos||null,
+      lote_obrigatorio:p?.lote_obrigatorio!==undefined?p.lote_obrigatorio:true,
+      notes:p?.notes||'',hasParam:!!p};
+  });
+  if(srch)items=items.filter(i=>i.ean.includes(srch)||i.desc.toLowerCase().includes(srch));
+  if(catF==='__sem__')items=items.filter(i=>!i.cat);
+  else if(catF)items=items.filter(i=>i.cat===catF);
+  if(subF==='__sem__')items=items.filter(i=>!i.subcat);
+  else if(subF)items=items.filter(i=>i.subcat===subF);
+  if(loteF==='1')items=items.filter(i=>i.lote_obrigatorio===true);
+  else if(loteF==='0')items=items.filter(i=>i.lote_obrigatorio===false&&i.hasParam);
+  else if(loteF==='vazio')items=items.filter(i=>!i.hasParam);
+  if(semF==='sem_cat')items=items.filter(i=>!i.cat);
+  else if(semF==='sem_sub')items=items.filter(i=>!i.subcat);
+  else if(semF==='sem_qpp')items=items.filter(i=>!i.qty_per_pos||i.qty_per_pos<=1);
+  const rows=items.map(i=>({EAN:i.ean,Descricao:i.desc,Categoria:i.cat,Subcategoria:i.subcat,UnPosicao:i.qty_per_pos||'',LoteObrigatorio:i.lote_obrigatorio?'Sim':'Não',Notas:i.notes}));
   const ws=XLSX.utils.json_to_sheet(rows);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Cadastro');
   XLSX.writeFile(wb,`cadastro_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -1158,20 +1184,48 @@ function exportDupXlsx(){
 }
 function exportSuspXlsx(){
   if(!suspData.length){toast('Sem dados para exportar','error');return;}
-  const rows=suspData.map(r=>({EAN:r.EAN_norm,Descricao:r.desc,LoteUnilog:r.Lote_norm,QtUnilog:r.qt,DepositoClasse:r.depots.join(' | '),LoteSAPSimilar:r.similar?.lote||'',Similaridade:r.similar?Math.round(r.similar.ratio*100)+'%':'',QtSAP:r.similar?.qt||''}));
-  const ws=XLSX.utils.json_to_sheet(rows);
+  // Apply same filters as renderSusp
+  let rows=[...suspData];
+  const srch=document.getElementById('suspSrch').value.toLowerCase();
+  const flt=document.getElementById('suspFlt').value;
+  const catFActive=document.getElementById('suspCat').value;
+  const minQt=parseInt(document.getElementById('suspMinQt').value)||0;
+  if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
+  if(flt==='similar')rows=rows.filter(r=>r.similar);
+  if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
+  if(catFActive)rows=rows.filter(r=>r.cat===catFActive);
+  if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
+  if(!rows.length){toast('Sem dados para exportar','error');return;}
+  const data=rows.map(r=>({EAN:r.EAN_norm,Descricao:r.desc,Categoria:r.cat||'',LoteUnilog:r.Lote_norm,QtUnilog:r.qt,DepositoClasse:r.depots.join(' | '),LoteSAPSimilar:r.similar?.lote||'',Similaridade:r.similar?Math.round(r.similar.ratio*100)+'%':'',QtSAP:r.similar?.qt||''}));
+  const ws=XLSX.utils.json_to_sheet(data);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Lotes Suspeitos');
   XLSX.writeFile(wb,`lotes_suspeitos_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 function exportOccXlsx(){
-  if(!sapData)return;
-  const byEan={};sapData.forEach(r=>{if(!r.EAN_norm)return;if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={desc:r.desc,qt:0};byEan[r.EAN_norm].qt+=r.qt;});
-  const rows=Object.entries(byEan).map(([ean,v])=>{
+  // Export only visible rows - re-run renderOccView logic to get filtered rows
+  if(!uniData)return;
+  const srch=document.getElementById('ovSrch').value.toLowerCase();
+  const catF=document.getElementById('ovCat').value;
+  const subF=document.getElementById('ovSub').value;
+  const depF=document.getElementById('ovDep').value;
+  const alertF=document.getElementById('ovAlerta').value;
+  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2']};
+  const filteredClasses=depF?(depClassMap[depF]||[]):null;
+  const uniF=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
+  const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
+  const byEan={};
+  uniF.forEach(r=>{if(!r.EAN_norm||r.endereco?.includes('DC'))return;if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={desc:descMap[r.EAN_norm]||r.produto||'',qt:0,lotes:{}};byEan[r.EAN_norm].qt+=r.qt;const lk=r.Lote_norm||'';if(!byEan[r.EAN_norm].lotes[lk])byEan[r.EAN_norm].lotes[lk]=0;byEan[r.EAN_norm].lotes[lk]+=r.qt;});
+  let rows=Object.entries(byEan).map(([ean,v])=>{
     const p=occParams.find(x=>x.ean===ean);
-    const pos=p&&p.qty_per_pos>0?Math.ceil(v.qt/p.qty_per_pos):null;
-    const lastPct=p&&p.qty_per_pos>0?Math.round((v.qt%p.qty_per_pos)/p.qty_per_pos*100):null;
-    return{EAN:ean,Descricao:v.desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',StockTotal:v.qt,UnPosicao:p?.qty_per_pos||'',PosicoesEstimadas:pos||'',OcupacaoUltimaPosicao:lastPct!==null?lastPct+'%':'',Alerta:lastPct!==null&&lastPct>0&&lastPct<50?'Subaproveitada':''};
-  }).sort((a,b)=>(b.PosicoesEstimadas||0)-(a.PosicoesEstimadas||0));
+    const qpp=p?.qty_per_pos||0;
+    let posReais=0,posOtim=0,poupanca=0;
+    if(qpp>1){Object.values(v.lotes).forEach(qt=>{const pm=Math.ceil(qt/qpp);posOtim+=pm;});}
+    const deps=DKS.filter(dk=>(reconData[dk]||[]).some(x=>x.EAN_norm===ean)).map(dk=>DEPOT_MAP[dk].label.split('—')[1].trim()).join(', ');
+    return{EAN:ean,Descricao:v.desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',Depositos:deps,StockUnilog:v.qt,UnPosicao:qpp||'',LoteObrigatorio:p?.lote_obrigatorio!==false?'Sim':'Não'};
+  });
+  if(srch)rows=rows.filter(r=>r.EAN.includes(srch)||r.Descricao.toLowerCase().includes(srch));
+  if(catF)rows=rows.filter(r=>r.Categoria===catF);
+  if(subF)rows=rows.filter(r=>r.Subcategoria===subF);
   const ws=XLSX.utils.json_to_sheet(rows);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Ocupação');
   XLSX.writeFile(wb,`ocupacao_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -1239,16 +1293,20 @@ function renderOccView(){
 
   // ── Aggregate by EAN+Lote (each lote occupies its own positions) ──
   const byEanLote={};
+  const isDC=e=>e&&e.includes('DC');
   uniFiltered.forEach(r=>{
     if(!r.EAN_norm)return;
     const k=r.EAN_norm+'|'+r.Lote_norm;
-    if(!byEanLote[k])byEanLote[k]={ean:r.EAN_norm,lote:r.Lote_norm,desc:descMap[r.EAN_norm]||r.produto||'',qt:0,enderecos:[],endSet:new Set()};
+    if(!byEanLote[k])byEanLote[k]={ean:r.EAN_norm,lote:r.Lote_norm,desc:descMap[r.EAN_norm]||r.produto||'',qt:0,enderecos:[],endSet:new Set(),qtDC:0};
     byEanLote[k].qt+=r.qt;
+    if(r.endereco&&isDC(r.endereco)){
+      byEanLote[k].qtDC+=r.qt; // DC stock counts for total but not for positions
+      return; // don't add DC as a storage position
+    }
     if(r.endereco&&!byEanLote[k].endSet.has(r.endereco)){
       byEanLote[k].endSet.add(r.endereco);
       byEanLote[k].enderecos.push({end:r.endereco,qt:0});
     }
-    // accumulate qty per endereco
     if(r.endereco){const e=byEanLote[k].enderecos.find(x=>x.end===r.endereco);if(e)e.qt+=r.qt;}
   });
 
@@ -1258,7 +1316,7 @@ function renderOccView(){
     if(!byEan[v.ean])byEan[v.ean]={desc:v.desc,qt:0,endSet:new Set(),lotes:[]};
     byEan[v.ean].qt+=v.qt;
     v.enderecos.forEach(e=>byEan[v.ean].endSet.add(e.end));
-    byEan[v.ean].lotes.push({lote:v.lote,qt:v.qt,nEnderecos:v.enderecos.length,enderecos:v.enderecos});
+    byEan[v.ean].lotes.push({lote:v.lote,qt:v.qt,nEnderecos:v.enderecos.length,enderecos:v.enderecos,qtDC:v.qtDC||0});
   });
   Object.values(byEan).forEach(v=>v.nEnderecos=v.endSet.size);
 
@@ -1333,7 +1391,7 @@ function renderOccView(){
         }
       }
       // posMinima tracked per lote in loteDetail
-      loteDetail.push({lote:l.lote,qt:l.qt,posMinima,posReais:l.nEnderecos,posExcesso,pct,faltam,subutil,consolidacao});
+      loteDetail.push({lote:l.lote,qt:l.qt,posMinima,posReais:l.nEnderecos,posExcesso,pct,faltam,subutil,consolidacao,qtDC:l.qtDC||0});
     });
 
     const poupanca=totalConsolidavel;
@@ -1384,7 +1442,14 @@ function renderOccView(){
     const pct=r.lastPct;
     const col=pct===null?'':pct<30?'var(--red)':pct<70?'var(--yellow)':'var(--green)';
     let alert='';
-    if(!r.param){alert='<span class="badge bgray">Sem parâm.</span>';}
+    // Special case: produto sem lote obrigatório with multiple lotes → fix Unilog cadastro
+    if(r.param&&r.param.lote_obrigatorio===false&&r.nLotes>1){
+      const allEnds=r.loteDetail.flatMap(l=>l.enderecos||[]).map(e=>e.end||e).filter(Boolean);
+      alert=`<div><span class="badge bwarn" style="background:#fde68a;color:#92400e">⚠ Produto sem lote — ${r.nLotes} lotes no Unilog</span>
+        <div style="font-size:10px;color:var(--text2);margin-top:3px">
+          ▸ Solicitar à Unilog: remover lotes do cadastro e unificar todas as posições numa única
+        </div></div>`;
+    } else if(!r.param){alert='<span class="badge bgray">Sem parâm.</span>';}
     else if(r.nLotes===0){alert='—';}
     else{
       // Check for consolidation opportunities (same lote in more positions than needed)
@@ -1410,7 +1475,13 @@ function renderOccView(){
         // Suboptimal positions but no action possible — show nothing
         alert='';
       } else {
-        alert='<span class="badge bok">✓ Posições cheias</span>';
+        const dcLotes=r.loteDetail.filter(l=>l.qtDC>0);
+        if(dcLotes.length>0){
+          const dcHtml=dcLotes.map(l=>`<div style="font-size:10px;color:var(--text2);margin-top:2px">▸ Lote ${l.lote||'—'}: <strong>${fmt(l.qtDC)}</strong> un em DOCA — armazenar</div>`).join('');
+          alert=`<div><span class="badge bwarn">🚚 Stock em DOCA</span>${dcHtml}</div>`;
+        } else {
+          alert='<span class="badge bok">✓ Posições cheias</span>';
+        }
       }
     }
     const posRealHtml=r.posReal>0?`<span style="font-weight:600;color:${r.posDiff!==null&&r.posDiff>0?'var(--red)':r.posDiff===0?'var(--green)':'var(--text)'}">${fmt(r.posReal)}${r.posDiff!==null&&r.posDiff>0?` <span style="font-size:10px">(+${r.posDiff})</span>`:''}</span>`:'—';
@@ -1426,11 +1497,12 @@ function renderOccView(){
       <td class="num"><strong>${fmt(r.posReal)}</strong></td>
       <td class="num">${r.posOtimizadas!==null?fmt(r.posOtimizadas):'—'}</td>
       <td class="num">${r.poupanca>0?`<strong>-${fmt(r.poupanca)}</strong>`:'—'}</td>
+      <td style="font-size:11px">${(()=>{const deps=DKS.filter(dk=>(reconData[dk]||[]).some(x=>x.EAN_norm===r.ean));return deps.length?deps.map(dk=>`<span class="badge bgray" style="margin-right:2px">${DEPOT_MAP[dk].label.split('—')[1].trim()}</span>`).join(''):'—';})()}</td>
       <td style="min-width:220px">${alert}</td>
     `;
     body.appendChild(tr);
   }
-  if(!rows.length)eRow(body,10,'Nenhum resultado');
+  if(!rows.length)eRow(body,11,'Nenhum resultado');
 }
 function renderOccBase(){
   const srch=document.getElementById('obSrch').value.toLowerCase();
@@ -1511,11 +1583,30 @@ async function renderHistory(){
 // ── EXPORT RECON XLSX ──
 function exportReconXlsx(){
   if(!reconData[activeDepot])return;
-  const rows=reconData[activeDepot].map(r=>{
+  // Apply same filters as renderRecon
+  let rows=[...(reconData[activeDepot]||[])];
+  const srch=document.getElementById('reconSrch').value.toLowerCase();
+  const estado=document.getElementById('reconEstado').value;
+  const catF=document.getElementById('reconCat').value;
+  const subF=document.getElementById('reconSub').value;
+  const valF=document.getElementById('reconValidade').value;
+  const minDiffVal=parseFloat(document.getElementById('reconMinDiff').value)||0;
+  if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
+  if(!showAll)rows=rows.filter(r=>r.diff!==0);
+  if(estado==='diff')rows=rows.filter(r=>r.diff!==0);
+  else if(estado==='only_sap')rows=rows.filter(r=>r.qt_uni===0&&r.qt_sap>0);
+  else if(estado==='only_uni')rows=rows.filter(r=>r.qt_sap===0&&r.qt_uni>0);
+  else if(estado==='diverg')rows=rows.filter(r=>r.qt_sap>0&&r.qt_uni>0&&r.diff!==0);
+  else if(estado==='ok')rows=rows.filter(r=>r.diff===0);
+  if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===catF;});}
+  if(subF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.subcat||'')===subF;});}
+  if(minDiffVal>0)rows=rows.filter(r=>Math.abs(r.diff)>=minDiffVal);
+  const data=rows.map(r=>{
     const notaKey=activeDepot+'|'+r.EAN_norm+'|'+r.Lote_norm;
-    return{EAN:r.EAN_norm,Descricao:r.desc,Lote:r.Lote_norm,SAP:r.qt_sap,Unilog:r.qt_uni,Diferenca:r.diff,Estado:r.qt_uni===0&&r.qt_sap>0?'Só SAP':r.qt_sap===0&&r.qt_uni>0?'Só Unilog':r.diff!==0?'Divergência':'OK',Recomendacao:autoRecomendacao(r),LocalizacaoUnilog:(r.uni_classes||[]).map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));return dk?`Dep ${dk.padStart(4,'0')}/Cl.${cl}`:cl;}).join(', '),Notas:reconNotas[notaKey]?.nota||''};
+    const p=occParams.find(x=>x.ean===r.EAN_norm);
+    return{EAN:r.EAN_norm,Descricao:r.desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',Lote:r.Lote_norm,SAP:r.qt_sap,Unilog:r.qt_uni,Diferenca:r.diff,Estado:r.qt_uni===0&&r.qt_sap>0?'Só SAP':r.qt_sap===0&&r.qt_uni>0?'Só Unilog':r.diff!==0?'Divergência':'OK',Recomendacao:autoRecomendacao(r),LocalizacaoUnilog:(r.uni_classes||[]).join(', '),Notas:reconNotas[notaKey]?.nota||''};
   });
-  const ws=XLSX.utils.json_to_sheet(rows);
+  const ws=XLSX.utils.json_to_sheet(data);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,DEPOT_MAP[activeDepot].label);
   XLSX.writeFile(wb,`conciliacao_${company}_dep${activeDepot}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
