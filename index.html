@@ -319,6 +319,7 @@ select.cad-inp{cursor:pointer;}
     <div class="tw2"><table>
       <thead><tr>
         <th onclick="doSort('susp','EAN_norm')">EAN</th>
+        <th onclick="doSort('susp','cat')">Categoria</th>
         <th onclick="doSort('susp','desc')">Descrição</th>
         <th onclick="doSort('susp','Lote_norm')">Lote Unilog</th>
         <th onclick="doSort('susp','qt')" class="num">Qt Unilog</th>
@@ -436,7 +437,7 @@ select.cad-inp{cursor:pointer;}
       <div class="kr" id="ovKpis"></div>
       <div class="tw2"><table>
         <thead><tr>
-          <th>EAN</th><th>Descrição</th><th>Categoria</th><th>Subcategoria</th>
+          <th>EAN</th><th>Categoria</th><th>Subcategoria</th><th>Descrição</th>
           <th class="num">Stock Unilog</th><th class="num">Un/Pos</th><th class="num">Pos. Reais</th><th class="num">Pos. Optimizadas</th><th class="num">Poupança</th>
           <th>Depósito(s)</th><th>Recomendação</th>
         </tr></thead>
@@ -916,19 +917,27 @@ function findOther(ean,lote,curDk){const found=[];for(const dk of DKS){if(dk===c
 
 // ── SUSPICIOUS ──
 function renderSusp(){
-  let rows=[...suspData];
+  // Read filter values first
   const srch=document.getElementById('suspSrch').value.toLowerCase();
   const flt=document.getElementById('suspFlt').value;
-  const catF=document.getElementById('suspCat').value;
   const minQt=parseInt(document.getElementById('suspMinQt').value)||0;
+
+  // Update cat dropdown
+  const cats=[...new Set(suspData.map(r=>r.cat).filter(Boolean))].sort();
+  const catSel=document.getElementById('suspCat');const catCur=catSel.value;
+  catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  catSel.value=cats.includes(catCur)?catCur:'';
+  const catF=catSel.value;
+
+  // Filter rows
+  let rows=[...suspData];
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(flt==='similar')rows=rows.filter(r=>r.similar);
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
-  if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===(catF);});}
-  if(subF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.subcat||'')===(subF);});}
+  if(catF)rows=rows.filter(r=>r.cat===catF);
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
-  if(!sorts['susp']){rows.sort((a,b)=>{const cc=String(a.cat||'').localeCompare(String(b.cat||''));if(cc!==0)return cc;return String(a.desc||'').localeCompare(String(b.desc||''));});}
-  else applySort('susp',rows);
+  applySort('susp',rows);
+
   const withSim=suspData.filter(r=>r.similar).length;
   document.getElementById('suspKpis').innerHTML=`
     <div class="kpi"><div class="kl">Lotes suspeitos</div><div class="kv r">${fmt(suspData.length)}</div></div>
@@ -936,17 +945,11 @@ function renderSusp(){
     <div class="kpi"><div class="kl">Sem correspondência</div><div class="kv">${fmt(suspData.length-withSim)}</div></div>
     <div class="kpi"><div class="kl">A mostrar</div><div class="kv b">${fmt(rows.length)}</div></div>
   `;
-  // Update cat filter
-  const cats=[...new Set(suspData.map(r=>r.cat).filter(Boolean))].sort();
-  const sel=document.getElementById('suspCat');const cur=sel.value;
-  sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
-  sel.value=cats.includes(cur)?cur:'';
-  const catFActive=sel.value;
 
   const body=document.getElementById('suspBody');body.innerHTML='';
   document.getElementById('suspEmpty').style.display=rows.length===0?'block':'none';
   for(const r of rows){
-    const depotHtml=r.depots.map(d=>`<span class="badge binfo" style="margin-right:2px">${d}</span>`).join('');
+    const depotHtml=(r.depots||[]).map(d=>`<span class="badge binfo" style="margin-right:2px">${d}</span>`).join('');
     let simHtml='<span style="color:var(--muted);font-size:11px">Sem similar</span>';
     if(r.similar){
       const pct=Math.round(r.similar.ratio*100);
@@ -954,7 +957,15 @@ function renderSusp(){
       simHtml=`<div class="sb"><span class="badge bwarn">Lote SAP: <strong>${r.similar.lote}</strong></span><div class="pw" style="width:50px"><div class="pf" style="width:${pct}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono)">${pct}%</span><span style="font-size:10px;color:var(--muted)">Qt:${fmt(r.similar.qt)}</span></div>`;
     }
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td><span class="badge bneu">${r.EAN_norm}</span></td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td><td><span class="badge berr">${r.Lote_norm}</span></td><td class="num">${fmt(r.qt)}</td><td>${depotHtml||'—'}</td><td>${simHtml}</td>`;
+    tr.innerHTML=`
+      <td><span class="badge bneu">${r.EAN_norm}</span></td>
+      <td style="font-size:11px;color:var(--muted)">${r.cat||'—'}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
+      <td><span class="badge berr">${r.Lote_norm}</span></td>
+      <td class="num">${fmt(r.qt)}</td>
+      <td>${depotHtml||'—'}</td>
+      <td>${simHtml}</td>
+    `;
     body.appendChild(tr);
   }
 }
@@ -981,8 +992,6 @@ function renderCadastro(){
   const subF=document.getElementById('cadSub').value;
   const loteF=document.getElementById('cadLote').value;
   const semF=document.getElementById('cadSemParam').value;
-
-  // Build EAN list from SAP
   const eanMap={};
   sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};});
   let items=Object.values(eanMap).map(e=>{
@@ -996,21 +1005,15 @@ function renderCadastro(){
       notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),
       hasParam:!!p};
   });
-
-  // Update filters
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
+  const allSubs=[...new Set(occParams.map(p=>p.subcat).filter(Boolean))].sort();
   const csel=document.getElementById('cadCat');const ccur=csel.value;
   csel.innerHTML='<option value="">Todas as categorias</option><option value="__sem__">— Sem categoria —</option>'+allCats.map(c=>`<option value="${c}">${c}</option>`).join('');csel.value=ccur;
-  // Subcategories filtered by selected category
-  const subSource=ccur&&ccur!=='__sem__'?occParams.filter(p=>p.cat===ccur):occParams;
-  const allSubs=[...new Set(subSource.map(p=>p.subcat).filter(Boolean))].sort();
   const ssel=document.getElementById('cadSub');const scur=ssel.value;
-  const scrValid=allSubs.includes(scur)?scur:'';
-  ssel.innerHTML='<option value="">Todas as subcategorias</option><option value="__sem__">— Sem subcategoria —</option>'+allSubs.map(c=>`<option value="${c}">${c}</option>`).join('');
-  ssel.value=scrValid;
-  if(scur!==scrValid){document.getElementById('cadSub').value='';}
-
-  // Apply filters
+  const subSrc=ccur&&ccur!=='__sem__'?occParams.filter(p=>p.cat===ccur):occParams;
+  const filtSubs=[...new Set(subSrc.map(p=>p.subcat).filter(Boolean))].sort();
+  ssel.innerHTML='<option value="">Todas as subcategorias</option><option value="__sem__">— Sem subcategoria —</option>'+filtSubs.map(c=>`<option value="${c}">${c}</option>`).join('');
+  ssel.value=filtSubs.includes(scur)?scur:'';
   if(srch)items=items.filter(i=>i.ean.includes(srch)||i.desc.toLowerCase().includes(srch));
   if(catF==='__sem__')items=items.filter(i=>!i.cat);
   else if(catF)items=items.filter(i=>i.cat===catF);
@@ -1022,18 +1025,15 @@ function renderCadastro(){
   if(semF==='sem_cat')items=items.filter(i=>!i.cat);
   else if(semF==='sem_sub')items=items.filter(i=>!i.subcat);
   else if(semF==='sem_qpp')items=items.filter(i=>!i.qty_per_pos||i.qty_per_pos<=1);
-
-  // Sort: primary column selected, secondary always cat→subcat→desc
-  const {col,dir}=cadSortState;
+  const{col,dir}=cadSortState;
   items.sort((a,b)=>{
-    if(col!=='cat'){const catCmp=String(a.cat||'').localeCompare(String(b.cat||''));if(catCmp!==0)return catCmp;}
-    if(col!=='subcat'&&col!=='cat'){const subCmp=String(a.subcat||'').localeCompare(String(b.subcat||''));if(subCmp!==0)return subCmp;}
+    if(col!=='cat'){const cc=String(a.cat||'').localeCompare(String(b.cat||''));if(cc!==0)return cc;}
+    if(col!=='subcat'&&col!=='cat'){const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;}
     let va=a[col]??'',vb=b[col]??'';
     if(typeof va==='boolean')va=va?1:0;if(typeof vb==='boolean')vb=vb?1:0;
     if(typeof va==='number'&&typeof vb==='number')return dir*(va-vb);
     return dir*String(va).localeCompare(String(vb));
   });
-
   document.getElementById('cadCount').textContent=`${items.length} artigos`;
   const body=document.getElementById('cadBody');body.innerHTML='';
   for(const item of items){
@@ -1058,36 +1058,22 @@ function renderCadastro(){
   }
   if(!items.length)eRow(body,7,'Nenhum resultado');
 }
-
+function cadEdit(ean,field,value){if(!cadEdits[ean])cadEdits[ean]={};cadEdits[ean][field]=value;}
 async function cadAutoSave(ean,field,value){
   cadEdit(ean,field,value);
   const p=occParams.find(x=>x.ean===ean);
   const sapRow=sapData?.find(r=>r.EAN_norm===ean);
-  const existing=p||{};
-  const edits=cadEdits[ean]||{};
-  const payload={
-    ean,
-    descricao:existing.descricao||sapRow?.desc||'',
+  const existing=p||{};const edits=cadEdits[ean]||{};
+  const payload={ean,descricao:existing.descricao||sapRow?.desc||'',
     cat:edits.cat!==undefined?edits.cat:(existing.cat||''),
     subcat:edits.subcat!==undefined?edits.subcat:(existing.subcat||''),
     qty_per_pos:edits.qty_per_pos!==undefined?edits.qty_per_pos:(existing.qty_per_pos||1),
     lote_obrigatorio:edits.lote_obrigatorio!==undefined?edits.lote_obrigatorio:(existing.lote_obrigatorio!==undefined?existing.lote_obrigatorio:true),
     notes:edits.notes!==undefined?edits.notes:(existing.notes||''),
-    updated_at:new Date().toISOString(),
-  };
+    updated_at:new Date().toISOString()};
   try{
     const{error}=await db.from('logistica_occ_params').upsert(payload,{onConflict:'ean'});
-    if(!error){
-      delete cadEdits[ean];
-      await loadOccParams();
-      // Update row background to saved state
-      const rows=[...document.getElementById('cadBody').querySelectorAll('tr')];
-      rows.forEach(tr=>{
-        const badge=tr.querySelector('.badge.bneu');
-        if(badge&&badge.textContent===ean){tr.style.background='';tr.style.transition='background 0.5s';}
-      });
-      showSaveIndicator();
-    }
+    if(!error){delete cadEdits[ean];await loadOccParams();showSaveIndicator();}
   }catch(e){}
 }
 function showSaveIndicator(){
@@ -1096,13 +1082,6 @@ function showSaveIndicator(){
   ind.textContent='✓ Guardado';ind.style.opacity='1';
   clearTimeout(ind._t);ind._t=setTimeout(()=>ind.style.opacity='0',1500);
 }
-function cadEdit(ean,field,value){
-  if(!cadEdits[ean])cadEdits[ean]={};
-  cadEdits[ean][field]=value;
-  // highlight row
-  const rows=[...document.getElementById('cadBody').querySelectorAll('tr')];
-}
-
 function cadToggleLote(ean,el){
   const p=occParams.find(x=>x.ean===ean);
   const cur=cadEdits[ean]?.lote_obrigatorio!==undefined?cadEdits[ean].lote_obrigatorio:(p?.lote_obrigatorio!==undefined?p.lote_obrigatorio:true);
@@ -1112,123 +1091,47 @@ function cadToggleLote(ean,el){
   el.closest('tr').style.background='#f0fdf4';
   cadAutoSave(ean,'lote_obrigatorio',next);
 }
-
 async function saveCadastroAll(){
   const keys=Object.keys(cadEdits);if(!keys.length){toast('Nenhuma alteração pendente','error');return;}
   let saved=0;
   for(const ean of keys){
-    const edit=cadEdits[ean];
-    const p=occParams.find(x=>x.ean===ean);
-    const existing=p||{};
+    const edit=cadEdits[ean];const p=occParams.find(x=>x.ean===ean);const existing=p||{};
     const sapRow=sapData?.find(r=>r.EAN_norm===ean);
-    const payload={
-      ean,
-      descricao:existing.descricao||sapRow?.desc||'',
+    const payload={ean,descricao:existing.descricao||sapRow?.desc||'',
       cat:edit.cat!==undefined?edit.cat:existing.cat||'',
       subcat:edit.subcat!==undefined?edit.subcat:existing.subcat||'',
       qty_per_pos:edit.qty_per_pos!==undefined?edit.qty_per_pos:existing.qty_per_pos||1,
       lote_obrigatorio:edit.lote_obrigatorio!==undefined?edit.lote_obrigatorio:(existing.lote_obrigatorio!==undefined?existing.lote_obrigatorio:true),
       notes:edit.notes!==undefined?edit.notes:existing.notes||'',
-      updated_at:new Date().toISOString(),
-    };
+      updated_at:new Date().toISOString()};
     const{error}=await db.from('logistica_occ_params').upsert(payload,{onConflict:'ean'});
     if(!error)saved++;
   }
-  cadEdits={};
-  await loadOccParams();
-  renderCadastro();
-  toast(`${saved} artigos guardados ✓`,'success');
+  cadEdits={};await loadOccParams();renderCadastro();toast(`${saved} artigos guardados ✓`,'success');
 }
-
 function exportCadastroXlsx(){
   if(!sapData)return;
-  // Apply same filters as renderCadastro
   const srch=document.getElementById('cadSrch').value.toLowerCase();
   const catF=document.getElementById('cadCat').value;
   const subF=document.getElementById('cadSub').value;
   const loteF=document.getElementById('cadLote').value;
   const semF=document.getElementById('cadSemParam').value;
-  const eanMap={};
-  sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};});
-  let items=Object.values(eanMap).map(e=>{
-    const p=occParams.find(x=>x.ean===e.ean);
-    return{ean:e.ean,desc:e.desc,
-      cat:p?.cat||'',subcat:p?.subcat||'',
-      qty_per_pos:p?.qty_per_pos||null,
-      lote_obrigatorio:p?.lote_obrigatorio!==undefined?p.lote_obrigatorio:true,
-      notes:p?.notes||'',hasParam:!!p};
-  });
+  const eanMap={};sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};});
+  let items=Object.values(eanMap).map(e=>{const p=occParams.find(x=>x.ean===e.ean);return{ean:e.ean,desc:e.desc,cat:p?.cat||'',subcat:p?.subcat||'',qty_per_pos:p?.qty_per_pos||null,lote_obrigatorio:p?.lote_obrigatorio!==undefined?p.lote_obrigatorio:true,notes:p?.notes||'',hasParam:!!p};});
   if(srch)items=items.filter(i=>i.ean.includes(srch)||i.desc.toLowerCase().includes(srch));
-  if(catF==='__sem__')items=items.filter(i=>!i.cat);
-  else if(catF)items=items.filter(i=>i.cat===catF);
-  if(subF==='__sem__')items=items.filter(i=>!i.subcat);
-  else if(subF)items=items.filter(i=>i.subcat===subF);
-  if(loteF==='1')items=items.filter(i=>i.lote_obrigatorio===true);
-  else if(loteF==='0')items=items.filter(i=>i.lote_obrigatorio===false&&i.hasParam);
-  else if(loteF==='vazio')items=items.filter(i=>!i.hasParam);
-  if(semF==='sem_cat')items=items.filter(i=>!i.cat);
-  else if(semF==='sem_sub')items=items.filter(i=>!i.subcat);
-  else if(semF==='sem_qpp')items=items.filter(i=>!i.qty_per_pos||i.qty_per_pos<=1);
+  if(catF==='__sem__')items=items.filter(i=>!i.cat);else if(catF)items=items.filter(i=>i.cat===catF);
+  if(subF==='__sem__')items=items.filter(i=>!i.subcat);else if(subF)items=items.filter(i=>i.subcat===subF);
+  if(loteF==='1')items=items.filter(i=>i.lote_obrigatorio===true);else if(loteF==='0')items=items.filter(i=>i.lote_obrigatorio===false&&i.hasParam);else if(loteF==='vazio')items=items.filter(i=>!i.hasParam);
+  if(semF==='sem_cat')items=items.filter(i=>!i.cat);else if(semF==='sem_sub')items=items.filter(i=>!i.subcat);else if(semF==='sem_qpp')items=items.filter(i=>!i.qty_per_pos||i.qty_per_pos<=1);
   const rows=items.map(i=>({EAN:i.ean,Descricao:i.desc,Categoria:i.cat,Subcategoria:i.subcat,UnPosicao:i.qty_per_pos||'',LoteObrigatorio:i.lote_obrigatorio?'Sim':'Não',Notas:i.notes}));
-  const ws=XLSX.utils.json_to_sheet(rows);
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Cadastro');
+  const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Cadastro');
   XLSX.writeFile(wb,`cadastro_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 function exportDupXlsx(){
-  const dups=buildDuplicados();
-  if(!dups.length){toast('Sem duplicados para exportar','error');return;}
+  const dups=buildDuplicados();if(!dups.length){toast('Sem duplicados','error');return;}
   const rows=dups.map(d=>({EAN:d.ean,Descricao:d.desc,NrMateriais:d.mats.size,MateriaisSAP:[...d.mats].join(' / '),Depositos:[...d.deps].map(x=>x.padStart(4,'0')).join(', ')}));
-  const ws=XLSX.utils.json_to_sheet(rows);
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'EAN Duplicados');
+  const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'EAN Duplicados');
   XLSX.writeFile(wb,`ean_duplicados_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
-}
-function exportSuspXlsx(){
-  if(!suspData.length){toast('Sem dados para exportar','error');return;}
-  // Apply same filters as renderSusp
-  let rows=[...suspData];
-  const srch=document.getElementById('suspSrch').value.toLowerCase();
-  const flt=document.getElementById('suspFlt').value;
-  const catFActive=document.getElementById('suspCat').value;
-  const minQt=parseInt(document.getElementById('suspMinQt').value)||0;
-  if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
-  if(flt==='similar')rows=rows.filter(r=>r.similar);
-  if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
-  if(catFActive)rows=rows.filter(r=>r.cat===catFActive);
-  if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
-  if(!rows.length){toast('Sem dados para exportar','error');return;}
-  const data=rows.map(r=>({EAN:r.EAN_norm,Descricao:r.desc,Categoria:r.cat||'',LoteUnilog:r.Lote_norm,QtUnilog:r.qt,DepositoClasse:r.depots.join(' | '),LoteSAPSimilar:r.similar?.lote||'',Similaridade:r.similar?Math.round(r.similar.ratio*100)+'%':'',QtSAP:r.similar?.qt||''}));
-  const ws=XLSX.utils.json_to_sheet(data);
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Lotes Suspeitos');
-  XLSX.writeFile(wb,`lotes_suspeitos_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
-}
-function exportOccXlsx(){
-  // Export only visible rows - re-run renderOccView logic to get filtered rows
-  if(!uniData)return;
-  const srch=document.getElementById('ovSrch').value.toLowerCase();
-  const catF=document.getElementById('ovCat').value;
-  const subF=document.getElementById('ovSub').value;
-  const depF=document.getElementById('ovDep').value;
-  const alertF=document.getElementById('ovAlerta').value;
-  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2']};
-  const filteredClasses=depF?(depClassMap[depF]||[]):null;
-  const uniF=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
-  const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
-  const byEan={};
-  uniF.forEach(r=>{if(!r.EAN_norm||r.endereco?.includes('DC'))return;if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={desc:descMap[r.EAN_norm]||r.produto||'',qt:0,lotes:{}};byEan[r.EAN_norm].qt+=r.qt;const lk=r.Lote_norm||'';if(!byEan[r.EAN_norm].lotes[lk])byEan[r.EAN_norm].lotes[lk]=0;byEan[r.EAN_norm].lotes[lk]+=r.qt;});
-  let rows=Object.entries(byEan).map(([ean,v])=>{
-    const p=occParams.find(x=>x.ean===ean);
-    const qpp=p?.qty_per_pos||0;
-    let posReais=0,posOtim=0,poupanca=0;
-    if(qpp>1){Object.values(v.lotes).forEach(qt=>{const pm=Math.ceil(qt/qpp);posOtim+=pm;});}
-    const deps=DKS.filter(dk=>(reconData[dk]||[]).some(x=>x.EAN_norm===ean)).map(dk=>DEPOT_MAP[dk].label.split('—')[1].trim()).join(', ');
-    return{EAN:ean,Descricao:v.desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',Depositos:deps,StockUnilog:v.qt,UnPosicao:qpp||'',LoteObrigatorio:p?.lote_obrigatorio!==false?'Sim':'Não'};
-  });
-  if(srch)rows=rows.filter(r=>r.EAN.includes(srch)||r.Descricao.toLowerCase().includes(srch));
-  if(catF)rows=rows.filter(r=>r.Categoria===catF);
-  if(subF)rows=rows.filter(r=>r.Subcategoria===subF);
-  const ws=XLSX.utils.json_to_sheet(rows);
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Ocupação');
-  XLSX.writeFile(wb,`ocupacao_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 // ── OCC PARAMS ──
@@ -1236,8 +1139,7 @@ async function loadOccParams(){
   try{
     const{data,error}=await db.from('logistica_occ_params').select('*').order('cat');
     if(!error&&data){
-      occParams=data;
-      updateOccFilters();
+      occParams=data;updateOccFilters();
       const ap=document.querySelector('.page.active');
       if(ap&&ap.id==='page-occupation'&&uniData)renderOccView();
     }
@@ -1246,187 +1148,87 @@ async function loadOccParams(){
 function updateOccFilters(){
   const cats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
   const subs=[...new Set(occParams.map(p=>p.subcat).filter(Boolean))].sort();
-  ['ovCat','obCat'].forEach(id=>{const sel=document.getElementById(id);const cur=sel.value;sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;});
-  const ovSub=document.getElementById('ovSub');const curSub=ovSub.value;
-  ovSub.innerHTML='<option value="">Todas as subcategorias</option>'+subs.map(c=>`<option value="${c}">${c}</option>`).join('');ovSub.value=curSub;
+  ['ovCat','obCat'].forEach(id=>{const sel=document.getElementById(id);if(!sel)return;const cur=sel.value;sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;});
+  const ovSub=document.getElementById('ovSub');if(ovSub){const cur=ovSub.value;ovSub.innerHTML='<option value="">Todas as subcategorias</option>'+subs.map(c=>`<option value="${c}">`+c+'</option>').join('');ovSub.value=cur;}
   document.getElementById('m_cat_dl').innerHTML=cats.map(c=>`<option value="${c}">`).join('');
   document.getElementById('m_sub_dl').innerHTML=subs.map(c=>`<option value="${c}">`).join('');
 }
 
-// ── OCC VIEW ──
+// ── RENDER OCC VIEW ──
 function renderOccView(){
-  if(!uniData){
-    document.getElementById('ovBody').innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros para ver a ocupação</td></tr>';
-    return;
-  }
-
-  // ── Read current filter values BEFORE touching selects ──
+  if(!uniData){document.getElementById('ovBody').innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros para ver a ocupação</td></tr>';return;}
   const srch=document.getElementById('ovSrch').value.toLowerCase();
   const catF=document.getElementById('ovCat').value;
   const subF=document.getElementById('ovSub').value;
   const depF=document.getElementById('ovDep').value;
   const alertF=document.getElementById('ovAlerta').value;
-
-  // ── Update category dropdown (preserve selection) ──
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
-  const catSel=document.getElementById('ovCat');
-  catSel.innerHTML='<option value="">Todas as categorias</option>'+allCats.map(c=>`<option value="${c}">${c}</option>`).join('');
-  catSel.value=allCats.includes(catF)?catF:'';
-  const catActive=catSel.value;
-
-  // ── Update subcategory dropdown filtered by active category ──
+  const catSel=document.getElementById('ovCat');catSel.innerHTML='<option value="">Todas as categorias</option>'+allCats.map(c=>`<option value="${c}">${c}</option>`).join('');catSel.value=allCats.includes(catF)?catF:'';const catActive=catSel.value;
   const subSrc=catActive?occParams.filter(p=>p.cat===catActive):occParams;
   const allSubs=[...new Set(subSrc.map(p=>p.subcat).filter(Boolean))].sort();
-  const subSel=document.getElementById('ovSub');
-  subSel.innerHTML='<option value="">Todas as subcategorias</option>'+allSubs.map(c=>`<option value="${c}">${c}</option>`).join('');
-  subSel.value=allSubs.includes(subF)?subF:'';
-  const subActive=subSel.value;
-
-  // ── Filter Unilog data by depot ──
+  const subSel=document.getElementById('ovSub');subSel.innerHTML='<option value="">Todas as subcategorias</option>'+allSubs.map(c=>`<option value="${c}">${c}</option>`).join('');subSel.value=allSubs.includes(subF)?subF:'';const subActive=subSel.value;
   const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2']};
   const filteredClasses=depF?(depClassMap[depF]||[]):null;
   const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
-
-  // ── Build desc map from SAP ──
-  const descMap={};
-  if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
-
-  // ── Aggregate by EAN+Lote (each lote occupies its own positions) ──
-  const byEanLote={};
   const isDC=e=>e&&e.includes('DC');
+  const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
+  const byEanLote={};
   uniFiltered.forEach(r=>{
     if(!r.EAN_norm)return;
     const k=r.EAN_norm+'|'+r.Lote_norm;
     if(!byEanLote[k])byEanLote[k]={ean:r.EAN_norm,lote:r.Lote_norm,desc:descMap[r.EAN_norm]||r.produto||'',qt:0,enderecos:[],endSet:new Set(),qtDC:0};
     byEanLote[k].qt+=r.qt;
-    if(r.endereco&&isDC(r.endereco)){
-      byEanLote[k].qtDC+=r.qt; // DC stock counts for total but not for positions
-      return; // don't add DC as a storage position
-    }
-    if(r.endereco&&!byEanLote[k].endSet.has(r.endereco)){
-      byEanLote[k].endSet.add(r.endereco);
-      byEanLote[k].enderecos.push({end:r.endereco,qt:0});
-    }
+    if(r.endereco&&isDC(r.endereco)){byEanLote[k].qtDC+=r.qt;return;}
+    if(r.endereco&&!byEanLote[k].endSet.has(r.endereco)){byEanLote[k].endSet.add(r.endereco);byEanLote[k].enderecos.push({end:r.endereco,qt:0});}
     if(r.endereco){const e=byEanLote[k].enderecos.find(x=>x.end===r.endereco);if(e)e.qt+=r.qt;}
   });
-
-  // ── Roll up to EAN level ──
   const byEan={};
   Object.values(byEanLote).forEach(v=>{
     if(!byEan[v.ean])byEan[v.ean]={desc:v.desc,qt:0,endSet:new Set(),lotes:[]};
-    byEan[v.ean].qt+=v.qt;
-    v.enderecos.forEach(e=>byEan[v.ean].endSet.add(e.end));
+    byEan[v.ean].qt+=v.qt;v.enderecos.forEach(e=>byEan[v.ean].endSet.add(e.end));
     byEan[v.ean].lotes.push({lote:v.lote,qt:v.qt,nEnderecos:v.enderecos.length,enderecos:v.enderecos,qtDC:v.qtDC||0});
   });
   Object.values(byEan).forEach(v=>v.nEnderecos=v.endSet.size);
-
-  // ── Build rows ──
   let rows=Object.entries(byEan).map(([ean,v])=>{
     const param=occParams.find(p=>p.ean===ean);
-    const qpp=param&&param.qty_per_pos>1?param.qty_per_pos:0; // only meaningful if >1 un/pos
+    const qpp=param&&param.qty_per_pos>1?param.qty_per_pos:0;
     let loteDetail=[],totalSubutil=0,totalConsolidavel=0;
-    // posReal = total lines in Unilog for this EAN (each line = 1 position, Qtd End=1)
     const posReal=v.lotes.reduce((s,l)=>s+l.nEnderecos,0);
-
     v.lotes.forEach(l=>{
-      let posMinima=l.nEnderecos; // default: keep as-is
-      let posExcesso=0,pct=100,faltam=0,subutil=false,consolidacao=null;
+      let posMinima=l.nEnderecos,posExcesso=0,pct=100,faltam=0,subutil=false,consolidacao=null;
       if(qpp>0){
-        posMinima=Math.ceil(l.qt/qpp);
-        const resto=l.qt%qpp;
-        pct=resto===0?100:Math.round(resto/qpp*100);
-        faltam=resto===0?0:qpp-resto;
-        subutil=resto>0&&pct<50;
-        // Only count posExcesso if consolidation is physically possible:
-        // need at least 2 positions where donor.qt + receptor.qt <= qpp
-        posExcesso=0;
+        posMinima=Math.ceil(l.qt/qpp);const resto=l.qt%qpp;
+        pct=resto===0?100:Math.round(resto/qpp*100);faltam=resto===0?0:qpp-resto;subutil=resto>0&&pct<50;
         if(l.nEnderecos>posMinima&&l.enderecos&&l.enderecos.length>1){
           const endSorted2=[...l.enderecos].sort((a,b)=>a.qt-b.qt);
-          // Check if smallest can fit into any other position
-          let consolidable=0;
-          const used=new Set();
-          for(let i=0;i<endSorted2.length;i++){
-            if(used.has(i))continue;
-            for(let j=endSorted2.length-1;j>i;j--){
-              if(used.has(j))continue;
-              if(endSorted2[i].qt+endSorted2[j].qt<=qpp){
-                // Can consolidate i into j — i becomes free
-                consolidable++;
-                used.add(i);
-                used.add(j);
-                break;
-              }
-            }
-          }
+          let consolidable=0;const used=new Set();
+          for(let i=0;i<endSorted2.length;i++){if(used.has(i))continue;for(let j=endSorted2.length-1;j>i;j--){if(used.has(j))continue;if(endSorted2[i].qt+endSorted2[j].qt<=qpp){consolidable++;used.add(i);used.add(j);break;}}}
           posExcesso=consolidable;
         }
-        if(posExcesso>0)totalConsolidavel+=posExcesso;
-        if(subutil)totalSubutil++;
-        // Consolidation instructions — respecting PK rules:
-        // PP→PP ✓, PP→PK ✓ (if space), PK→PK ✓ (if space), PK→PP ✗ (never)
-        if(posExcesso>0&&l.enderecos&&l.enderecos.length>1){
+        if(posExcesso>0){totalConsolidavel+=posExcesso;
           const isPK=e=>e.end&&e.end.includes('PK');
           const endSorted=[...l.enderecos].sort((a,b)=>a.qt-b.qt);
-          const doadores=[];const receptores=[];
-          const used=new Set();
-          // Find valid pairs: donor fits into receptor (same type or PP→PK allowed, PK→PP forbidden)
-          for(let i=0;i<endSorted.length;i++){
-            if(used.has(i))continue;
-            const donor=endSorted[i];
-            for(let j=endSorted.length-1;j>i;j--){
-              if(used.has(j))continue;
-              const recep=endSorted[j];
-              if(donor.qt+recep.qt>qpp)continue; // won't fit
-              if(isPK(donor)&&!isPK(recep))continue; // PK→PP forbidden
-              // Valid pair found
-              doadores.push({...donor,receptor:recep.end,receptorIsPK:isPK(recep)});
-              used.add(i);used.add(j);
-              break;
-            }
-          }
-          if(doadores.length>0){
-            const receptorIsPK=doadores.some(d=>d.receptorIsPK);
-            consolidacao={posExcesso:doadores.length,doadores,receptor:doadores[0],receptorIsPK};
-          }
+          const doadores=[];const used=new Set();
+          for(let i=0;i<endSorted.length;i++){if(used.has(i))continue;const donor=endSorted[i];for(let j=endSorted.length-1;j>i;j--){if(used.has(j))continue;const recep=endSorted[j];if(donor.qt+recep.qt>qpp)continue;if(isPK(donor)&&!isPK(recep))continue;doadores.push({...donor,receptor:recep.end,receptorIsPK:isPK(recep)});used.add(i);used.add(j);break;}}
+          if(doadores.length>0){const receptorIsPK=doadores.some(d=>d.receptorIsPK);consolidacao={posExcesso:doadores.length,doadores,receptor:doadores[0],receptorIsPK};}
         }
+        if(subutil)totalSubutil++;
       }
-      // posMinima tracked per lote in loteDetail
       loteDetail.push({lote:l.lote,qt:l.qt,posMinima,posReais:l.nEnderecos,posExcesso,pct,faltam,subutil,consolidacao,qtDC:l.qtDC||0});
     });
-
-    const poupanca=totalConsolidavel;
-    const posOtimizadasFinal=posReal-poupanca; // real positions after consolidation
-    return{ean,desc:v.desc,qt:v.qt,param,posReal,posOtimizadas:posOtimizadasFinal,poupanca,
-      underutil:totalSubutil>0||totalConsolidavel>0,loteDetail,totalSubutil,totalConsolidavel,
-      nLotes:v.lotes.length,cat:param?.cat||'',subcat:param?.subcat||''};
+    const poupanca=totalConsolidavel;const posOtimizadas=posReal-poupanca;
+    return{ean,desc:v.desc,qt:v.qt,param,posReal,posOtimizadas,poupanca,underutil:totalSubutil>0||totalConsolidavel>0,loteDetail,totalSubutil,totalConsolidavel,nLotes:v.lotes.length,cat:param?.cat||'',subcat:param?.subcat||''};
   });
-
-  // ── Apply filters (using captured values, NOT re-reading selects) ──
   if(srch)rows=rows.filter(r=>r.ean.includes(srch)||r.desc.toLowerCase().includes(srch));
   if(catActive)rows=rows.filter(r=>r.cat===catActive);
   if(subActive)rows=rows.filter(r=>r.subcat===subActive);
   if(alertF==='sub')rows=rows.filter(r=>r.underutil);
   else if(alertF==='sem')rows=rows.filter(r=>!r.param);
-
-  // ── Sort: cat → subcat → desc ──
-  rows.sort((a,b)=>{
-    const cc=String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'));if(cc!==0)return cc;
-    const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;
-    return String(a.desc||'').localeCompare(String(b.desc||''));
-  });
-
-  // ── KPIs ──
-  const wP=rows.filter(r=>r.param).length;
-  // Count unique enderecos only for EANs in filtered rows
+  rows.sort((a,b)=>{const cc=String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'));if(cc!==0)return cc;const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;return String(a.desc||'').localeCompare(String(b.desc||''));});
   const filteredEANs=new Set(rows.map(r=>r.ean));
-  const filteredEnderecos=new Set(
-    uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!==''&&filteredEANs.has(r.EAN_norm))
-    .map(r=>r.endereco)
-  );
-  const tP=filteredEnderecos.size;
-  const tPoup=rows.reduce((s,r)=>s+(r.poupanca||0),0);
-  const tOpt=tP-tPoup;
-  const uC=rows.reduce((s,r)=>s+(r.totalSubutil||0)+(r.totalConsolidavel||0),0);
+  const filteredEnderecos=new Set(uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!==''&&!isDC(r.endereco)&&filteredEANs.has(r.EAN_norm)).map(r=>r.endereco));
+  const tP=filteredEnderecos.size;const tPoup=rows.reduce((s,r)=>s+(r.poupanca||0),0);const tOpt=tP-tPoup;const uC=rows.reduce((s,r)=>s+(r.totalSubutil||0)+(r.totalConsolidavel||0),0);
+  const wP=rows.filter(r=>r.param).length;
   document.getElementById('ovKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com parâmetro</div><div class="kv g">${fmt(wP)}</div><div class="ks">${rows.length?Math.round(wP/rows.length*100):0}%</div></div>
@@ -1435,75 +1237,54 @@ function renderOccView(){
     <div class="kpi"><div class="kl">Posições a Libertar</div><div class="kv ${tPoup>0?'r':''}">${fmt(tPoup)}</div><div class="ks">${tP>0?Math.round(tPoup/tP*100):0}% do total</div></div>
     <div class="kpi"><div class="kl">Lotes Subaproveit.</div><div class="kv y">${fmt(uC)}</div></div>
   `;
-
-  // ── Render table ──
   const body=document.getElementById('ovBody');body.innerHTML='';
   for(const r of rows){
-    const pct=r.lastPct;
+    const pct=r.loteDetail.length>0?r.loteDetail[r.loteDetail.length-1].pct:null;
     const col=pct===null?'':pct<30?'var(--red)':pct<70?'var(--yellow)':'var(--green)';
     let alert='';
-    // Special case: produto sem lote obrigatório with multiple lotes → fix Unilog cadastro
     if(r.param&&r.param.lote_obrigatorio===false&&r.nLotes>1){
-      const allEnds=r.loteDetail.flatMap(l=>l.enderecos||[]).map(e=>e.end||e).filter(Boolean);
-      alert=`<div><span class="badge bwarn" style="background:#fde68a;color:#92400e">⚠ Produto sem lote — ${r.nLotes} lotes no Unilog</span>
-        <div style="font-size:10px;color:var(--text2);margin-top:3px">
-          ▸ Solicitar à Unilog: remover lotes do cadastro e unificar todas as posições numa única
-        </div></div>`;
+      alert=`<div><span class="badge bwarn" style="background:#fde68a;color:#92400e">⚠ Produto sem lote — ${r.nLotes} lotes no Unilog</span><div style="font-size:10px;color:var(--text2);margin-top:3px">▸ Solicitar à Unilog: remover lotes e unificar posições</div></div>`;
     } else if(!r.param){alert='<span class="badge bgray">Sem parâm.</span>';}
     else if(r.nLotes===0){alert='—';}
     else{
-      // Check for consolidation opportunities (same lote in more positions than needed)
       const consol=r.loteDetail.filter(l=>l.consolidacao&&l.consolidacao.posExcesso>0);
-      const subutil=r.loteDetail.filter(l=>l.subutil&&!l.consolidacao);
       if(consol.length>0){
         const consolHtml=consol.map(l=>{
-          const {doadores,receptor,posExcesso}=l.consolidacao;
-          const tipoMov=l.consolidacao?.receptorIsPK?'PP→PK':'PP→PP';
-          const badgeColor=l.consolidacao?.receptorIsPK?'#dbeafe':'#dcfce7';
-          const badgeLabel=l.consolidacao?.receptorIsPK?'📦 PP→PK':'📦 Consolidar PP';
-          return `<div style="font-size:10px;margin-top:3px">
-            <span class="badge binfo" style="background:${badgeColor}">${badgeLabel} — Lote ${l.lote||'—'} (${posExcesso} pos.)</span>
-            ${doadores.map(d=>`<div style="font-size:10px;color:var(--text2);margin-top:2px;padding-left:8px">
-              ▸ Mover <strong>${fmt(d.qt)}</strong> un de <span style="font-family:var(--mono);background:#e2e8f0;padding:1px 5px;border-radius:3px">${d.end}</span>
-              → <span style="font-family:var(--mono);background:${d.receptorIsPK?'#dbeafe':'#dcfce7'};padding:1px 5px;border-radius:3px">${d.receptor}</span>
-              <span style="color:var(--muted)">(liberta 1 posição)</span>
-            </div>`).join('')}
-          </div>`;
+          const{doadores,posExcesso}=l.consolidacao;
+          const badgeColor=l.consolidacao.receptorIsPK?'#dbeafe':'#dcfce7';
+          const badgeLabel=l.consolidacao.receptorIsPK?'📦 PP→PK':'📦 Consolidar PP';
+          return `<div style="font-size:10px;margin-top:3px"><span class="badge binfo" style="background:${badgeColor}">${badgeLabel} — Lote ${l.lote||'—'} (${posExcesso} pos.)</span>${doadores.map(d=>`<div style="font-size:10px;color:var(--text2);margin-top:2px;padding-left:8px">▸ Mover <strong>${fmt(d.qt)}</strong> un de <span style="font-family:var(--mono);background:#e2e8f0;padding:1px 5px;border-radius:3px">${d.end}</span> → <span style="font-family:var(--mono);background:${d.receptorIsPK?'#dbeafe':'#dcfce7'};padding:1px 5px;border-radius:3px">${d.receptor}</span> <span style="color:var(--muted)">(liberta 1 posição${posExcesso>1?'':''})</span></div>`).join('')}</div>`;
         }).join('');
         alert=`<span class="badge binfo">🔧 ${consol.length} consolid.</span>${consolHtml}`;
-      } else if(r.totalSubutil>0){
-        // Suboptimal positions but no action possible — show nothing
-        alert='';
-      } else {
+      } else if(r.totalSubutil>0){alert='';}
+      else{
         const dcLotes=r.loteDetail.filter(l=>l.qtDC>0);
-        if(dcLotes.length>0){
-          const dcHtml=dcLotes.map(l=>`<div style="font-size:10px;color:var(--text2);margin-top:2px">▸ Lote ${l.lote||'—'}: <strong>${fmt(l.qtDC)}</strong> un em DOCA — armazenar</div>`).join('');
-          alert=`<div><span class="badge bwarn">🚚 Stock em DOCA</span>${dcHtml}</div>`;
-        } else {
-          alert='<span class="badge bok">✓ Posições cheias</span>';
-        }
+        if(dcLotes.length>0){const dcHtml=dcLotes.map(l=>`<div style="font-size:10px;color:var(--text2);margin-top:2px">▸ Lote ${l.lote||'—'}: <strong>${fmt(l.qtDC)}</strong> un em DOCA — armazenar</div>`).join('');alert=`<div><span class="badge bwarn">🚚 Stock em DOCA</span>${dcHtml}</div>`;}
+        else{alert='<span class="badge bok">✓ Posições cheias</span>';}
       }
     }
-    const posRealHtml=r.posReal>0?`<span style="font-weight:600;color:${r.posDiff!==null&&r.posDiff>0?'var(--red)':r.posDiff===0?'var(--green)':'var(--text)'}">${fmt(r.posReal)}${r.posDiff!==null&&r.posDiff>0?` <span style="font-size:10px">(+${r.posDiff})</span>`:''}</span>`:'—';
-    const tr=document.createElement('tr');
-    if(r.underutil)tr.style.background='#fffbeb';
+    const deps=DKS.filter(dk=>(reconData[dk]||[]).some(x=>x.EAN_norm===r.ean));
+    const depHtml=deps.length?deps.map(dk=>`<span class="badge bgray" style="margin-right:2px">${DEPOT_MAP[dk].label.split('—')[1].trim()}</span>`).join(''):'—';
+    const tr=document.createElement('tr');if(r.underutil)tr.style.background='#fffbeb';
     tr.innerHTML=`
       <td><span class="badge bneu">${r.ean}</span></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc}</td>
       <td style="font-size:11px">${r.cat||'—'}</td>
       <td style="font-size:11px">${r.subcat||'—'}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc}</td>
       <td class="num">${fmt(r.qt)}</td>
       <td class="num">${r.param?fmt(r.param.qty_per_pos):'—'}</td>
       <td class="num"><strong>${fmt(r.posReal)}</strong></td>
       <td class="num">${r.posOtimizadas!==null?fmt(r.posOtimizadas):'—'}</td>
-      <td class="num">${r.poupanca>0?`<strong>-${fmt(r.poupanca)}</strong>`:'—'}</td>
-      <td style="font-size:11px">${(()=>{const deps=DKS.filter(dk=>(reconData[dk]||[]).some(x=>x.EAN_norm===r.ean));return deps.length?deps.map(dk=>`<span class="badge bgray" style="margin-right:2px">${DEPOT_MAP[dk].label.split('—')[1].trim()}</span>`).join(''):'—';})()}</td>
+      <td class="num">${r.poupanca>0?`<strong style="color:var(--red)">-${fmt(r.poupanca)}</strong>`:'—'}</td>
+      <td style="font-size:11px">${depHtml}</td>
       <td style="min-width:220px">${alert}</td>
     `;
     body.appendChild(tr);
   }
   if(!rows.length)eRow(body,11,'Nenhum resultado');
 }
+
+// ── OCC BASE ──
 function renderOccBase(){
   const srch=document.getElementById('obSrch').value.toLowerCase();
   const catF=document.getElementById('obCat').value;
@@ -1513,41 +1294,18 @@ function renderOccBase(){
   const grid=document.getElementById('occBaseGrid');grid.innerHTML='';
   document.getElementById('occBaseEmpty').style.display=params.length===0?'block':'none';
   for(const p of params){
-    const card=document.createElement('div');card.className='oc';
     const needsReview=!p.qty_per_pos||p.qty_per_pos<=1;
+    const card=document.createElement('div');card.className='oc';
     if(needsReview)card.style.borderLeft='3px solid var(--yellow)';
-    card.innerHTML=`
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
-        <div style="flex:1;min-width:0;padding-right:8px">
-          <div style="font-size:12px;font-weight:600;margin-bottom:2px;line-height:1.3">${p.descricao||p.ean}</div>
-          <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">${p.ean}</div>
-          <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
-            ${p.cat?`<span class="badge bgray">${p.cat}</span>`:''}
-            ${p.subcat?`<span class="badge bgray">${p.subcat}</span>`:''}
-            ${p.lote_obrigatorio?'<span class="badge binfo">Lote obrig.</span>':''}
-          </div>
-        </div>
-        <div style="text-align:right;flex-shrink:0">
-          <div style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--red)">${fmt(p.qty_per_pos)}</div>
-          <div style="font-size:9px;color:var(--muted);text-transform:uppercase">un/posição</div>
-        </div>
-      </div>
-      ${p.notes?`<div style="font-size:10px;color:var(--muted);margin-bottom:8px">${p.notes}</div>`:''}
-      <div style="display:flex;gap:6px">
-        <button class="btn bg bs" onclick='editOcc(${JSON.stringify(p)})'>✏️ Editar</button>
-        <button class="btn bg bs" onclick="delOcc(${p.id})">🗑️</button>
-      </div>
-    `;
+    card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><div style="flex:1;min-width:0;padding-right:8px"><div style="font-size:12px;font-weight:600;margin-bottom:2px;line-height:1.3">${p.descricao||p.ean}</div><div style="font-family:var(--mono);font-size:10px;color:var(--muted)">${p.ean}</div><div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${p.cat?`<span class="badge bgray">${p.cat}</span>`:''} ${p.subcat?`<span class="badge bgray">${p.subcat}</span>`:''} ${p.lote_obrigatorio?'':'<span class="badge binfo">Sem lote</span>'}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--red)">${fmt(p.qty_per_pos)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">un/posição</div></div></div>${p.notes?`<div style="font-size:10px;color:var(--muted);margin-bottom:8px">${p.notes}</div>`:''}<div style="display:flex;gap:6px"><button class="btn bg bs" onclick='editOcc(${JSON.stringify(p)})'>✏️ Editar</button><button class="btn bg bs" onclick="delOcc(${p.id})">🗑️</button></div>`;
     grid.appendChild(card);
   }
 }
-
-// ── OCC MODAL ──
 function openOccModal(pre){
   ['m_ean','m_desc','m_cat','m_subcat','m_notes'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('m_qty').value='';document.getElementById('m_lote_obrig').value='true';
   document.getElementById('m_err').style.display='none';document.getElementById('m_ean_info').textContent='';editOccId=null;
-  if(pre){document.getElementById('m_ean').value=pre.ean||'';document.getElementById('m_desc').value=pre.descricao||'';document.getElementById('m_cat').value=pre.cat||'';document.getElementById('m_subcat').value=pre.subcat||'';document.getElementById('m_qty').value=pre.qty_per_pos||'';document.getElementById('m_lote_obrig').value=String(pre.lote_obrigatorio||false);document.getElementById('m_notes').value=pre.notes||'';editOccId=pre.id;lookupEAN();}
+  if(pre){document.getElementById('m_ean').value=pre.ean||'';document.getElementById('m_desc').value=pre.descricao||'';document.getElementById('m_cat').value=pre.cat||'';document.getElementById('m_subcat').value=pre.subcat||'';document.getElementById('m_qty').value=pre.qty_per_pos||'';document.getElementById('m_lote_obrig').value=String(pre.lote_obrigatorio!==false);document.getElementById('m_notes').value=pre.notes||'';editOccId=pre.id;lookupEAN();}
   document.getElementById('occModal').classList.add('open');
 }
 function editOcc(p){openOccModal(p);}
@@ -1569,6 +1327,24 @@ async function saveOcc(){
   if(error){errEl.textContent='Erro: '+error.message;errEl.style.display='block';return;}
   closeOccModal();await loadOccParams();renderOccBase();renderOccView();toast('Guardado ✓','success');
 }
+function exportOccXlsx(){
+  if(!uniData)return;
+  const srch=document.getElementById('ovSrch').value.toLowerCase();
+  const catF=document.getElementById('ovCat').value;
+  const subF=document.getElementById('ovSub').value;
+  const depF=document.getElementById('ovDep').value;
+  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2']};
+  const filteredClasses=depF?(depClassMap[depF]||[]):null;
+  const uniF=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
+  const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
+  const byEan={};uniF.forEach(r=>{if(!r.EAN_norm||r.endereco?.includes('DC'))return;if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={desc:descMap[r.EAN_norm]||r.produto||'',qt:0};byEan[r.EAN_norm].qt+=r.qt;});
+  let rows=Object.entries(byEan).map(([ean,v])=>{const p=occParams.find(x=>x.ean===ean);const deps=DKS.filter(dk=>(reconData[dk]||[]).some(x=>x.EAN_norm===ean)).map(dk=>DEPOT_MAP[dk].label.split('—')[1].trim()).join(', ');return{EAN:ean,Descricao:v.desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',Depositos:deps,StockUnilog:v.qt,UnPosicao:p?.qty_per_pos||'',LoteObrigatorio:p?.lote_obrigatorio!==false?'Sim':'Não'};});
+  if(srch)rows=rows.filter(r=>r.EAN.includes(srch)||r.Descricao.toLowerCase().includes(srch));
+  if(catF)rows=rows.filter(r=>r.Categoria===catF);
+  if(subF)rows=rows.filter(r=>r.Subcategoria===subF);
+  const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Ocupação');
+  XLSX.writeFile(wb,`ocupacao_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
 
 // ── HISTORY ──
 async function renderHistory(){
@@ -1578,37 +1354,6 @@ async function renderHistory(){
     if(!data||!data.length){empty.style.display='block';return;}empty.style.display='none';
     for(const row of data){const dt=new Date(row.uploaded_at);const summary=row.summary?JSON.parse(row.summary):{};const td=Object.values(summary).reduce((s,d)=>s+(d.diffs||0),0);const ti=Object.values(summary).reduce((s,d)=>s+(d.total||0),0);const pct=ti>0?Math.round((ti-td)/ti*100):0;const tr=document.createElement('tr');tr.innerHTML=`<td style="font-family:var(--mono);font-size:11px">${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td><td><span class="co-chip">${row.company}</span></td><td class="num">${fmt(row.sap_rows)}</td><td class="num">${fmt(row.unilog_rows)}</td><td class="num ${td>0?'neg':''}">${fmt(td)}</td><td class="num ${pct>=95?'pos':pct<80?'neg':''}">${pct}%</td>`;body.appendChild(tr);}
   }catch(e){}
-}
-
-// ── EXPORT RECON XLSX ──
-function exportReconXlsx(){
-  if(!reconData[activeDepot])return;
-  // Apply same filters as renderRecon
-  let rows=[...(reconData[activeDepot]||[])];
-  const srch=document.getElementById('reconSrch').value.toLowerCase();
-  const estado=document.getElementById('reconEstado').value;
-  const catF=document.getElementById('reconCat').value;
-  const subF=document.getElementById('reconSub').value;
-  const valF=document.getElementById('reconValidade').value;
-  const minDiffVal=parseFloat(document.getElementById('reconMinDiff').value)||0;
-  if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
-  if(!showAll)rows=rows.filter(r=>r.diff!==0);
-  if(estado==='diff')rows=rows.filter(r=>r.diff!==0);
-  else if(estado==='only_sap')rows=rows.filter(r=>r.qt_uni===0&&r.qt_sap>0);
-  else if(estado==='only_uni')rows=rows.filter(r=>r.qt_sap===0&&r.qt_uni>0);
-  else if(estado==='diverg')rows=rows.filter(r=>r.qt_sap>0&&r.qt_uni>0&&r.diff!==0);
-  else if(estado==='ok')rows=rows.filter(r=>r.diff===0);
-  if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===catF;});}
-  if(subF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.subcat||'')===subF;});}
-  if(minDiffVal>0)rows=rows.filter(r=>Math.abs(r.diff)>=minDiffVal);
-  const data=rows.map(r=>{
-    const notaKey=activeDepot+'|'+r.EAN_norm+'|'+r.Lote_norm;
-    const p=occParams.find(x=>x.ean===r.EAN_norm);
-    return{EAN:r.EAN_norm,Descricao:r.desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',Lote:r.Lote_norm,SAP:r.qt_sap,Unilog:r.qt_uni,Diferenca:r.diff,Estado:r.qt_uni===0&&r.qt_sap>0?'Só SAP':r.qt_sap===0&&r.qt_uni>0?'Só Unilog':r.diff!==0?'Divergência':'OK',Recomendacao:autoRecomendacao(r),LocalizacaoUnilog:(r.uni_classes||[]).join(', '),Notas:reconNotas[notaKey]?.nota||''};
-  });
-  const ws=XLSX.utils.json_to_sheet(data);
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,DEPOT_MAP[activeDepot].label);
-  XLSX.writeFile(wb,`conciliacao_${company}_dep${activeDepot}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 // ── SORT ──
