@@ -999,9 +999,11 @@ function renderCadastro(){
   const subF=document.getElementById('cadSub').value;
   const loteF=document.getElementById('cadLote').value;
   const semF=document.getElementById('cadSemParam').value;
-  // Only EANs with stock > 0 in valid deposits (dep 0033 already excluded in normSap)
+  // Only EANs with total stock > 0 across valid deposits
+  const eanStock={};
+  sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanStock[r.EAN_norm])eanStock[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc,total:0};eanStock[r.EAN_norm].total+=r.qt;});
   const eanMap={};
-  sapData.forEach(r=>{if(!r.EAN_norm||r.qt<=0)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};});
+  Object.values(eanStock).forEach(e=>{if(e.total>0)eanMap[e.ean]=e;});
   let items=Object.values(eanMap).map(e=>{
     const p=occParams.find(x=>x.ean===e.ean);
     const edited=cadEdits[e.ean];
@@ -1122,7 +1124,7 @@ function exportCadastroXlsx(){
   const subF=document.getElementById('cadSub').value;
   const loteF=document.getElementById('cadLote').value;
   const semF=document.getElementById('cadSemParam').value;
-  const eanMap={};sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};});
+  const eanStock2={};sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanStock2[r.EAN_norm])eanStock2[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc,total:0};eanStock2[r.EAN_norm].total+=r.qt;});const eanMap=Object.fromEntries(Object.entries(eanStock2).filter(([,v])=>v.total>0));
   let items=Object.values(eanMap).map(e=>{const p=occParams.find(x=>x.ean===e.ean);return{ean:e.ean,desc:e.desc,cat:p?.cat||'',subcat:p?.subcat||'',qty_per_pos:p?.qty_per_pos||null,lote_obrigatorio:p?.lote_obrigatorio!==undefined?p.lote_obrigatorio:true,notes:p?.notes||'',hasParam:!!p};});
   if(srch)items=items.filter(i=>i.ean.includes(srch)||i.desc.toLowerCase().includes(srch));
   if(catF==='__sem__')items=items.filter(i=>!i.cat);else if(catF)items=items.filter(i=>i.cat===catF);
