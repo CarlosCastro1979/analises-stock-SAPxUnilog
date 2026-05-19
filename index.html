@@ -328,6 +328,7 @@ select.cad-inp{cursor:pointer;}
         <th onclick="doSort('susp','qt')" class="num">Qt Unilog</th>
         <th>Depósito / Classe</th>
         <th>Lote SAP Similar</th>
+        <th>Recomendação</th>
       </tr></thead>
       <tbody id="suspBody"></tbody>
     </table></div>
@@ -663,11 +664,10 @@ function buildSusp(){
     // Only include if EAN exists in SAP (wrong lote) — unknown EANs go to "Só Unilog"
     if(!sapEANs.has(EAN_norm))continue;
     const desc=dm[EAN_norm]||'';
-    const param=occParams.find(p=>p.ean===EAN_norm);const cat=param?.cat||autoCat(desc).cat||'';
     const depots=[...classes].map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));return dk?`Dep ${dk.padStart(4,'0')} / Cl.${cl}`:cl;});
     const sapL=Object.keys(sapLotes[EAN_norm]||{});
     let best=null;for(const sl of sapL){const r=simRatio(Lote_norm,sl);if(r>=0.7&&r<1.0){if(!best||r>best.ratio)best={lote:sl,ratio:r,qt:sapLotes[EAN_norm][sl]};}}
-    suspData.push({EAN_norm,Lote_norm,qt,desc,similar:best,depots,cat});
+    suspData.push({EAN_norm,Lote_norm,qt,desc,similar:best,depots});
   }
   const badge=document.getElementById('suspBadge');badge.textContent=suspData.length;badge.style.display=suspData.length>0?'':'none';
 }
@@ -1053,7 +1053,7 @@ function renderSusp(){
   const minQt=parseInt(document.getElementById('suspMinQt').value)||0;
 
   // Update cat dropdown
-  const cats=[...new Set(suspData.map(r=>r.cat).filter(Boolean))].sort();
+  const cats=[...new Set(suspData.map(r=>occParams.find(p=>p.ean===r.EAN_norm)?.cat).filter(Boolean))].sort();
   const catSel=document.getElementById('suspCat');const catCur=catSel.value;
   catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
   catSel.value=cats.includes(catCur)?catCur:'';
@@ -1064,7 +1064,7 @@ function renderSusp(){
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(flt==='similar')rows=rows.filter(r=>r.similar);
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
-  if(catF)rows=rows.filter(r=>r.cat===catF);
+  if(catF)rows=rows.filter(r=>(occParams.find(p=>p.ean===r.EAN_norm)?.cat||'')=== catF);
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
   applySort('susp',rows);
 
@@ -1086,15 +1086,31 @@ function renderSusp(){
       const col=pct>=90?'var(--red)':pct>=80?'var(--yellow)':'var(--blue)';
       simHtml=`<div class="sb"><span class="badge bwarn">Lote SAP: <strong>${r.similar.lote}</strong></span><div class="pw" style="width:50px"><div class="pf" style="width:${pct}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono)">${pct}%</span><span style="font-size:10px;color:var(--muted)">Qt:${fmt(r.similar.qt)}</span></div>`;
     }
+    const param=occParams.find(p=>p.ean===r.EAN_norm);
+    let recHtml='';
+    if(param&&param.lote_obrigatorio===false){
+      recHtml='<span class="badge bwarn" style="background:#fde68a;color:#92400e">Produto sem lote — retirar lote do WMS</span>';
+    } else if(r.similar){
+      recHtml=`<span class="badge binfo">Corrigir lote: <strong>${r.similar.lote}</strong></span>`;
+    } else {
+      // Check if SAP has same EAN without lote
+      const sapSemLote=sapData&&sapData.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm==='');
+      if(sapSemLote){
+        recHtml='<span class="badge bwarn">Corrigir lote no WMS (SAP sem lote)</span>';
+      } else {
+        recHtml='<span style="color:var(--muted);font-size:11px">Investigar</span>';
+      }
+    }
     const tr=document.createElement('tr');
     tr.innerHTML=`
-      <td style="font-size:11px">${r.cat||'—'}</td>
+      <td style="font-size:11px">${param?.cat||'—'}</td>
       <td><span class="badge bneu">${r.EAN_norm}</span></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
       <td><span class="badge berr">${r.Lote_norm}</span></td>
       <td class="num">${fmt(r.qt)}</td>
       <td>${depotHtml||'—'}</td>
       <td>${simHtml}</td>
+      <td>${recHtml}</td>
     `;
     body.appendChild(tr);
   }
@@ -1257,6 +1273,30 @@ function exportCadastroXlsx(){
   const rows=items.map(i=>({EAN:i.ean,Descricao:i.desc,Categoria:i.cat,Subcategoria:i.subcat,UnPosicao:i.qty_per_pos||'',LoteObrigatorio:i.lote_obrigatorio?'Sim':'Não',Notas:i.notes}));
   const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Cadastro');
   XLSX.writeFile(wb,`cadastro_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function exportSuspXlsx(){
+  if(!suspData.length){toast('Sem dados para exportar','error');return;}
+  let rows=[...suspData];
+  const srch=document.getElementById('suspSrch').value.toLowerCase();
+  const flt=document.getElementById('suspFlt').value;
+  const catFActive=document.getElementById('suspCat').value;
+  const minQt=parseInt(document.getElementById('suspMinQt').value)||0;
+  if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||(r.desc||'').toLowerCase().includes(srch)||(r.Lote_norm||'').toLowerCase().includes(srch));
+  if(flt==='similar')rows=rows.filter(r=>r.similar);
+  if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
+  if(catFActive)rows=rows.filter(r=>(occParams.find(p=>p.ean===r.EAN_norm)?.cat||'')=== catFActive);
+  if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
+  if(!rows.length){toast('Sem dados','error');return;}
+  const data=rows.map(r=>{
+    const p=occParams.find(x=>x.ean===r.EAN_norm);
+    let rec='';
+    if(p&&p.lote_obrigatorio===false)rec='Produto sem lote — retirar lote do WMS';
+    else if(r.similar)rec='Corrigir lote: '+r.similar.lote;
+    else{const ss=sapData&&sapData.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm==='');rec=ss?'Corrigir lote no WMS (SAP sem lote)':'Investigar';}
+    return{Categoria:p?.cat||'',EAN:r.EAN_norm,Descricao:r.desc,LoteUnilog:r.Lote_norm,QtUnilog:r.qt,DepositoClasse:(r.depots||[]).join(' | '),LoteSAPSimilar:r.similar?.lote||'',Similaridade:r.similar?Math.round(r.similar.ratio*100)+'%':'',QtSAP:r.similar?.qt||'',Recomendacao:rec};
+  });
+  const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Lotes Suspeitos');
+  XLSX.writeFile(wb,`lotes_suspeitos_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 function exportDupXlsx(){
   const dups=buildDuplicados();if(!dups.length){toast('Sem duplicados','error');return;}
