@@ -203,6 +203,7 @@ select.cad-inp{cursor:pointer;}
   <div class="nt" data-page="somunilog">⚠️ Só Unilog<span id="suBadge" class="bc" style="display:none"></span></div>
   <div class="nt" data-page="cadastro">🗂️ Cadastro</div>
   <div class="nt" data-page="occupation">📦 Ocupação</div>
+  <div class="nt" data-page="reclamacoes">🚨 Reclamações<span id="recBadge" class="bc" style="display:none;background:#f59e0b;color:#fff"></span></div>
   <div class="nt" data-page="history">📋 Histórico</div>
 </div>
 
@@ -496,6 +497,181 @@ select.cad-inp{cursor:pointer;}
   </div>
 </div>
 
+<!-- ══ RECLAMAÇÕES ══ -->
+<div class="page" id="page-reclamacoes">
+  <div class="its">
+    <div class="it active" onclick="recTab('lista',this)">📋 Reclamações</div>
+    <div class="it" onclick="recTab('dashboard',this)">📊 Dashboard</div>
+    <div class="it" onclick="recTab('config',this)">⚙️ Configuração</div>
+  </div>
+
+  <!-- LISTA -->
+  <div id="rec-lista">
+    <div class="card">
+      <div class="ch">
+        <div class="ct">Registo de Reclamações</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn bg bs" onclick="exportRecXlsx()">⬇ Excel</button>
+          <button class="btn bp bs" onclick="openRecModal()">+ Nova Reclamação</button>
+        </div>
+      </div>
+      <div class="tb">
+        <input class="inp is" id="recSrch" placeholder="Pesquisar…" oninput="renderRecLista()">
+        <select class="inp" id="recArea" onchange="renderRecLista()">
+          <option value="">Todas as áreas</option>
+          <option value="armazem">Armazém</option>
+          <option value="transporte">Transporte</option>
+        </select>
+        <select class="inp" id="recEstado" onchange="renderRecLista()">
+          <option value="">Todos os estados</option>
+          <option value="aberta">Aberta</option>
+          <option value="em_tratamento">Em Tratamento</option>
+          <option value="encerrada">Encerrada</option>
+        </select>
+        <select class="inp" id="recMes" onchange="renderRecLista()"><option value="">Todos os meses</option></select>
+      </div>
+      <div class="kr" id="recKpis"></div>
+      <div class="tw2"><table>
+        <thead><tr>
+          <th onclick="doSort('rec','numero')">Nº</th>
+          <th onclick="doSort('rec','criado_em')">Data</th>
+          <th onclick="doSort('rec','area')">Área</th>
+          <th onclick="doSort('rec','tipo_nome')">Tipo</th>
+          <th>Descrição</th>
+          <th onclick="doSort('rec','estado')">Estado</th>
+          <th onclick="doSort('rec','criado_por_nome')">Criado por</th>
+          <th>Prazo</th>
+          <th>Acções</th>
+        </tr></thead>
+        <tbody id="recBody"></tbody>
+      </table></div>
+      <div id="recEmpty" class="empty" style="display:none"><div class="empty-i">🚨</div><div>Sem reclamações registadas</div></div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="rec-dashboard" style="display:none">
+    <div class="card">
+      <div class="ch">
+        <div class="ct">Resumo de Reclamações</div>
+        <select class="inp" id="dashMes" onchange="renderDashboard()"><option value="">Todos os meses</option></select>
+      </div>
+      <div class="kr" id="dashKpis"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px" id="dashGrids"></div>
+    </div>
+  </div>
+
+  <!-- CONFIG -->
+  <div id="rec-config" style="display:none">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <!-- Tipos -->
+      <div class="card">
+        <div class="ch">
+          <div class="ct">Tipos de Reclamação</div>
+          <button class="btn bp bs" onclick="openTipoModal()">+ Novo Tipo</button>
+        </div>
+        <div id="tiposList"></div>
+      </div>
+      <!-- Utilizadores -->
+      <div class="card">
+        <div class="ch">
+          <div class="ct">Utilizadores</div>
+          <button class="btn bp bs" onclick="openUserModal()">+ Novo Utilizador</button>
+        </div>
+        <div id="usersList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL NOVA RECLAMAÇÃO -->
+<div class="mb" id="recModal" onclick="if(event.target===this)closeRecModal()">
+  <div class="modal" style="width:580px">
+    <div class="mt" id="recModalTitle">Nova Reclamação</div>
+    <!-- Login section -->
+    <div id="recLoginSection">
+      <div class="fr"><label class="fl">O seu nome</label>
+        <select class="fi" id="recUserSel"><option value="">Seleccionar utilizador…</option></select>
+      </div>
+      <div class="fr"><label class="fl">PIN</label>
+        <input class="fi" id="recUserPin" type="password" maxlength="4" placeholder="4 dígitos">
+      </div>
+      <div id="recLoginErr" style="font-size:11px;color:var(--red);display:none;margin-top:4px"></div>
+      <div class="mbb"><button class="btn bg" onclick="closeRecModal()">Cancelar</button><button class="btn bp" onclick="recLogin()">Entrar</button></div>
+    </div>
+    <!-- Form section (shown after login) -->
+    <div id="recFormSection" style="display:none">
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:12px;color:#15803d">
+        A criar como: <strong id="recLoginName"></strong>
+      </div>
+      <div class="fg">
+        <div class="fr"><label class="fl">Área</label>
+          <select class="fi" id="recFormArea" onchange="loadTiposForArea()">
+            <option value="armazem">Armazém</option>
+            <option value="transporte">Transporte</option>
+          </select>
+        </div>
+        <div class="fr"><label class="fl">Tipo</label>
+          <select class="fi" id="recFormTipo"><option value="">Seleccionar…</option></select>
+        </div>
+      </div>
+      <div class="fr"><label class="fl">Descrição</label>
+        <textarea class="fi" id="recFormDesc" rows="4" placeholder="Descreve o problema em detalhe…" style="resize:vertical"></textarea>
+      </div>
+      <div id="recFormErr" style="font-size:11px;color:var(--red);display:none;margin-top:4px"></div>
+      <div class="mbb"><button class="btn bg" onclick="recLogout()">← Trocar utilizador</button><button class="btn bp" onclick="submitRec()">Registar Reclamação</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DETALHE RECLAMAÇÃO -->
+<div class="mb" id="recDetailModal" onclick="if(event.target===this)closeRecDetail()">
+  <div class="modal" style="width:680px;max-height:90vh;overflow-y:auto">
+    <div id="recDetailContent"></div>
+  </div>
+</div>
+
+<!-- MODAL TIPO -->
+<div class="mb" id="tipoModal" onclick="if(event.target===this)closeTipoModal()">
+  <div class="modal" style="width:400px">
+    <div class="mt">Tipo de Reclamação</div>
+    <div class="fr"><label class="fl">Área</label><select class="fi" id="tipoArea"><option value="armazem">Armazém</option><option value="transporte">Transporte</option></select></div>
+    <div class="fr"><label class="fl">Nome</label><input class="fi" id="tipoNome" placeholder="Ex: Erro de picking"></div>
+    <div class="fr"><label class="fl">Prazo de resposta (horas)</label><input class="fi" id="tipoPrazo" type="number" value="48" min="1"></div>
+    <div id="tipoErr" style="font-size:11px;color:var(--red);display:none;margin-top:4px"></div>
+    <div class="mbb"><button class="btn bg" onclick="closeTipoModal()">Cancelar</button><button class="btn bp" onclick="saveTipo()">Guardar</button></div>
+  </div>
+</div>
+
+<!-- MODAL UTILIZADOR -->
+<div class="mb" id="userModal" onclick="if(event.target===this)closeUserModal()">
+  <div class="modal" style="width:400px">
+    <div class="mt">Utilizador</div>
+    <div class="fr"><label class="fl">Nome</label><input class="fi" id="userName" placeholder="Nome completo"></div>
+    <div class="fr"><label class="fl">Papel</label><select class="fi" id="userPapel"><option value="delta">Delta</option><option value="unilog">Unilog</option></select></div>
+    <div class="fr"><label class="fl">PIN (4 dígitos)</label><input class="fi" id="userPin" type="password" maxlength="4" placeholder="1234"></div>
+    <div id="userErr" style="font-size:11px;color:var(--red);display:none;margin-top:4px"></div>
+    <div class="mbb"><button class="btn bg" onclick="closeUserModal()">Cancelar</button><button class="btn bp" onclick="saveUser()">Guardar</button></div>
+  </div>
+</div>
+
+<!-- MODAL COMENTÁRIO/ENCERRAR -->
+<div class="mb" id="commentModal" onclick="if(event.target===this)closeCommentModal()">
+  <div class="modal" style="width:500px">
+    <div class="mt" id="commentModalTitle">Adicionar Comentário</div>
+    <div class="fr"><label class="fl">Utilizador</label><select class="fi" id="commentUserSel"><option value="">Seleccionar…</option></select></div>
+    <div class="fr"><label class="fl">PIN</label><input class="fi" id="commentPin" type="password" maxlength="4" placeholder="4 dígitos"></div>
+    <div class="fr"><label class="fl">Comentário</label><textarea class="fi" id="commentText" rows="3" placeholder="Escreve aqui…" style="resize:vertical"></textarea></div>
+    <div id="commentEncerrarDiv" style="display:none">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-top:4px">
+        <input type="checkbox" id="commentEncerrar"> Encerrar esta reclamação após comentário (só Delta)
+      </label>
+    </div>
+    <div id="commentErr" style="font-size:11px;color:var(--red);display:none;margin-top:4px"></div>
+    <div class="mbb"><button class="btn bg" onclick="closeCommentModal()">Cancelar</button><button class="btn bp" onclick="submitComment()">Guardar</button></div>
+  </div>
+</div>
+
 <!-- ══ HISTÓRICO ══ -->
 <div class="page" id="page-history">
   <div class="card">
@@ -558,6 +734,7 @@ async function init(){
       if(t.dataset.page==='somunilog')renderSoUnilog();
       if(t.dataset.page==='cadastro')renderCadastro();
       if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
+      if(t.dataset.page==='reclamacoes'){loadReclamacoes();}
       if(t.dataset.page==='history')renderHistory();
     };
   });
@@ -1053,7 +1230,7 @@ function renderSusp(){
   const minQt=parseInt(document.getElementById('suspMinQt').value)||0;
 
   // Update cat dropdown
-  const cats=[...new Set(suspData.map(r=>occParams.find(p=>p.ean===r.EAN_norm)?.cat).filter(Boolean))].sort();
+  const cats=[...new Set(suspData.map(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return p?.cat||autoCat(r.desc).cat||'';}).filter(Boolean))].sort();
   const catSel=document.getElementById('suspCat');const catCur=catSel.value;
   catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
   catSel.value=cats.includes(catCur)?catCur:'';
@@ -1064,7 +1241,7 @@ function renderSusp(){
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(flt==='similar')rows=rows.filter(r=>r.similar);
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
-  if(catF)rows=rows.filter(r=>(occParams.find(p=>p.ean===r.EAN_norm)?.cat||'')=== catF);
+  if(catF)rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||autoCat(r.desc).cat||'')===catF;});
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
   applySort('susp',rows);
 
@@ -1089,11 +1266,10 @@ function renderSusp(){
     const param=occParams.find(p=>p.ean===r.EAN_norm);
     let recHtml='';
     if(param&&param.lote_obrigatorio===false){
-      recHtml='<span class="badge bwarn" style="background:#fde68a;color:#92400e">Produto sem lote — retirar lote do WMS</span>';
+      recHtml='<span class="badge bwarn" style="background:#fde68a;color:#92400e">⚠ Produto sem lote obrigatório — retirar lote do WMS</span>';
     } else if(r.similar){
       recHtml=`<span class="badge binfo">Corrigir lote: <strong>${r.similar.lote}</strong></span>`;
     } else {
-      // Check if SAP has same EAN without lote
       const sapSemLote=sapData&&sapData.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm==='');
       if(sapSemLote){
         recHtml='<span class="badge bwarn">Corrigir lote no WMS (SAP sem lote)</span>';
@@ -1103,7 +1279,7 @@ function renderSusp(){
     }
     const tr=document.createElement('tr');
     tr.innerHTML=`
-      <td style="font-size:11px">${param?.cat||'—'}</td>
+      <td style="font-size:11px">${param?.cat||(autoCat(r.desc).cat||'—')}</td>
       <td><span class="badge bneu">${r.EAN_norm}</span></td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
       <td><span class="badge berr">${r.Lote_norm}</span></td>
@@ -1290,7 +1466,7 @@ function exportSuspXlsx(){
   const data=rows.map(r=>{
     const p=occParams.find(x=>x.ean===r.EAN_norm);
     let rec='';
-    if(p&&p.lote_obrigatorio===false)rec='Produto sem lote — retirar lote do WMS';
+    if(p&&p.lote_obrigatorio===false)rec='Produto sem lote obrigatório — retirar lote do WMS';
     else if(r.similar)rec='Corrigir lote: '+r.similar.lote;
     else{const ss=sapData&&sapData.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm==='');rec=ss?'Corrigir lote no WMS (SAP sem lote)':'Investigar';}
     return{Categoria:p?.cat||'',EAN:r.EAN_norm,Descricao:r.desc,LoteUnilog:r.Lote_norm,QtUnilog:r.qt,DepositoClasse:(r.depots||[]).join(' | '),LoteSAPSimilar:r.similar?.lote||'',Similaridade:r.similar?Math.round(r.similar.ratio*100)+'%':'',QtSAP:r.similar?.qt||'',Recomendacao:rec};
@@ -1540,6 +1716,368 @@ function esc(s){return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'
 function updateChip(){const c=document.getElementById('coChip');c.textContent=company;c.style.display='';}
 function eRow(body,cols,msg){const tr=document.createElement('tr');tr.innerHTML=`<td colspan="${cols}" style="text-align:center;color:var(--muted);padding:28px">${msg}</td>`;body.appendChild(tr);}
 function toast(msg,type='info'){const el=document.getElementById('toast');el.textContent=msg;el.className='show '+type;clearTimeout(el._t);el._t=setTimeout(()=>el.className='',3500);}
+
+// ═══════════════════════════════════════════
+// RECLAMAÇÕES
+// ═══════════════════════════════════════════
+let reclamacoes=[], recTipos=[], recUsers=[], recSorts={};
+let recLoggedUser=null, recDetailId=null, commentRecId=null, editTipoId=null;
+
+// ── LOAD ──
+async function loadReclamacoes(){
+  try{
+    const[r1,r2,r3]=await Promise.all([
+      db.from('reclamacoes').select('*').eq('company',company).order('criado_em',{ascending:false}),
+      db.from('reclamacoes_tipos').select('*').eq('ativo',true).order('area').order('nome'),
+      db.from('reclamacoes_utilizadores').select('*').eq('ativo',true).order('nome')
+    ]);
+    if(r1.data)reclamacoes=r1.data;
+    if(r2.data)recTipos=r2.data;
+    if(r3.data)recUsers=r3.data;
+    updateRecBadge();
+    renderRecLista();
+    populateRecMeses();
+    renderConfig();
+  }catch(e){toast('Erro ao carregar reclamações: '+e.message,'error');}
+}
+function updateRecBadge(){
+  const abertas=reclamacoes.filter(r=>r.estado!=='encerrada').length;
+  const b=document.getElementById('recBadge');
+  b.textContent=abertas;b.style.display=abertas>0?'':'none';
+}
+function populateRecMeses(){
+  const meses=[...new Set(reclamacoes.map(r=>r.criado_em?.slice(0,7)))].sort().reverse();
+  ['recMes','dashMes'].forEach(id=>{
+    const sel=document.getElementById(id);if(!sel)return;
+    const cur=sel.value;
+    sel.innerHTML='<option value="">Todos os meses</option>'+meses.map(m=>`<option value="${m}">${m}</option>`).join('');
+    sel.value=cur;
+  });
+}
+
+// ── RENDER LISTA ──
+function renderRecLista(){
+  let rows=[...reclamacoes];
+  const srch=document.getElementById('recSrch').value.toLowerCase();
+  const area=document.getElementById('recArea').value;
+  const estado=document.getElementById('recEstado').value;
+  const mes=document.getElementById('recMes').value;
+  if(srch)rows=rows.filter(r=>(r.numero||'').includes(srch)||(r.descricao||'').toLowerCase().includes(srch)||(r.tipo_nome||'').toLowerCase().includes(srch)||(r.criado_por_nome||'').toLowerCase().includes(srch));
+  if(area)rows=rows.filter(r=>r.area===area);
+  if(estado)rows=rows.filter(r=>r.estado===estado);
+  if(mes)rows=rows.filter(r=>r.criado_em?.startsWith(mes));
+  applySort('rec',rows);
+
+  const abertas=rows.filter(r=>r.estado==='aberta').length;
+  const tratamento=rows.filter(r=>r.estado==='em_tratamento').length;
+  const encerradas=rows.filter(r=>r.estado==='encerrada').length;
+  const temposMedio=rows.filter(r=>r.encerrado_em&&r.criado_em).map(r=>(new Date(r.encerrado_em)-new Date(r.criado_em))/(1000*3600));
+  const tMedio=temposMedio.length>0?Math.round(temposMedio.reduce((a,b)=>a+b,0)/temposMedio.length):null;
+
+  document.getElementById('recKpis').innerHTML=`
+    <div class="kpi"><div class="kl">Total</div><div class="kv">${fmt(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Abertas</div><div class="kv r">${fmt(abertas)}</div></div>
+    <div class="kpi"><div class="kl">Em Tratamento</div><div class="kv y">${fmt(tratamento)}</div></div>
+    <div class="kpi"><div class="kl">Encerradas</div><div class="kv g">${fmt(encerradas)}</div></div>
+    <div class="kpi"><div class="kl">Tempo Médio</div><div class="kv b">${tMedio!==null?tMedio+'h':'—'}</div><div class="ks">resolução</div></div>
+  `;
+
+  const body=document.getElementById('recBody');body.innerHTML='';
+  document.getElementById('recEmpty').style.display=rows.length===0?'block':'none';
+  const now=new Date();
+  for(const r of rows){
+    const dt=new Date(r.criado_em);
+    const horasAberta=(now-dt)/3600000;
+    const tipo=recTipos.find(t=>t.id===r.tipo_id);
+    const prazo=tipo?.prazo_horas||48;
+    const vencido=r.estado!=='encerrada'&&horasAberta>prazo;
+    const estadoBadge=r.estado==='encerrada'?'<span class="badge bok">Encerrada</span>':r.estado==='em_tratamento'?'<span class="badge binfo">Em Tratamento</span>':'<span class="badge berr">Aberta</span>';
+    const areaBadge=r.area==='armazem'?'<span class="badge bgray">🏭 Armazém</span>':'<span class="badge bpurple">🚚 Transporte</span>';
+    const prazoBadge=r.estado==='encerrada'?'':vencido?`<span class="badge berr">⚠ ${Math.round(horasAberta)}h</span>`:`<span class="badge bok">${Math.round(prazo-horasAberta)}h restantes</span>`;
+    const tr=document.createElement('tr');
+    if(vencido)tr.style.background='#fff5f5';
+    tr.innerHTML=`
+      <td><span style="font-family:var(--mono);font-weight:700;color:var(--red)">${r.numero}</span></td>
+      <td style="font-size:11px;white-space:nowrap">${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${areaBadge}</td>
+      <td style="font-size:11px">${r.tipo_nome||'—'}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(r.descricao)}">${r.descricao}</td>
+      <td>${estadoBadge}</td>
+      <td style="font-size:11px">${r.criado_por_nome||'—'}</td>
+      <td>${prazoBadge}</td>
+      <td style="white-space:nowrap">
+        <button class="btn bg bs" onclick="openRecDetail(${r.id})" style="margin-right:4px">👁 Ver</button>
+        ${r.estado!=='encerrada'?`<button class="btn bg bs" onclick="openCommentModal(${r.id})">💬</button>`:''}
+      </td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!rows.length)eRow(body,9,'Nenhum resultado');
+}
+
+// ── DASHBOARD ──
+function renderDashboard(){
+  const mes=document.getElementById('dashMes').value;
+  let rows=mes?reclamacoes.filter(r=>r.criado_em?.startsWith(mes)):[...reclamacoes];
+
+  const total=rows.length;
+  const encerradas=rows.filter(r=>r.estado==='encerrada').length;
+  const taxaRes=total>0?Math.round(encerradas/total*100):0;
+  const tempos=rows.filter(r=>r.encerrado_em&&r.criado_em).map(r=>(new Date(r.encerrado_em)-new Date(r.criado_em))/(1000*3600));
+  const tMedio=tempos.length>0?Math.round(tempos.reduce((a,b)=>a+b,0)/tempos.length):null;
+
+  document.getElementById('dashKpis').innerHTML=`
+    <div class="kpi"><div class="kl">Total reclamações</div><div class="kv">${fmt(total)}</div></div>
+    <div class="kpi"><div class="kl">Encerradas</div><div class="kv g">${fmt(encerradas)}</div><div class="ks">${taxaRes}% resolução</div></div>
+    <div class="kpi"><div class="kl">Abertas/Em trat.</div><div class="kv r">${fmt(total-encerradas)}</div></div>
+    <div class="kpi"><div class="kl">Tempo médio resolução</div><div class="kv b">${tMedio!==null?tMedio+'h':'—'}</div></div>
+  `;
+
+  // By area and type
+  const byArea={armazem:rows.filter(r=>r.area==='armazem'),transporte:rows.filter(r=>r.area==='transporte')};
+  const grids=document.getElementById('dashGrids');grids.innerHTML='';
+
+  ['armazem','transporte'].forEach(area=>{
+    const aRows=byArea[area];if(!aRows.length)return;
+    const byTipo={};
+    aRows.forEach(r=>{const t=r.tipo_nome||'Outro';if(!byTipo[t])byTipo[t]={total:0,encerradas:0,tempos:[]};byTipo[t].total++;if(r.estado==='encerrada')byTipo[t].encerradas++;if(r.encerrado_em&&r.criado_em)byTipo[t].tempos.push((new Date(r.encerrado_em)-new Date(r.criado_em))/3600000);});
+    const sorted=Object.entries(byTipo).sort((a,b)=>b[1].total-a[1].total);
+    const div=document.createElement('div');div.className='card';
+    div.innerHTML=`<div class="ch"><div class="ct">${area==='armazem'?'🏭 Armazém':'🚚 Transporte'} (${aRows.length})</div></div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="border-bottom:2px solid var(--navy3)"><th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Tipo</th><th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--muted);text-transform:uppercase">Total</th><th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--muted);text-transform:uppercase">Enc.</th><th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--muted);text-transform:uppercase">T.Médio</th></tr></thead>
+        <tbody>${sorted.map(([tipo,d])=>{
+          const tm=d.tempos.length>0?Math.round(d.tempos.reduce((a,b)=>a+b,0)/d.tempos.length)+'h':'—';
+          const pct=d.total>0?Math.round(d.encerradas/d.total*100):0;
+          return`<tr style="border-bottom:1px solid #edf0f5"><td style="padding:6px 8px">${tipo}</td><td style="padding:6px 8px;text-align:right;font-weight:700">${d.total}</td><td style="padding:6px 8px;text-align:right;color:var(--green)">${d.encerradas} <span style="color:var(--muted);font-size:10px">(${pct}%)</span></td><td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--blue)">${tm}</td></tr>`;
+        }).join('')}</tbody>
+      </table>`;
+    grids.appendChild(div);
+  });
+}
+
+// ── DETAIL ──
+async function openRecDetail(id){
+  recDetailId=id;
+  const r=reclamacoes.find(x=>x.id===id);if(!r)return;
+  const{data:comentarios}=await db.from('reclamacoes_comentarios').select('*').eq('reclamacao_id',id).order('criado_em');
+  const tipo=recTipos.find(t=>t.id===r.tipo_id);
+  const dt=new Date(r.criado_em);
+  const areaBadge=r.area==='armazem'?'🏭 Armazém':'🚚 Transporte';
+  const estadoBadge=r.estado==='encerrada'?'<span class="badge bok">Encerrada</span>':r.estado==='em_tratamento'?'<span class="badge binfo">Em Tratamento</span>':'<span class="badge berr">Aberta</span>';
+  const comsHtml=(comentarios||[]).map(c=>{
+    const cd=new Date(c.criado_em);
+    const isDelta=c.papel==='delta';
+    return`<div style="margin-bottom:12px;padding:10px 14px;border-radius:6px;background:${isDelta?'#eff6ff':'#f0fdf4'};border:1px solid ${isDelta?'#bfdbfe':'#bbf7d0'}">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="font-weight:600;font-size:12px;color:${isDelta?'#1d4ed8':'#15803d'}">${c.utilizador_nome} <span style="font-weight:400;font-size:10px;opacity:.7">(${isDelta?'Delta':'Unilog'})</span></span>
+        <span style="font-size:10px;color:var(--muted)">${cd.toLocaleDateString('pt-BR')} ${cd.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
+      </div>
+      <div style="font-size:13px">${c.texto}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('recDetailContent').innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px">
+      <div>
+        <div style="font-size:20px;font-weight:700;color:var(--red)">${r.numero}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · ${r.criado_por_nome||'—'}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">${estadoBadge}<button class="btn bg bs" onclick="closeRecDetail()">✕</button></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Área</div><div style="font-size:13px;font-weight:500">${areaBadge}</div></div>
+      <div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Tipo</div><div style="font-size:13px;font-weight:500">${r.tipo_nome||'—'}</div></div>
+      ${tipo?`<div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Prazo</div><div style="font-size:13px;font-weight:500">${tipo.prazo_horas}h</div></div>`:''}
+      ${r.encerrado_em?`<div style="background:#f0fdf4;border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Encerrado</div><div style="font-size:13px;font-weight:500">${new Date(r.encerrado_em).toLocaleDateString('pt-BR')} por ${r.encerrado_por_nome}</div></div>`:''}
+    </div>
+    <div style="background:var(--bg3);border-radius:6px;padding:12px;margin-bottom:16px">
+      <div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Descrição</div>
+      <div style="font-size:13px;line-height:1.5">${r.descricao}</div>
+    </div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Histórico de Comentários</div>
+    <div>${comsHtml||'<div style="color:var(--muted);font-size:12px;padding:10px 0">Sem comentários ainda.</div>'}</div>
+    ${r.estado!=='encerrada'?`<div style="margin-top:16px"><button class="btn bp" onclick="closeRecDetail();openCommentModal(${r.id})">💬 Adicionar Comentário</button></div>`:''}
+  `;
+  document.getElementById('recDetailModal').classList.add('open');
+}
+function closeRecDetail(){document.getElementById('recDetailModal').classList.remove('open');}
+
+// ── NOVA RECLAMAÇÃO ──
+function openRecModal(){
+  document.getElementById('recLoginSection').style.display='';
+  document.getElementById('recFormSection').style.display='none';
+  document.getElementById('recLoginErr').style.display='none';
+  document.getElementById('recUserPin').value='';
+  const sel=document.getElementById('recUserSel');
+  sel.innerHTML='<option value="">Seleccionar utilizador…</option>'+recUsers.map(u=>`<option value="${u.id}">${u.nome} (${u.papel==='delta'?'Delta':'Unilog'})</option>`).join('');
+  recLoggedUser=null;
+  document.getElementById('recModal').classList.add('open');
+}
+function closeRecModal(){document.getElementById('recModal').classList.remove('open');recLoggedUser=null;}
+async function recLogin(){
+  const userId=document.getElementById('recUserSel').value;
+  const pin=document.getElementById('recUserPin').value;
+  const errEl=document.getElementById('recLoginErr');
+  if(!userId||!pin){errEl.textContent='Selecciona utilizador e PIN';errEl.style.display='block';return;}
+  const user=recUsers.find(u=>u.id==userId);
+  if(!user){errEl.textContent='Utilizador não encontrado';errEl.style.display='block';return;}
+  const pinHash=await hashPin(pin);
+  if(pinHash!==user.pin_hash){errEl.textContent='PIN incorrecto';errEl.style.display='block';return;}
+  recLoggedUser=user;
+  document.getElementById('recLoginSection').style.display='none';
+  document.getElementById('recFormSection').style.display='';
+  document.getElementById('recLoginName').textContent=user.nome+' ('+( user.papel==='delta'?'Delta':'Unilog')+')';
+  loadTiposForArea();
+}
+function recLogout(){document.getElementById('recLoginSection').style.display='';document.getElementById('recFormSection').style.display='none';recLoggedUser=null;}
+function loadTiposForArea(){
+  const area=document.getElementById('recFormArea').value;
+  const tipos=recTipos.filter(t=>t.area===area);
+  const sel=document.getElementById('recFormTipo');
+  sel.innerHTML='<option value="">Seleccionar tipo…</option>'+tipos.map(t=>`<option value="${t.id}">${t.nome}</option>`).join('');
+}
+async function submitRec(){
+  if(!recLoggedUser){toast('Faz login primeiro','error');return;}
+  const area=document.getElementById('recFormArea').value;
+  const tipoId=document.getElementById('recFormTipo').value;
+  const desc=document.getElementById('recFormDesc').value.trim();
+  const errEl=document.getElementById('recFormErr');
+  if(!tipoId||!desc){errEl.textContent='Preenche todos os campos';errEl.style.display='block';return;}
+  const tipo=recTipos.find(t=>t.id==tipoId);
+  const numero=`REC-${company}-${new Date().getFullYear()}-${String(reclamacoes.length+1).padStart(4,'0')}`;
+  const{error}=await db.from('reclamacoes').insert({numero,area,tipo_id:parseInt(tipoId),tipo_nome:tipo?.nome||'',descricao:desc,criado_por_id:recLoggedUser.id,criado_por_nome:recLoggedUser.nome,company,estado:'aberta'});
+  if(error){errEl.textContent='Erro: '+error.message;errEl.style.display='block';return;}
+  closeRecModal();await loadReclamacoes();toast('Reclamação registada: '+numero,'success');
+}
+
+// ── COMENTÁRIO ──
+function openCommentModal(recId){
+  commentRecId=recId;
+  const r=reclamacoes.find(x=>x.id===recId);
+  document.getElementById('commentModalTitle').textContent='Comentário — '+r?.numero;
+  document.getElementById('commentUserSel').innerHTML='<option value="">Seleccionar…</option>'+recUsers.map(u=>`<option value="${u.id}">${u.nome} (${u.papel==='delta'?'Delta':'Unilog'})</option>`).join('');
+  document.getElementById('commentPin').value='';
+  document.getElementById('commentText').value='';
+  document.getElementById('commentErr').style.display='none';
+  document.getElementById('commentEncerrarDiv').style.display='none';
+  document.getElementById('commentEncerrar').checked=false;
+  document.getElementById('commentModal').classList.add('open');
+}
+function closeCommentModal(){document.getElementById('commentModal').classList.remove('open');commentRecId=null;}
+document.getElementById('commentUserSel')?.addEventListener('change',function(){
+  const user=recUsers.find(u=>u.id==this.value);
+  document.getElementById('commentEncerrarDiv').style.display=user?.papel==='delta'?'':'none';
+});
+async function submitComment(){
+  const userId=document.getElementById('commentUserSel').value;
+  const pin=document.getElementById('commentPin').value;
+  const texto=document.getElementById('commentText').value.trim();
+  const encerrar=document.getElementById('commentEncerrar').checked;
+  const errEl=document.getElementById('commentErr');
+  if(!userId||!pin||!texto){errEl.textContent='Preenche todos os campos';errEl.style.display='block';return;}
+  const user=recUsers.find(u=>u.id==userId);
+  const pinHash=await hashPin(pin);
+  if(pinHash!==user?.pin_hash){errEl.textContent='PIN incorrecto';errEl.style.display='block';return;}
+  if(encerrar&&user.papel!=='delta'){errEl.textContent='Só utilizadores Delta podem encerrar';errEl.style.display='block';return;}
+  // Save comment
+  const{error:e1}=await db.from('reclamacoes_comentarios').insert({reclamacao_id:commentRecId,texto,utilizador_id:user.id,utilizador_nome:user.nome,papel:user.papel});
+  if(e1){errEl.textContent='Erro: '+e1.message;errEl.style.display='block';return;}
+  // Update estado
+  const novoEstado=encerrar?'encerrada':'em_tratamento';
+  const update={estado:novoEstado};
+  if(encerrar){update.encerrado_em=new Date().toISOString();update.encerrado_por_nome=user.nome;}
+  await db.from('reclamacoes').update(update).eq('id',commentRecId);
+  closeCommentModal();await loadReclamacoes();toast('Comentário guardado','success');
+}
+
+// ── CONFIG ──
+function renderConfig(){
+  // Tipos
+  const tiposList=document.getElementById('tiposList');
+  const byArea={armazem:recTipos.filter(t=>t.area==='armazem'),transporte:recTipos.filter(t=>t.area==='transporte')};
+  tiposList.innerHTML=['armazem','transporte'].map(area=>`
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px">${area==='armazem'?'🏭 Armazém':'🚚 Transporte'}</div>
+      ${byArea[area].map(t=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg3);border-radius:5px;margin-bottom:4px;font-size:12px">
+        <span>${t.nome} <span style="color:var(--muted);font-size:10px">${t.prazo_horas}h</span></span>
+        <button class="btn bg bs" onclick="deleteTipo(${t.id})">🗑️</button>
+      </div>`).join('')}
+    </div>`).join('');
+  // Users
+  const usersList=document.getElementById('usersList');
+  usersList.innerHTML=recUsers.map(u=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg3);border-radius:5px;margin-bottom:4px;font-size:12px">
+    <span>${u.nome} <span class="badge ${u.papel==='delta'?'binfo':'bok'}" style="font-size:9px">${u.papel}</span></span>
+    <button class="btn bg bs" onclick="deleteUser(${u.id})">🗑️</button>
+  </div>`).join('');
+}
+
+// Tipo modal
+function openTipoModal(){editTipoId=null;document.getElementById('tipoNome').value='';document.getElementById('tipoPrazo').value='48';document.getElementById('tipoErr').style.display='none';document.getElementById('tipoModal').classList.add('open');}
+function closeTipoModal(){document.getElementById('tipoModal').classList.remove('open');}
+async function saveTipo(){
+  const area=document.getElementById('tipoArea').value;
+  const nome=document.getElementById('tipoNome').value.trim();
+  const prazo=parseInt(document.getElementById('tipoPrazo').value)||48;
+  const errEl=document.getElementById('tipoErr');
+  if(!nome){errEl.textContent='Nome obrigatório';errEl.style.display='block';return;}
+  const{error}=await db.from('reclamacoes_tipos').insert({area,nome,prazo_horas:prazo});
+  if(error){errEl.textContent='Erro: '+error.message;errEl.style.display='block';return;}
+  closeTipoModal();await loadReclamacoes();toast('Tipo criado','success');
+}
+async function deleteTipo(id){if(!confirm('Eliminar tipo?'))return;await db.from('reclamacoes_tipos').update({ativo:false}).eq('id',id);await loadReclamacoes();toast('Eliminado','success');}
+
+// User modal
+function openUserModal(){document.getElementById('userName').value='';document.getElementById('userPin').value='';document.getElementById('userErr').style.display='none';document.getElementById('userModal').classList.add('open');}
+function closeUserModal(){document.getElementById('userModal').classList.remove('open');}
+async function saveUser(){
+  const nome=document.getElementById('userName').value.trim();
+  const papel=document.getElementById('userPapel').value;
+  const pin=document.getElementById('userPin').value;
+  const errEl=document.getElementById('userErr');
+  if(!nome||!pin||pin.length!==4){errEl.textContent='Nome e PIN de 4 dígitos obrigatórios';errEl.style.display='block';return;}
+  const pin_hash=await hashPin(pin);
+  const{error}=await db.from('reclamacoes_utilizadores').insert({nome,papel,pin_hash});
+  if(error){errEl.textContent='Erro: '+error.message;errEl.style.display='block';return;}
+  closeUserModal();await loadReclamacoes();toast('Utilizador criado','success');
+}
+async function deleteUser(id){if(!confirm('Eliminar utilizador?'))return;await db.from('reclamacoes_utilizadores').update({ativo:false}).eq('id',id);await loadReclamacoes();toast('Eliminado','success');}
+
+// ── TAB ──
+function recTab(name,el){
+  el.closest('.page').querySelectorAll('.it').forEach(t=>t.classList.remove('active'));el.classList.add('active');
+  ['lista','dashboard','config'].forEach(n=>{const d=document.getElementById('rec-'+n);if(d)d.style.display=n===name?'':'none';});
+  if(name==='dashboard')renderDashboard();
+  if(name==='config')renderConfig();
+}
+
+// ── EXPORT ──
+function exportRecXlsx(){
+  let rows=[...reclamacoes];
+  const srch=document.getElementById('recSrch').value.toLowerCase();
+  const area=document.getElementById('recArea').value;
+  const estado=document.getElementById('recEstado').value;
+  const mes=document.getElementById('recMes').value;
+  if(srch)rows=rows.filter(r=>(r.numero||'').includes(srch)||(r.descricao||'').toLowerCase().includes(srch));
+  if(area)rows=rows.filter(r=>r.area===area);
+  if(estado)rows=rows.filter(r=>r.estado===estado);
+  if(mes)rows=rows.filter(r=>r.criado_em?.startsWith(mes));
+  const data=rows.map(r=>{
+    const tempoH=r.encerrado_em&&r.criado_em?Math.round((new Date(r.encerrado_em)-new Date(r.criado_em))/3600000):null;
+    return{Numero:r.numero,Data:new Date(r.criado_em).toLocaleDateString('pt-BR'),Area:r.area==='armazem'?'Armazém':'Transporte',Tipo:r.tipo_nome||'',Descricao:r.descricao,Estado:r.estado,CriadoPor:r.criado_por_nome||'',EncerradoPor:r.encerrado_por_nome||'',DataEnc:r.encerrado_em?new Date(r.encerrado_em).toLocaleDateString('pt-BR'):'',TempoResolucaoH:tempoH||''};
+  });
+  if(!data.length){toast('Sem dados','error');return;}
+  const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Reclamações');
+  XLSX.writeFile(wb,`reclamacoes_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+// ── PIN HASH ──
+async function hashPin(pin){
+  const encoder=new TextEncoder();
+  const data=encoder.encode(pin+'delta_unilog_salt');
+  const hash=await crypto.subtle.digest('SHA-256',data);
+  return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
 
 init();
 </script>
