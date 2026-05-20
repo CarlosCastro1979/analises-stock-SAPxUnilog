@@ -2121,7 +2121,7 @@ async function saveTipo(){
 async function deleteTipo(id){if(!confirm('Eliminar tipo?'))return;await db.from('reclamacoes_tipos').update({ativo:false}).eq('id',id);await loadReclamacoes();toast('Eliminado','success');}
 
 // User modal
-function openUserModal(){document.getElementById('userName').value='';document.getElementById('userPin').value='';document.getElementById('userErr').style.display='none';document.getElementById('userModal').classList.add('open');}
+function openUserModal(){document.getElementById('userName').value='';document.getElementById('userErr').style.display='none';document.getElementById('userModal').classList.add('open');}
 function closeUserModal(){document.getElementById('userModal').classList.remove('open');}
 async function saveUser(){
   const nome=document.getElementById('userName').value.trim();
