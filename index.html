@@ -538,6 +538,7 @@ select.cad-inp{cursor:pointer;}
           <th onclick="doSort('rec','area')">Área</th>
           <th onclick="doSort('rec','tipo_nome')">Tipo</th>
           <th>Descrição</th>
+          <th onclick="doSort('rec','nf_numero')">NF / Dias</th>
           <th onclick="doSort('rec','estado')">Estado</th>
           <th onclick="doSort('rec','criado_por_nome')">Criado por</th>
           <th>Prazo</th>
@@ -593,11 +594,8 @@ select.cad-inp{cursor:pointer;}
       <div class="fr"><label class="fl">O seu nome</label>
         <select class="fi" id="recUserSel"><option value="">Seleccionar utilizador…</option></select>
       </div>
-      <div class="fr"><label class="fl">PIN</label>
-        <input class="fi" id="recUserPin" type="password" maxlength="4" placeholder="4 dígitos">
-      </div>
       <div id="recLoginErr" style="font-size:11px;color:var(--red);display:none;margin-top:4px"></div>
-      <div class="mbb"><button class="btn bg" onclick="closeRecModal()">Cancelar</button><button class="btn bp" onclick="recLogin()">Entrar</button></div>
+      <div class="mbb"><button class="btn bg" onclick="closeRecModal()">Cancelar</button><button class="btn bp" onclick="recLogin()">Continuar</button></div>
     </div>
     <!-- Form section (shown after login) -->
     <div id="recFormSection" style="display:none">
@@ -615,8 +613,21 @@ select.cad-inp{cursor:pointer;}
           <select class="fi" id="recFormTipo"><option value="">Seleccionar…</option></select>
         </div>
       </div>
+      <div class="fg">
+        <div class="fr"><label class="fl">Nº Nota Fiscal</label>
+          <input class="fi" id="recFormNF" placeholder="Ex: 123456">
+        </div>
+        <div class="fr"><label class="fl">Data de Emissão NF</label>
+          <input class="fi" id="recFormNFData" type="date">
+        </div>
+      </div>
       <div class="fr"><label class="fl">Descrição</label>
-        <textarea class="fi" id="recFormDesc" rows="4" placeholder="Descreve o problema em detalhe…" style="resize:vertical"></textarea>
+        <textarea class="fi" id="recFormDesc" rows="3" placeholder="Descreve o problema em detalhe…" style="resize:vertical"></textarea>
+      </div>
+      <div class="fr">
+        <label class="fl">Fotos / Evidências (opcional)</label>
+        <input type="file" id="recFormFotos" accept="image/*" multiple style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;width:100%;font-size:12px;color:var(--text)" onchange="previewFotos(this)">
+        <div id="recFotosPreview" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"></div>
       </div>
       <div id="recFormErr" style="font-size:11px;color:var(--red);display:none;margin-top:4px"></div>
       <div class="mbb"><button class="btn bg" onclick="recLogout()">← Trocar utilizador</button><button class="btn bp" onclick="submitRec()">Registar Reclamação</button></div>
@@ -649,7 +660,6 @@ select.cad-inp{cursor:pointer;}
     <div class="mt">Utilizador</div>
     <div class="fr"><label class="fl">Nome</label><input class="fi" id="userName" placeholder="Nome completo"></div>
     <div class="fr"><label class="fl">Papel</label><select class="fi" id="userPapel"><option value="delta">Delta</option><option value="unilog">Unilog</option></select></div>
-    <div class="fr"><label class="fl">PIN (4 dígitos)</label><input class="fi" id="userPin" type="password" maxlength="4" placeholder="1234"></div>
     <div id="userErr" style="font-size:11px;color:var(--red);display:none;margin-top:4px"></div>
     <div class="mbb"><button class="btn bg" onclick="closeUserModal()">Cancelar</button><button class="btn bp" onclick="saveUser()">Guardar</button></div>
   </div>
@@ -660,7 +670,6 @@ select.cad-inp{cursor:pointer;}
   <div class="modal" style="width:500px">
     <div class="mt" id="commentModalTitle">Adicionar Comentário</div>
     <div class="fr"><label class="fl">Utilizador</label><select class="fi" id="commentUserSel"><option value="">Seleccionar…</option></select></div>
-    <div class="fr"><label class="fl">PIN</label><input class="fi" id="commentPin" type="password" maxlength="4" placeholder="4 dígitos"></div>
     <div class="fr"><label class="fl">Comentário</label><textarea class="fi" id="commentText" rows="3" placeholder="Escreve aqui…" style="resize:vertical"></textarea></div>
     <div id="commentEncerrarDiv" style="display:none">
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-top:4px">
@@ -1801,7 +1810,8 @@ function renderRecLista(){
       <td style="font-size:11px;white-space:nowrap">${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td>
       <td>${areaBadge}</td>
       <td style="font-size:11px">${r.tipo_nome||'—'}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(r.descricao)}">${r.descricao}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(r.descricao)}">${r.descricao}</td>
+      <td style="font-size:11px;font-family:var(--mono)">${r.nf_numero||'—'}${r.nf_data?(()=>{const d=Math.floor((new Date()-new Date(r.nf_data))/86400000);const c=d>30?'var(--red)':d>15?'var(--yellow)':'var(--green)';return` <span style="color:${c};font-size:10px">${d}d</span>`;})():''}</td>
       <td>${estadoBadge}</td>
       <td style="font-size:11px">${r.criado_por_nome||'—'}</td>
       <td>${prazoBadge}</td>
@@ -1812,7 +1822,7 @@ function renderRecLista(){
     `;
     body.appendChild(tr);
   }
-  if(!rows.length)eRow(body,9,'Nenhum resultado');
+  if(!rows.length)eRow(body,10,'Nenhum resultado');
 }
 
 // ── DASHBOARD ──
@@ -1884,12 +1894,20 @@ async function openRecDetail(id){
       </div>
       <div style="display:flex;gap:6px;align-items:center">${estadoBadge}<button class="btn bg bs" onclick="closeRecDetail()">✕</button></div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-      <div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Área</div><div style="font-size:13px;font-weight:500">${areaBadge}</div></div>
-      <div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Tipo</div><div style="font-size:13px;font-weight:500">${r.tipo_nome||'—'}</div></div>
-      ${tipo?`<div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Prazo</div><div style="font-size:13px;font-weight:500">${tipo.prazo_horas}h</div></div>`:''}
-      ${r.encerrado_em?`<div style="background:#f0fdf4;border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Encerrado</div><div style="font-size:13px;font-weight:500">${new Date(r.encerrado_em).toLocaleDateString('pt-BR')} por ${r.encerrado_por_nome}</div></div>`:''}
-    </div>
+    ${(()=>{
+      const diasNF=r.nf_data?Math.floor((new Date()-new Date(r.nf_data))/86400000):null;
+      const diasNFColor=diasNF===null?'':diasNF>30?'var(--red)':diasNF>15?'var(--yellow)':'var(--green)';
+      return`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+        <div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Área</div><div style="font-size:13px;font-weight:500">${areaBadge}</div></div>
+        <div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Tipo</div><div style="font-size:13px;font-weight:500">${r.tipo_nome||'—'}</div></div>
+        ${r.nf_numero?`<div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Nota Fiscal</div><div style="font-size:13px;font-weight:600;font-family:var(--mono)">${r.nf_numero}</div></div>`:''}
+        ${diasNF!==null?`<div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Dias desde emissão NF</div><div style="font-size:20px;font-weight:700;color:${diasNFColor}">${diasNF}d</div><div style="font-size:10px;color:var(--muted)">${new Date(r.nf_data).toLocaleDateString('pt-BR')}</div></div>`:''}
+        ${tipo?`<div style="background:var(--bg3);border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Prazo</div><div style="font-size:13px;font-weight:500">${tipo.prazo_horas}h</div></div>`:''}
+        ${r.encerrado_em?`<div style="background:#f0fdf4;border-radius:6px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Encerrado</div><div style="font-size:13px;font-weight:500">${new Date(r.encerrado_em).toLocaleDateString('pt-BR')} por ${r.encerrado_por_nome}</div></div>`:''}
+      </div>
+      ${r.fotos&&r.fotos.length>0?`<div style="margin-bottom:16px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Evidências Fotográficas</div><div style="display:flex;gap:8px;flex-wrap:wrap">${r.fotos.map((f,i)=>`<img src="${f.data}" onclick="openFotoFull('${f.data}')" style="width:100px;height:100px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer" title="${f.nome}">`).join('')}</div></div>`:''}
+      `;
+    })()}
     <div style="background:var(--bg3);border-radius:6px;padding:12px;margin-bottom:16px">
       <div style="font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Descrição</div>
       <div style="font-size:13px;line-height:1.5">${r.descricao}</div>
@@ -1904,29 +1922,35 @@ function closeRecDetail(){document.getElementById('recDetailModal').classList.re
 
 // ── NOVA RECLAMAÇÃO ──
 function openRecModal(){
+  // Clear all fields
   document.getElementById('recLoginSection').style.display='';
   document.getElementById('recFormSection').style.display='none';
   document.getElementById('recLoginErr').style.display='none';
-  document.getElementById('recUserPin').value='';
+  document.getElementById('recUserSel').value='';
+  document.getElementById('recFormArea').value='armazem';
+  document.getElementById('recFormTipo').innerHTML='<option value="">Seleccionar tipo…</option>';
+  document.getElementById('recFormDesc').value='';
+  document.getElementById('recFormNF').value='';
+  document.getElementById('recFormNFData').value='';
+  document.getElementById('recFormFotos').value='';
+  document.getElementById('recFotosPreview').innerHTML='';
+  document.getElementById('recFormErr').style.display='none';
   const sel=document.getElementById('recUserSel');
   sel.innerHTML='<option value="">Seleccionar utilizador…</option>'+recUsers.map(u=>`<option value="${u.id}">${u.nome} (${u.papel==='delta'?'Delta':'Unilog'})</option>`).join('');
   recLoggedUser=null;
   document.getElementById('recModal').classList.add('open');
 }
 function closeRecModal(){document.getElementById('recModal').classList.remove('open');recLoggedUser=null;}
-async function recLogin(){
+function recLogin(){
   const userId=document.getElementById('recUserSel').value;
-  const pin=document.getElementById('recUserPin').value;
   const errEl=document.getElementById('recLoginErr');
-  if(!userId||!pin){errEl.textContent='Selecciona utilizador e PIN';errEl.style.display='block';return;}
+  if(!userId){errEl.textContent='Selecciona o teu nome';errEl.style.display='block';return;}
   const user=recUsers.find(u=>u.id==userId);
   if(!user){errEl.textContent='Utilizador não encontrado';errEl.style.display='block';return;}
-  const pinHash=await hashPin(pin);
-  if(pinHash!==user.pin_hash){errEl.textContent='PIN incorrecto';errEl.style.display='block';return;}
   recLoggedUser=user;
   document.getElementById('recLoginSection').style.display='none';
   document.getElementById('recFormSection').style.display='';
-  document.getElementById('recLoginName').textContent=user.nome+' ('+( user.papel==='delta'?'Delta':'Unilog')+')';
+  document.getElementById('recLoginName').textContent=user.nome+' ('+(user.papel==='delta'?'Delta':'Unilog')+')';
   loadTiposForArea();
 }
 function recLogout(){document.getElementById('recLoginSection').style.display='';document.getElementById('recFormSection').style.display='none';recLoggedUser=null;}
@@ -1936,16 +1960,48 @@ function loadTiposForArea(){
   const sel=document.getElementById('recFormTipo');
   sel.innerHTML='<option value="">Seleccionar tipo…</option>'+tipos.map(t=>`<option value="${t.id}">${t.nome}</option>`).join('');
 }
+function previewFotos(input){
+  const preview=document.getElementById('recFotosPreview');preview.innerHTML='';
+  [...input.files].forEach(f=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=document.createElement('img');
+      img.src=e.target.result;
+      img.style.cssText='width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--border)';
+      preview.appendChild(img);
+    };
+    reader.readAsDataURL(f);
+  });
+}
+
+async function filesToBase64(files){
+  const results=[];
+  for(const f of files){
+    const b64=await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(f);});
+    results.push({nome:f.name,tipo:f.type,tamanho:f.size,data:b64});
+  }
+  return results;
+}
+
 async function submitRec(){
   if(!recLoggedUser){toast('Faz login primeiro','error');return;}
   const area=document.getElementById('recFormArea').value;
   const tipoId=document.getElementById('recFormTipo').value;
   const desc=document.getElementById('recFormDesc').value.trim();
+  const nf_numero=document.getElementById('recFormNF').value.trim()||null;
+  const nf_data=document.getElementById('recFormNFData').value||null;
+  const fotosInput=document.getElementById('recFormFotos');
   const errEl=document.getElementById('recFormErr');
-  if(!tipoId||!desc){errEl.textContent='Preenche todos os campos';errEl.style.display='block';return;}
+  if(!tipoId||!desc){errEl.textContent='Preenche tipo e descrição';errEl.style.display='block';return;}
   const tipo=recTipos.find(t=>t.id==tipoId);
+  // Convert photos to base64
+  let fotos=[];
+  if(fotosInput.files.length>0){
+    if(fotosInput.files.length>5){errEl.textContent='Máximo 5 fotos';errEl.style.display='block';return;}
+    fotos=await filesToBase64([...fotosInput.files]);
+  }
   const numero=`REC-${company}-${new Date().getFullYear()}-${String(reclamacoes.length+1).padStart(4,'0')}`;
-  const{error}=await db.from('reclamacoes').insert({numero,area,tipo_id:parseInt(tipoId),tipo_nome:tipo?.nome||'',descricao:desc,criado_por_id:recLoggedUser.id,criado_por_nome:recLoggedUser.nome,company,estado:'aberta'});
+  const{error}=await db.from('reclamacoes').insert({numero,area,tipo_id:parseInt(tipoId),tipo_nome:tipo?.nome||'',descricao:desc,nf_numero,nf_data,fotos,criado_por_id:recLoggedUser.id,criado_por_nome:recLoggedUser.nome,company,estado:'aberta'});
   if(error){errEl.textContent='Erro: '+error.message;errEl.style.display='block';return;}
   closeRecModal();await loadReclamacoes();toast('Reclamação registada: '+numero,'success');
 }
@@ -1956,7 +2012,6 @@ function openCommentModal(recId){
   const r=reclamacoes.find(x=>x.id===recId);
   document.getElementById('commentModalTitle').textContent='Comentário — '+r?.numero;
   document.getElementById('commentUserSel').innerHTML='<option value="">Seleccionar…</option>'+recUsers.map(u=>`<option value="${u.id}">${u.nome} (${u.papel==='delta'?'Delta':'Unilog'})</option>`).join('');
-  document.getElementById('commentPin').value='';
   document.getElementById('commentText').value='';
   document.getElementById('commentErr').style.display='none';
   document.getElementById('commentEncerrarDiv').style.display='none';
@@ -1970,14 +2025,12 @@ document.getElementById('commentUserSel')?.addEventListener('change',function(){
 });
 async function submitComment(){
   const userId=document.getElementById('commentUserSel').value;
-  const pin=document.getElementById('commentPin').value;
   const texto=document.getElementById('commentText').value.trim();
   const encerrar=document.getElementById('commentEncerrar').checked;
   const errEl=document.getElementById('commentErr');
-  if(!userId||!pin||!texto){errEl.textContent='Preenche todos os campos';errEl.style.display='block';return;}
+  if(!userId||!texto){errEl.textContent='Selecciona utilizador e escreve um comentário';errEl.style.display='block';return;}
   const user=recUsers.find(u=>u.id==userId);
-  const pinHash=await hashPin(pin);
-  if(pinHash!==user?.pin_hash){errEl.textContent='PIN incorrecto';errEl.style.display='block';return;}
+  if(!user){errEl.textContent='Utilizador não encontrado';errEl.style.display='block';return;}
   if(encerrar&&user.papel!=='delta'){errEl.textContent='Só utilizadores Delta podem encerrar';errEl.style.display='block';return;}
   // Save comment
   const{error:e1}=await db.from('reclamacoes_comentarios').insert({reclamacao_id:commentRecId,texto,utilizador_id:user.id,utilizador_nome:user.nome,papel:user.papel});
@@ -2032,11 +2085,9 @@ function closeUserModal(){document.getElementById('userModal').classList.remove(
 async function saveUser(){
   const nome=document.getElementById('userName').value.trim();
   const papel=document.getElementById('userPapel').value;
-  const pin=document.getElementById('userPin').value;
   const errEl=document.getElementById('userErr');
-  if(!nome||!pin||pin.length!==4){errEl.textContent='Nome e PIN de 4 dígitos obrigatórios';errEl.style.display='block';return;}
-  const pin_hash=await hashPin(pin);
-  const{error}=await db.from('reclamacoes_utilizadores').insert({nome,papel,pin_hash});
+  if(!nome){errEl.textContent='Nome obrigatório';errEl.style.display='block';return;}
+  const{error}=await db.from('reclamacoes_utilizadores').insert({nome,papel,pin_hash:''});
   if(error){errEl.textContent='Erro: '+error.message;errEl.style.display='block';return;}
   closeUserModal();await loadReclamacoes();toast('Utilizador criado','success');
 }
@@ -2071,12 +2122,13 @@ function exportRecXlsx(){
 }
 
 // ── PIN HASH ──
-async function hashPin(pin){
-  const encoder=new TextEncoder();
-  const data=encoder.encode(pin+'delta_unilog_salt');
-  const hash=await crypto.subtle.digest('SHA-256',data);
-  return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+function openFotoFull(src){
+  let ov=document.getElementById('fotoFullOv');
+  if(!ov){ov=document.createElement('div');ov.id='fotoFullOv';ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:500;display:flex;align-items:center;justify-content:center;cursor:zoom-out';ov.onclick=()=>ov.remove();document.body.appendChild(ov);}
+  ov.innerHTML=`<img src="${src}" style="max-width:95vw;max-height:95vh;border-radius:8px;box-shadow:0 0 40px rgba(0,0,0,.5)">`;
+  document.body.appendChild(ov);
 }
+
 
 
 init();
