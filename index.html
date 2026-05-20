@@ -635,6 +635,47 @@ select.cad-inp{cursor:pointer;}
   </div>
 </div>
 
+<!-- MODAL EDITAR RECLAMAÇÃO -->
+<div class="mb" id="recEditModal" onclick="if(event.target===this)closeEditRec()">
+  <div class="modal" style="width:580px">
+    <div class="mt">Editar Reclamação <span id="recEditNumero" style="color:var(--red)"></span></div>
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:12px;color:#92400e">
+      ✏️ Edição restrita a utilizadores Delta
+    </div>
+    <div class="fr"><label class="fl">Utilizador Delta</label>
+      <select class="fi" id="editUserSel"><option value="">Seleccionar…</option></select>
+    </div>
+    <div class="fg">
+      <div class="fr"><label class="fl">Área</label>
+        <select class="fi" id="editArea" onchange="loadEditTipos()">
+          <option value="armazem">Armazém</option>
+          <option value="transporte">Transporte</option>
+        </select>
+      </div>
+      <div class="fr"><label class="fl">Tipo</label>
+        <select class="fi" id="editTipo"></select>
+      </div>
+    </div>
+    <div class="fg">
+      <div class="fr"><label class="fl">Nº Nota Fiscal</label>
+        <input class="fi" id="editNF" placeholder="Ex: 123456">
+      </div>
+      <div class="fr"><label class="fl">Data de Emissão NF</label>
+        <input class="fi" id="editNFData" type="date">
+      </div>
+    </div>
+    <div class="fr"><label class="fl">Descrição</label>
+      <textarea class="fi" id="editDesc" rows="3" style="resize:vertical"></textarea>
+    </div>
+    <div id="recEditErr" style="font-size:11px;color:var(--red);display:none;margin-top:4px"></div>
+    <div class="mbb">
+      <button class="btn bg" onclick="closeEditRec()">Cancelar</button>
+      <button class="btn bp" onclick="submitEditRec()">Guardar Alterações</button>
+    </div>
+  </div>
+</div>
+
+
 <!-- MODAL DETALHE RECLAMAÇÃO -->
 <div class="mb" id="recDetailModal" onclick="if(event.target===this)closeRecDetail()">
   <div class="modal" style="width:680px;max-height:90vh;overflow-y:auto">
@@ -1817,7 +1858,7 @@ function renderRecLista(){
       <td>${prazoBadge}</td>
       <td style="white-space:nowrap">
         <button class="btn bg bs" onclick="openRecDetail(${r.id})" style="margin-right:4px">👁 Ver</button>
-        ${r.estado!=='encerrada'?`<button class="btn bg bs" onclick="openCommentModal(${r.id})">💬</button>`:''}
+        ${r.estado!=='encerrada'?`<button class="btn bg bs" onclick="openCommentModal(${r.id})" style="margin-right:4px">💬</button><button class="btn bg bs" onclick="openEditRec(${r.id})">✏️</button>`:''}
       </td>
     `;
     body.appendChild(tr);
@@ -2087,13 +2128,55 @@ async function saveUser(){
   const papel=document.getElementById('userPapel').value;
   const errEl=document.getElementById('userErr');
   if(!nome){errEl.textContent='Nome obrigatório';errEl.style.display='block';return;}
-  const{error}=await db.from('reclamacoes_utilizadores').insert({nome,papel,pin_hash:''});
+  const{error}=await db.from('reclamacoes_utilizadores').insert({nome,papel,pin_hash:'no_pin'});
   if(error){errEl.textContent='Erro: '+error.message;errEl.style.display='block';return;}
   closeUserModal();await loadReclamacoes();toast('Utilizador criado','success');
 }
 async function deleteUser(id){if(!confirm('Eliminar utilizador?'))return;await db.from('reclamacoes_utilizadores').update({ativo:false}).eq('id',id);await loadReclamacoes();toast('Eliminado','success');}
 
 // ── TAB ──
+let editRecId=null;
+function openEditRec(id){
+  const r=reclamacoes.find(x=>x.id===id);if(!r)return;
+  editRecId=id;
+  // Populate delta users only
+  const deltaUsers=recUsers.filter(u=>u.papel==='delta');
+  document.getElementById('editUserSel').innerHTML='<option value="">Seleccionar…</option>'+deltaUsers.map(u=>`<option value="${u.id}">${u.nome}</option>`).join('');
+  document.getElementById('recEditNumero').textContent=r.numero;
+  document.getElementById('editArea').value=r.area||'armazem';
+  document.getElementById('editNF').value=r.nf_numero||'';
+  document.getElementById('editNFData').value=r.nf_data||'';
+  document.getElementById('editDesc').value=r.descricao||'';
+  document.getElementById('recEditErr').style.display='none';
+  loadEditTipos(r.tipo_id);
+  document.getElementById('recEditModal').classList.add('open');
+}
+function closeEditRec(){document.getElementById('recEditModal').classList.remove('open');editRecId=null;}
+function loadEditTipos(selectedId){
+  const area=document.getElementById('editArea').value;
+  const tipos=recTipos.filter(t=>t.area===area);
+  const sel=document.getElementById('editTipo');
+  sel.innerHTML='<option value="">Seleccionar…</option>'+tipos.map(t=>`<option value="${t.id}" ${t.id==selectedId?'selected':''}>${t.nome}</option>`).join('');
+}
+async function submitEditRec(){
+  const userId=document.getElementById('editUserSel').value;
+  const area=document.getElementById('editArea').value;
+  const tipoId=document.getElementById('editTipo').value;
+  const nf_numero=document.getElementById('editNF').value.trim()||null;
+  const nf_data=document.getElementById('editNFData').value||null;
+  const desc=document.getElementById('editDesc').value.trim();
+  const errEl=document.getElementById('recEditErr');
+  if(!userId){errEl.textContent='Selecciona utilizador Delta';errEl.style.display='block';return;}
+  if(!tipoId||!desc){errEl.textContent='Tipo e descrição são obrigatórios';errEl.style.display='block';return;}
+  const user=recUsers.find(u=>u.id==userId);
+  if(!user||user.papel!=='delta'){errEl.textContent='Só utilizadores Delta podem editar';errEl.style.display='block';return;}
+  const tipo=recTipos.find(t=>t.id==tipoId);
+  const{error}=await db.from('reclamacoes').update({area,tipo_id:parseInt(tipoId),tipo_nome:tipo?.nome||'',descricao:desc,nf_numero,nf_data}).eq('id',editRecId);
+  if(error){errEl.textContent='Erro: '+error.message;errEl.style.display='block';return;}
+  closeEditRec();await loadReclamacoes();toast('Reclamação actualizada','success');
+}
+
+
 function recTab(name,el){
   el.closest('.page').querySelectorAll('.it').forEach(t=>t.classList.remove('active'));el.classList.add('active');
   ['lista','dashboard','config'].forEach(n=>{const d=document.getElementById('rec-'+n);if(d)d.style.display=n===name?'':'none';});
