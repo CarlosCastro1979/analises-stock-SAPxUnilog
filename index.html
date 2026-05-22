@@ -878,7 +878,7 @@ async function init(){
       if(t.dataset.page==='cadastro')renderCadastro();
       if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
       if(t.dataset.page==='reclamacoes'){loadReclamacoes();}
-      if(t.dataset.page==='transferencias'){processTransferencias();}
+      if(t.dataset.page==='transferencias'){if(transData.ecommerce.length)renderTrans('ecommerce');}
       if(t.dataset.page==='history')renderHistory();
     };
   });
