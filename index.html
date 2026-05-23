@@ -215,7 +215,7 @@ select.cad-inp{cursor:pointer;}
   <div class="card">
     <div class="ch"><div class="ct">Carregar Ficheiros de Stock</div></div>
     <div class="tb" style="margin-bottom:16px;">
-      <select class="inp" id="coSel"><option value="DFB">DFB — Delta Foods Brasil</option><option value="QB">QB — Quality Brands</option></select>
+      <select class="inp" id="coSel" onchange="switchCompany()"><option value="DFB">DFB — Delta Foods Brasil</option><option value="QB">QB — Quality Brands</option></select>
     </div>
     <div class="upload-grid">
       <div>
@@ -758,7 +758,7 @@ select.cad-inp{cursor:pointer;}
   <div id="trans-ecommerce">
     <div class="card">
       <div class="ch">
-        <div class="ct">Necessidades de Transferência — Ecommerce (Dep 0011 → 0008)</div>
+        <div class="ct">Necessidades de Transferência — Ecommerce (Dep 0011 → 0008) <span id="transCoChip" class="co-chip" style="margin-left:8px"></span></div>
         <div style="display:flex;gap:8px">
           <button class="btn bg bs" onclick="exportTransXlsx('ecommerce')">⬇ Excel</button>
           <button class="btn bp bs" onclick="buildTransData()">🔄 Calcular</button>
@@ -1198,6 +1198,23 @@ async function processAll(){
 }
 
 function buildSummary(){const s={};for(const dk of DKS){const rows=reconData[dk]||[];s[dk]={total:rows.length,diffs:rows.filter(r=>r.diff!==0).length};}return s;}
+
+function switchCompany(){
+  // Reset all data when switching company
+  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];
+  buildRecon();buildSusp();buildSoUnilog();
+  renderUpKpis();updateChip();
+  // Try to load saved data for the new company
+  loadFromDB(true);
+  // Reset transferencias
+  transData={ecommerce:[],qbrasil:[]};
+  const ec=document.getElementById('transEcBody');if(ec)ec.innerHTML='';
+  const qb=document.getElementById('transQbBody');if(qb)qb.innerHTML='';
+  // Update chip
+  const coSel=document.getElementById('coSel');
+  if(coSel)company=coSel.value;
+  toast('Empresa: '+company,'info');
+}
 
 async function loadFromDB(silent=false){
   try{
@@ -2426,7 +2443,10 @@ function transTab(name,el){
     const d=document.getElementById('trans-'+n);if(d)d.style.display=n===name?'':'none';
   });
   if(name==='vendas')loadVendasHist();
-  if(name==='ecommerce'&&transData.ecommerce.length)renderTrans('ecommerce');
+  if(name==='ecommerce'){
+    if(company!=='DFB'){document.getElementById('transEcEmpty').style.display='block';document.getElementById('transEcEmpty').innerHTML='<div class="empty-i">⚠️</div><div>Selecciona a empresa <strong>DFB</strong> para ver as transferências</div>';}
+    else if(transData.ecommerce.length)renderTrans('ecommerce');
+  }
   if(name==='qbrasil'&&transData.qbrasil.length)renderTrans('qbrasil');
 }
 
@@ -2459,7 +2479,12 @@ async function uploadVendas(){
         const dp=dateStr.match(/(\d{2})\.(\d{2})\.(\d{4})/)||dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
         if(!dp)return;
         const mes=dateStr.includes('.')?`${dp[3]}-${dp[2]}`:`${dp[1]}-${dp[2]}`;
-        const emp=String(row['Organização vendas']||'').includes('QB01')?'QB':'DFB';
+        const orgVendas=String(row['Organização vendas']||'');
+        const canal=String(row['Canal distribuição']||'');
+        let emp='';
+        if(orgVendas.includes('QB01'))emp='QB';
+        else if(canal.includes('09'))emp='B2C';
+        else emp='DFB';
         const k=`${mes}|${emp}|${ean}`;
         if(!byKey[k])byKey[k]={mes,empresa:emp,ean,mat_code:mat,qt:0};
         byKey[k].qt+=qt;
@@ -2502,6 +2527,7 @@ async function loadVendasHist(){
 // ── BUILD TRANS DATA ──
 async function buildTransData(){
   if(!sapData){toast('Carrega o ficheiro SAP primeiro (aba Dados)','error');return;}
+  if(company!=='DFB'){toast('As transferências são geridas a partir da empresa DFB','error');return;}
   toast('A calcular transferências…','info');
   try{
     // Load sales from Supabase
@@ -2524,10 +2550,11 @@ async function buildTransData(){
     }
 
     // Group vendas by empresa+ean
-    const vDFB={},vQB={};
+    const vDFB={},vQB={},vB2C={};
     vendas.forEach(r=>{
-      if(r.empresa==='DFB'){if(!vDFB[r.ean])vDFB[r.ean]=[];vDFB[r.ean].push(r);}
+      if(r.empresa==='B2C'){if(!vB2C[r.ean])vB2C[r.ean]=[];vB2C[r.ean].push(r);}
       else if(r.empresa==='QB'){if(!vQB[r.ean])vQB[r.ean]=[];vQB[r.ean].push(r);}
+      else if(r.empresa==='DFB'){if(!vDFB[r.ean])vDFB[r.ean]=[];vDFB[r.ean].push(r);}
     });
 
     // SAP stock by EAN+depot
@@ -2584,7 +2611,7 @@ async function buildTransData(){
       return rows.sort((a,b)=>b.necessidade-a.necessidade);
     }
 
-    transData.ecommerce=buildRows(vDFB,'8',sixMoDate,false);
+    transData.ecommerce=buildRows(vB2C,'8',sixMoDate,false);
     transData.qbrasil=buildRows(vQB,'11',eightMoDate,true); // QB dep 11 = QB stock
 
     // Update cat filters
@@ -2620,6 +2647,8 @@ function renderTrans(tipo){
   else if(estadoF==='need')filtered=filtered.filter(r=>r.necessidade>0&&!r.semValidade);
   else if(estadoF==='nostock')filtered=filtered.filter(r=>r.semValidade);
 
+  // Update company chip
+  const tcc=document.getElementById('transCoChip');if(tcc)tcc.textContent=company;
   kpis.innerHTML=`
     <div class="kpi"><div class="kl">EANs</div><div class="kv">${fmt(filtered.length)}</div></div>
     <div class="kpi"><div class="kl">Necessitam transf.</div><div class="kv r">${fmt(filtered.filter(r=>r.necessidade>0&&!r.semValidade).length)}</div></div>
