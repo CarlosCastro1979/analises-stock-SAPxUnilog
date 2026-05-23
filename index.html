@@ -726,9 +726,9 @@ select.cad-inp{cursor:pointer;}
 
 <!-- ══ TRANSFERÊNCIAS ══ -->
 <div class="page" id="page-transferencias">
-  <div class="its">
-    <div class="it active" onclick="transTab('ecommerce',this)">🛒 Ecommerce (B2C)</div>
-    <div class="it" onclick="transTab('qbrasil',this)">🏢 Qbrasil</div>
+  <div class="its" id="transIts">
+    <div class="it active" id="transItEc" onclick="transTab('ecommerce',this)">🛒 Ecommerce (B2C)</div>
+    <div class="it" id="transItQb" onclick="transTab('qbrasil',this)">🏢 Qbrasil</div>
     <div class="it" onclick="transTab('vendas',this)">📥 Carregar Vendas</div>
   </div>
 
@@ -904,7 +904,28 @@ async function init(){
       if(t.dataset.page==='cadastro')renderCadastro();
       if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
       if(t.dataset.page==='reclamacoes'){loadReclamacoes();}
-      if(t.dataset.page==='transferencias'){if(transData.ecommerce.length)renderTrans('ecommerce');}
+      if(t.dataset.page==='transferencias'){
+        // Show/hide tabs based on company
+        const itEc=document.getElementById('transItEc');
+        const itQb=document.getElementById('transItQb');
+        const divEc=document.getElementById('trans-ecommerce');
+        const divQb=document.getElementById('trans-qbrasil');
+        if(company==='QB'){
+          if(itEc)itEc.style.display='none';
+          if(divEc)divEc.style.display='none';
+          // Activate Qbrasil tab
+          document.querySelectorAll('#transIts .it').forEach(x=>x.classList.remove('active'));
+          if(itQb){itQb.style.display='';itQb.classList.add('active');}
+          if(divQb)divQb.style.display='';
+          if(transData.qbrasil.length)renderTrans('qbrasil');
+        } else {
+          if(itEc){itEc.style.display='';itEc.classList.add('active');}
+          if(itQb){itQb.style.display='';itQb.classList.remove('active');}
+          if(divEc)divEc.style.display='';
+          if(divQb)divQb.style.display='none';
+          if(transData.ecommerce.length)renderTrans('ecommerce');
+        }
+      }
       if(t.dataset.page==='history')renderHistory();
     };
   });
@@ -2457,8 +2478,7 @@ function transTab(name,el){
   });
   if(name==='vendas')loadVendasHist();
   if(name==='ecommerce'){
-    if(company!=='DFB'){document.getElementById('transEcEmpty').style.display='block';document.getElementById('transEcEmpty').innerHTML='<div class="empty-i">⚠️</div><div>Selecciona a empresa <strong>DFB</strong> para ver as transferências</div>';}
-    else if(transData.ecommerce.length)renderTrans('ecommerce');
+    if(transData.ecommerce.length)renderTrans('ecommerce');
   }
   if(name==='qbrasil'&&transData.qbrasil.length)renderTrans('qbrasil');
 }
@@ -2540,7 +2560,7 @@ async function loadVendasHist(){
 // ── BUILD TRANS DATA ──
 async function buildTransData(){
   if(!sapData){toast('Carrega o ficheiro SAP primeiro (aba Dados)','error');return;}
-  if(company!=='DFB'){toast('As transferências são geridas a partir da empresa DFB','error');return;}
+
   toast('A calcular transferências…','info');
   try{
     // Load sales from Supabase
