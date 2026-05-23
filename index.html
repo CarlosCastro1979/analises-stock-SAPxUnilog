@@ -880,8 +880,11 @@ const SB_URL='https://qnscwppgljobelplgbkp.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFuc2N3cHBnbGpvYmVscGxnYmtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxMDc3NzgsImV4cCI6MjA5MTY4Mzc3OH0.9ysq0ibsn3qDPHe5WYF-yyq9-vEKjc_hIn9BNKZccYY';
 const db=supabase.createClient(SB_URL,SB_KEY);
 
-const DEPOT_MAP={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2'],label:'0044 — Avarias'}};
-const DKS=Object.keys(DEPOT_MAP);
+// Depot maps per company
+const DEPOT_MAP_DFB={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2'],label:'0044 — Avarias'}};
+const DEPOT_MAP_QB={'11':{classes:['00'],label:'0011 — Disponível'},'44':{classes:['A1','A2'],label:'0044 — Avarias'},'99':{classes:['104'],label:'0099 — Vencidos'}};
+let DEPOT_MAP=DEPOT_MAP_DFB;
+let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','FI','SI','Total',''];
 
 let sapData=null,uniData=null,reconData={},suspData=[],occParams=[],reconNotas={},cadEdits={};
@@ -1203,6 +1206,9 @@ function buildSummary(){const s={};for(const dk of DKS){const rows=reconData[dk]
 
 function switchCompany(){
   company=document.getElementById('coSel').value;
+  // Update depot map for company
+  DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
+  DKS=Object.keys(DEPOT_MAP);
   // Reset all data
   sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];
   transData={ecommerce:[],qbrasil:[]};
@@ -1222,7 +1228,7 @@ async function loadFromDB(silent=false){
     company=document.getElementById('coSel').value;
     const{data,error}=await db.from('logistica_stock').select('*').eq('id',company).single();
     if(error||!data){if(!silent)toast('Sem dados para '+company,'error');return;}
-    sapData=JSON.parse(data.sap_data).filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito));uniData=JSON.parse(data.unilog_data);company=data.company;
+    company=data.company;DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;DKS=Object.keys(DEPOT_MAP);sapData=JSON.parse(data.sap_data).filter(r=>DKS.includes(r.deposito));uniData=JSON.parse(data.unilog_data);
     buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();renderUpKpis();updateChip();
     // Re-render active page if it needs data
     const activePage=document.querySelector('.page.active');
