@@ -191,7 +191,10 @@ select.cad-inp{cursor:pointer;}
     <div class="logo-name">Performance Logística<span>Delta Foods Brasil</span></div>
   </div>
   <div class="hdr-r">
-    <div id="coChip" class="co-chip" style="display:none"></div>
+    <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
+      <option value="DFB">DFB — Delta Foods Brasil</option>
+      <option value="QB">QB — Quality Brands</option>
+    </select>
     <div class="db-st"><div class="db-dot" id="dbDot"></div><span id="dbLbl">conectando…</span></div>
   </div>
 </header>
@@ -214,9 +217,7 @@ select.cad-inp{cursor:pointer;}
 <div class="page active" id="page-upload">
   <div class="card">
     <div class="ch"><div class="ct">Carregar Ficheiros de Stock</div></div>
-    <div class="tb" style="margin-bottom:16px;">
-      <select class="inp" id="coSel" onchange="switchCompany()"><option value="DFB">DFB — Delta Foods Brasil</option><option value="QB">QB — Quality Brands</option></select>
-    </div>
+
     <div class="upload-grid">
       <div>
         <div class="sl">Stock SAP</div>
