@@ -974,6 +974,7 @@ function autoRecomendacao(r){
 
 // ── BUILD RECON ──
 function buildRecon(){
+  if(!sapData||!uniData)return;
   reconData={};
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
@@ -1201,19 +1202,18 @@ async function processAll(){
 function buildSummary(){const s={};for(const dk of DKS){const rows=reconData[dk]||[];s[dk]={total:rows.length,diffs:rows.filter(r=>r.diff!==0).length};}return s;}
 
 function switchCompany(){
-  // Reset all data when switching company
+  company=document.getElementById('coSel').value;
+  // Reset all data
   sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];
-  buildRecon();buildSusp();buildSoUnilog();
-  renderUpKpis();updateChip();
-  // Try to load saved data for the new company
-  loadFromDB(true);
-  // Reset transferencias
   transData={ecommerce:[],qbrasil:[]};
+  // Reset UI
+  renderUpKpis();
   const ec=document.getElementById('transEcBody');if(ec)ec.innerHTML='';
   const qb=document.getElementById('transQbBody');if(qb)qb.innerHTML='';
-  // Update chip
-  const coSel=document.getElementById('coSel');
-  if(coSel)company=coSel.value;
+  const badge=document.getElementById('recBadge');if(badge){badge.textContent='';badge.style.display='none';}
+  const suspBadge=document.getElementById('suspBadge');if(suspBadge){suspBadge.textContent='';suspBadge.style.display='none';}
+  // Try to load saved data for the new company
+  loadFromDB(true);
   toast('Empresa: '+company,'info');
 }
 
@@ -1967,7 +1967,13 @@ function innerTab(name,el){el.closest('.page').querySelectorAll('.it').forEach(t
 // ── UTILS ──
 function fmt(n){if(n===null||n===undefined)return'—';return Number(n).toLocaleString('pt-BR');}
 function esc(s){return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
-function updateChip(){const c=document.getElementById('coChip');c.textContent=company;c.style.display='';}
+function updateChip(){
+  const c=document.getElementById('coChip');
+  if(c){c.textContent=company;c.style.display='';}
+  // Also sync the selector
+  const sel=document.getElementById('coSel');
+  if(sel&&sel.value!==company)sel.value=company;
+}
 function eRow(body,cols,msg){const tr=document.createElement('tr');tr.innerHTML=`<td colspan="${cols}" style="text-align:center;color:var(--muted);padding:28px">${msg}</td>`;body.appendChild(tr);}
 function toast(msg,type='info'){const el=document.getElementById('toast');el.textContent=msg;el.className='show '+type;clearTimeout(el._t);el._t=setTimeout(()=>el.className='',3500);}
 
