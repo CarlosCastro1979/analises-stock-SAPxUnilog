@@ -418,6 +418,7 @@ select.cad-inp{cursor:pointer;}
           <th onclick="cadSort('desc')" id="cadTh_desc">Descrição SAP</th>
           <th>Depósitos</th>
           <th onclick="cadSort('qty_per_pos')" id="cadTh_qty_per_pos" style="min-width:80px">Un/Posição</th>
+          <th onclick="cadSort('unidades_cx')" id="cadTh_unidades_cx" style="min-width:70px">Un/CX</th>
           <th onclick="cadSort('lote_obrigatorio')" id="cadTh_lote_obrigatorio">Lote Obrig.</th>
           <th style="min-width:120px">Notas</th>
         </tr></thead>
@@ -785,6 +786,7 @@ select.cad-inp{cursor:pointer;}
           <th class="num">Média 3M</th>
           <th class="num">Média 6M</th>
           <th class="num">Stock B2C</th>
+          <th class="num">Cobertura</th>
           <th class="num" title="Editável — sugestão = média 3 meses">Stock Seg. ✏️</th>
           <th class="num">Necessidade</th>
           <th>Lotes Sugeridos</th>
@@ -826,6 +828,7 @@ select.cad-inp{cursor:pointer;}
           <th class="num">Média 3M</th>
           <th class="num">Média 6M</th>
           <th class="num">Stock QB</th>
+          <th class="num">Cobertura</th>
           <th class="num" title="Editável — sugestão = média 3 meses">Stock Seg. ✏️</th>
           <th class="num">Necessidade</th>
           <th>Lotes Sugeridos</th>
@@ -1538,6 +1541,7 @@ function renderCadastro(){
       subcat:edited?.subcat!==undefined?edited.subcat:(p?.subcat||''),
       qty_per_pos:edited?.qty_per_pos!==undefined?edited.qty_per_pos:(p?.qty_per_pos||null),
       lote_obrigatorio:edited?.lote_obrigatorio!==undefined?edited.lote_obrigatorio:(p?.lote_obrigatorio!==undefined?p.lote_obrigatorio:true),
+      unidades_cx:edited?.unidades_cx!==undefined?edited.unidades_cx:(p?.unidades_cx||null),
       notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),
       hasParam:!!p};
   });
@@ -1585,6 +1589,7 @@ function renderCadastro(){
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(item.desc)}">${item.desc}</td>
       <td style="white-space:nowrap">${cadDepHtml}</td>
       <td><input class="cad-inp" type="number" min="1" value="${item.qty_per_pos||''}" onblur="cadAutoSave('${item.ean}','qty_per_pos',parseInt(this.value)||null)" placeholder="0" style="width:70px"></td>
+      <td><input class="cad-inp" type="number" min="1" value="${item.unidades_cx||''}" onblur="cadAutoSave('${item.ean}','unidades_cx',parseInt(this.value)||null)" placeholder="—" style="width:60px"></td>
       <td class="cad-toggle"><div class="tw" onclick="cadToggleLote('${item.ean}',this)"><div class="tg ${item.lote_obrigatorio?'on':''}"><div class="tk"></div></div><span style="font-size:11px">${item.lote_obrigatorio?'Sim':'Não'}</span></div></td>
       <td><input class="cad-inp" value="${esc(item.notes)}" onblur="cadAutoSave('${item.ean}','notes',this.value)" placeholder="Notas…"></td>
     `;
@@ -1602,6 +1607,7 @@ async function cadAutoSave(ean,field,value){
     cat:edits.cat!==undefined?edits.cat:(existing.cat||''),
     subcat:edits.subcat!==undefined?edits.subcat:(existing.subcat||''),
     qty_per_pos:edits.qty_per_pos!==undefined?edits.qty_per_pos:(existing.qty_per_pos||1),
+    unidades_cx:edits.unidades_cx!==undefined?edits.unidades_cx:(existing.unidades_cx||null),
     lote_obrigatorio:edits.lote_obrigatorio!==undefined?edits.lote_obrigatorio:(existing.lote_obrigatorio!==undefined?existing.lote_obrigatorio:true),
     notes:edits.notes!==undefined?edits.notes:(existing.notes||''),
     updated_at:new Date().toISOString()};
@@ -2658,10 +2664,24 @@ async function buildTransData(){
         const param=occParams.find(p=>p.ean===ean);
         const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||'';
         const{lotes,maxValidade}=getLotes11(ean,minDate,antiFifo);
-        let loteSugest=[],restNeed=necessidade;
-        for(const l of lotes){if(restNeed<=0)break;const qty=Math.min(l.qt,restNeed);loteSugest.push({lote:l.lote,qty,validade:l.validade,validadeDate:l.validadeDate});restNeed-=qty;}
+        const cx=param?.unidades_cx||null;
+        // Round necessidade up to CX multiple
+        const necessidadeCX=cx&&cx>1?Math.ceil(necessidade/cx)*cx:necessidade;
+        let loteSugest=[],restNeed=necessidadeCX;
+        for(const l of lotes){
+          if(restNeed<=0)break;
+          // Per lote: only transfer whole CX units — don't split lotes for partial CX
+          if(cx&&cx>1){
+            const cxLote=Math.floor(Math.min(l.qt,restNeed)/cx)*cx;
+            if(cxLote>0){loteSugest.push({lote:l.lote,qty:cxLote,validade:l.validade,validadeDate:l.validadeDate,cx});restNeed-=cxLote;}
+          } else {
+            const qty=Math.min(l.qt,restNeed);
+            loteSugest.push({lote:l.lote,qty,validade:l.validade,validadeDate:l.validadeDate});
+            restNeed-=qty;
+          }
+        }
         const stockDisp11=lotes.reduce((s,l)=>s+l.qt,0);
-        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0});
+        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0});
       });
       return rows.sort((a,b)=>b.necessidade-a.necessidade);
     }
@@ -2682,10 +2702,24 @@ async function buildTransData(){
         const param=occParams.find(p=>p.ean===ean);
         const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||'';
         const{lotes,maxValidade}=getLotes11(ean,minDate,true);
-        let loteSugest=[],restNeed=necessidade;
-        for(const l of lotes){if(restNeed<=0)break;const qty=Math.min(l.qt,restNeed);loteSugest.push({lote:l.lote,qty,validade:l.validade,validadeDate:l.validadeDate});restNeed-=qty;}
+        const cx=param?.unidades_cx||null;
+        // Round necessidade up to CX multiple
+        const necessidadeCX=cx&&cx>1?Math.ceil(necessidade/cx)*cx:necessidade;
+        let loteSugest=[],restNeed=necessidadeCX;
+        for(const l of lotes){
+          if(restNeed<=0)break;
+          // Per lote: only transfer whole CX units — don't split lotes for partial CX
+          if(cx&&cx>1){
+            const cxLote=Math.floor(Math.min(l.qt,restNeed)/cx)*cx;
+            if(cxLote>0){loteSugest.push({lote:l.lote,qty:cxLote,validade:l.validade,validadeDate:l.validadeDate,cx});restNeed-=cxLote;}
+          } else {
+            const qty=Math.min(l.qt,restNeed);
+            loteSugest.push({lote:l.lote,qty,validade:l.validade,validadeDate:l.validadeDate});
+            restNeed-=qty;
+          }
+        }
         const stockDisp11=lotes.reduce((s,l)=>s+l.qt,0);
-        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0});
+        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0});
       });
       return rows.sort((a,b)=>b.necessidade-a.necessidade);
     }
@@ -2752,32 +2786,60 @@ function renderTrans(tipo){
       lotesHtml=r.lotes.map(l=>{
         const v=l.validadeDate;const mo=v?Math.floor((v-today)/(1000*3600*24*30)):null;
         const c=mo===null?'var(--muted)':mo<minMeses?'var(--red)':mo<12?'var(--yellow)':'var(--green)';
-        return`<div style="font-size:11px;margin-bottom:2px">▸ <strong>${fmt(l.qty)}</strong> un · <span style="font-family:var(--mono);background:#e2e8f0;padding:1px 4px;border-radius:3px">${l.lote||'—'}</span> <span style="color:${c};font-size:10px">${l.validade&&l.validade!=='—'?`val.${l.validade}${mo!==null?' ('+mo+'m)':''}`:''}</span></div>`;
+        const cxInfo=l.cx&&l.cx>1?` (${Math.round(l.qty/l.cx)} CX)`:'';
+        return`<div style="font-size:11px;margin-bottom:2px">▸ <strong>${fmt(l.qty)}</strong> un${cxInfo} · <span style="font-family:var(--mono);background:#e2e8f0;padding:1px 4px;border-radius:3px">${l.lote||'—'}</span> <span style="color:${c};font-size:10px">${l.validade&&l.validade!=='—'?`val.${l.validade}${mo!==null?' ('+mo+'m)':''}`:''}</span></div>`;
       }).join('');
       if(r.necessidade>r.stockDisp11)lotesHtml+=`<div style="font-size:10px;color:var(--yellow);margin-top:2px">⚠ Só ${fmt(r.stockDisp11)} un válidas disponíveis</div>`;
     }
     const overKey=stockKey+'|'+r.ean;
+    const param=occParams.find(p=>p.ean===r.ean);
+    const cx=param?.unidades_cx||null;
+    // Coverage = stock / media3 months
+    const cobertura=r.media3>0?Math.round(r.stockDest/r.media3*10)/10:null;
+    const coberturaIdeal=r.seguranca>0&&r.media3>0?Math.round(r.seguranca/r.media3*10)/10:1;
+    const coberturaMax=coberturaIdeal*1.25;
+    const stockMax=Math.ceil(r.seguranca*1.25);
+    const excessoStock=r.stockDest-stockMax;
+    // Cobertura color
+    const covColor=cobertura===null?'var(--muted)':cobertura>coberturaMax?'var(--red)':cobertura<0.5?'var(--yellow)':'var(--green)';
+
+    // Return recommendation (too much stock)
+    let returnHtml='';
+    if(excessoStock>0&&r.media3>0){
+      const qtDevolver=excessoStock;
+      // Find lotes to return (by depot stock key - need lotes in dest depot)
+      if(cx&&cx>1){
+        const cxDevolver=Math.floor(qtDevolver/cx);
+        if(cxDevolver>0)returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Devolver ao dep.0011: ${fmt(cxDevolver)} CX (${fmt(cxDevolver*cx)} un)</span></div>`;
+      } else {
+        returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Devolver ao dep.0011: ${fmt(qtDevolver)} un</span></div>`;
+      }
+    }
+    // Add return to lotesHtml
+    const lotesHtmlFinal=lotesHtml+(returnHtml||'');
+
     const tr=document.createElement('tr');
-    if(r.necessidade>0&&!r.semValidade)tr.style.background='#fff5f5';
-    else if(r.semValidade)tr.style.background='#fffbeb';
+    if(excessoStock>0)tr.style.background='#fffbeb';
+    else if(r.necessidade>0&&!r.semValidade)tr.style.background='#fff5f5';
     tr.innerHTML=`
       <td style="font-size:11px">${r.cat||'—'}</td>
       <td><span class="badge bneu">${r.ean}</span></td>
-      <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(r.desc)}">${r.desc}</td>
+      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(r.desc)}">${r.desc}</td>
       <td class="num">${fmt(r.media3)}</td>
       <td class="num" style="color:var(--muted)">${fmt(r.media6)}</td>
       <td class="num">${fmt(r.stockDest)}</td>
+      <td class="num" style="font-weight:700;color:${covColor}">${cobertura!==null?cobertura+'m':'—'}</td>
       <td class="num"><input type="number" min="0" value="${r.seguranca}"
         style="width:65px;text-align:right;font-family:var(--mono);font-size:12px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;background:var(--bg3)"
         onchange="updateSeg('${overKey}',this.value,'${tipo}')"
-        title="Sugestão: ${fmt(Math.ceil(r.media3))} (média 3M)"></td>
-      <td class="num" style="font-weight:700;color:${r.necessidade>0?'var(--red)':'var(--green)'}">${r.necessidade>0?fmt(r.necessidade):'—'}</td>
-      <td style="min-width:250px">${lotesHtml}</td>
-      <td>${estadoHtml}</td>
+        title="Sugestão: ${fmt(Math.ceil(r.media3))} (média 3M)${cx?' · CX='+cx:''}"></td>
+      <td class="num" style="font-weight:700;color:${r.necessidade>0?'var(--red)':excessoStock>0?'var(--yellow)':'var(--green)'}">${r.necessidade>0?fmt(r.necessidade):excessoStock>0?'Excesso':'—'}</td>
+      <td style="min-width:250px">${lotesHtmlFinal}</td>
+      <td>${estadoHtml}${excessoStock>0&&!r.necessidade?'<span class="badge bwarn" style="margin-top:3px;display:block">↩ Stock excessivo</span>':''}</td>
     `;
     body.appendChild(tr);
   }
-  if(!filtered.length)eRow(body,10,'Clica "Calcular" para processar');
+  if(!filtered.length)eRow(body,11,'Clica "Calcular" para processar');
 }
 
 function updateSeg(key,val,tipo){
