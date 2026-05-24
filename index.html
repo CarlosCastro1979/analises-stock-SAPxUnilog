@@ -420,6 +420,8 @@ select.cad-inp{cursor:pointer;}
           <th onclick="cadSort('qty_per_pos')" id="cadTh_qty_per_pos" style="min-width:80px">Un/Posição</th>
           <th onclick="cadSort('unidades_cx')" id="cadTh_unidades_cx" style="min-width:70px">Un/CX</th>
           <th onclick="cadSort('lote_obrigatorio')" id="cadTh_lote_obrigatorio">Lote Obrig.</th>
+          <th onclick="cadSort('b2c')" id="cadTh_b2c">B2C</th>
+          <th onclick="cadSort('descontinuado')" id="cadTh_descontinuado">Desc.</th>
           <th style="min-width:120px">Notas</th>
         </tr></thead>
         <tbody id="cadBody"></tbody>
@@ -1542,6 +1544,8 @@ function renderCadastro(){
       qty_per_pos:edited?.qty_per_pos!==undefined?edited.qty_per_pos:(p?.qty_per_pos||null),
       lote_obrigatorio:edited?.lote_obrigatorio!==undefined?edited.lote_obrigatorio:(p?.lote_obrigatorio!==undefined?p.lote_obrigatorio:true),
       unidades_cx:edited?.unidades_cx!==undefined?edited.unidades_cx:(p?.unidades_cx||null),
+      b2c:edited?.b2c!==undefined?edited.b2c:(p?.b2c!==undefined?p.b2c:true),
+      descontinuado:edited?.descontinuado!==undefined?edited.descontinuado:(p?.descontinuado===true),
       notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),
       hasParam:!!p};
   });
@@ -1592,6 +1596,18 @@ function renderCadastro(){
       <td><input class="cad-inp" type="number" min="1" value="${item.unidades_cx||''}" onblur="cadAutoSave('${item.ean}','unidades_cx',parseInt(this.value)||null)" placeholder="—" style="width:60px"></td>
       <td class="cad-toggle"><div class="tw" onclick="cadToggleLote('${item.ean}',this)"><div class="tg ${item.lote_obrigatorio?'on':''}"><div class="tk"></div></div><span style="font-size:11px">${item.lote_obrigatorio?'Sim':'Não'}</span></div></td>
       <td><input class="cad-inp" value="${esc(item.notes)}" onblur="cadAutoSave('${item.ean}','notes',this.value)" placeholder="Notas…"></td>
+      <td class="cad-toggle">
+        <div class="tw" onclick="cadToggleB2c('${item.ean}',this)">
+          <div class="tg ${item.b2c?'on':''}"><div class="tk"></div></div>
+          <span style="font-size:11px">${item.b2c?'Sim':'Não'}</span>
+        </div>
+      </td>
+      <td class="cad-toggle">
+        <div class="tw" onclick="cadToggleDesc('${item.ean}',this)">
+          <div class="tg ${item.descontinuado?'on':''}" style="${item.descontinuado?'background:var(--red)':''}"><div class="tk"></div></div>
+          <span style="font-size:11px;color:${item.descontinuado?'var(--red)':'inherit'}">${item.descontinuado?'Sim':'Não'}</span>
+        </div>
+      </td>
     `;
     body.appendChild(tr);
   }
@@ -1608,6 +1624,8 @@ async function cadAutoSave(ean,field,value){
     subcat:edits.subcat!==undefined?edits.subcat:(existing.subcat||''),
     qty_per_pos:edits.qty_per_pos!==undefined?edits.qty_per_pos:(existing.qty_per_pos||1),
     unidades_cx:edits.unidades_cx!==undefined?edits.unidades_cx:(existing.unidades_cx||null),
+    b2c:edits.b2c!==undefined?edits.b2c:(existing.b2c!==undefined?existing.b2c:true),
+    descontinuado:edits.descontinuado!==undefined?edits.descontinuado:(existing.descontinuado===true),
     lote_obrigatorio:edits.lote_obrigatorio!==undefined?edits.lote_obrigatorio:(existing.lote_obrigatorio!==undefined?existing.lote_obrigatorio:true),
     notes:edits.notes!==undefined?edits.notes:(existing.notes||''),
     updated_at:new Date().toISOString()};
@@ -1621,6 +1639,27 @@ function showSaveIndicator(){
   if(!ind){ind=document.createElement('div');ind.id='saveInd';ind.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#16a34a;color:#fff;padding:6px 16px;border-radius:20px;font-size:11px;font-weight:600;z-index:999;transition:opacity .4s';document.body.appendChild(ind);}
   ind.textContent='✓ Guardado';ind.style.opacity='1';
   clearTimeout(ind._t);ind._t=setTimeout(()=>ind.style.opacity='0',1500);
+}
+function cadToggleB2c(ean,el){
+  const p=occParams.find(x=>x.ean===ean);
+  const cur=cadEdits[ean]?.b2c!==undefined?cadEdits[ean].b2c:(p?.b2c!==undefined?p.b2c:true);
+  const next=!cur;
+  const tg=el.querySelector('.tg');const sp=el.querySelector('span');
+  tg.classList.toggle('on',next);sp.textContent=next?'Sim':'Não';
+  el.closest('tr').style.background='#f0fdf4';
+  cadAutoSave(ean,'b2c',next);
+}
+function cadToggleDesc(ean,el){
+  const p=occParams.find(x=>x.ean===ean);
+  const cur=cadEdits[ean]?.descontinuado!==undefined?cadEdits[ean].descontinuado:(p?.descontinuado===true);
+  const next=!cur;
+  const tg=el.querySelector('.tg');const sp=el.querySelector('span');
+  tg.classList.toggle('on',next);
+  tg.style.background=next?'var(--red)':'';
+  sp.textContent=next?'Sim':'Não';
+  sp.style.color=next?'var(--red)':'inherit';
+  el.closest('tr').style.background=next?'#fff5f5':'#f0fdf4';
+  cadAutoSave(ean,'descontinuado',next);
 }
 function cadToggleLote(ean,el){
   const p=occParams.find(x=>x.ean===ean);
@@ -2654,6 +2693,11 @@ async function buildTransData(){
       const eans=new Set([...Object.keys(vendaMap)]);
       const rows=[];
       eans.forEach(ean=>{
+        // Skip discontinued products
+        if(param?.descontinuado===true)return;
+        // For B2C: skip if b2c=false
+        if(stockKey==='8'&&param?.b2c===false)return;
+        const param=occParams.find(p=>p.ean===ean);
         const v3=calcAvgMonths(vendaMap[ean]||[],3);
         const v6=calcAvgMonths(vendaMap[ean]||[],6);
         if(v3<=0&&v6<=0)return;
@@ -2692,6 +2736,8 @@ async function buildTransData(){
       const eans=new Set(Object.keys(vendaMap));
       const rows=[];
       eans.forEach(ean=>{
+        const paramCheck=occParams.find(p=>p.ean===ean);
+        if(paramCheck?.descontinuado===true)return;
         const v3=calcAvgMonths(vendaMap[ean]||[],3);
         const v6=calcAvgMonths(vendaMap[ean]||[],6);
         if(v3<=0&&v6<=0)return;
