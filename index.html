@@ -2559,10 +2559,25 @@ async function loadVendasHist(){
 
 // ── BUILD TRANS DATA ──
 async function buildTransData(){
-  if(!sapData){toast('Carrega o ficheiro SAP primeiro (aba Dados)','error');return;}
-
   toast('A calcular transferências…','info');
   try{
+    // Always need DFB sapData (source stock is always DFB dep 0011)
+    let dfbSapData=null;
+    if(company==='DFB'&&sapData){
+      dfbSapData=sapData;
+    } else {
+      const{data:dfbRec}=await db.from('logistica_stock').select('sap_data').eq('id','DFB').single();
+      if(!dfbRec){toast('Sem dados DFB — carrega o SAP DFB primeiro','error');return;}
+      dfbSapData=JSON.parse(dfbRec.sap_data).filter(r=>Object.keys(DEPOT_MAP_DFB).includes(r.deposito));
+    }
+    // QB stock
+    let qbSapData=null;
+    if(company==='QB'&&sapData){
+      qbSapData=sapData;
+    } else {
+      const{data:qbRec}=await db.from('logistica_stock').select('sap_data').eq('id','QB').single();
+      if(qbRec)qbSapData=JSON.parse(qbRec.sap_data).filter(r=>Object.keys(DEPOT_MAP_QB).includes(r.deposito));
+    }
     // Load sales from Supabase
     const{data:vendas,error}=await db.from('logistica_vendas').select('*').order('mes',{ascending:false});
     if(error||!vendas){toast('Erro ao carregar vendas: '+(error?.message||'sem dados'),'error');return;}
@@ -2590,13 +2605,20 @@ async function buildTransData(){
       else if(r.empresa==='DFB'){if(!vDFB[r.ean])vDFB[r.ean]=[];vDFB[r.ean].push(r);}
     });
 
-    // SAP stock by EAN+depot
+    // SAP stock by EAN+depot (from DFB for source dep 0011, from QB for QB stock)
     const sapStock={};
-    sapData.forEach(r=>{
+    (dfbSapData||[]).forEach(r=>{
       if(!r.EAN_norm)return;
       if(!sapStock[r.EAN_norm])sapStock[r.EAN_norm]={};
       if(!sapStock[r.EAN_norm][r.deposito])sapStock[r.EAN_norm][r.deposito]=0;
       sapStock[r.EAN_norm][r.deposito]+=r.qt;
+    });
+    // QB stock (dep 11 QB = target for QB transfers)
+    const qbStock={};
+    (qbSapData||[]).forEach(r=>{
+      if(!r.EAN_norm)return;
+      if(!qbStock[r.EAN_norm])qbStock[r.EAN_norm]=0;
+      qbStock[r.EAN_norm]+=r.qt;
     });
 
     function parseValidade(v){
@@ -2610,7 +2632,7 @@ async function buildTransData(){
 
     function getLotes11(ean, minDate, antiFifo){
       const lotes=[];
-      sapData.filter(r=>r.EAN_norm===ean&&r.deposito==='11'&&r.qt>0).forEach(r=>{
+      (dfbSapData||[]).filter(r=>r.EAN_norm===ean&&r.deposito==='11'&&r.qt>0).forEach(r=>{
         const v=parseValidade(r.validade);
         lotes.push({lote:r.Lote_norm,qt:r.qt,validade:r.validade,validadeDate:v});
       });
@@ -2634,7 +2656,7 @@ async function buildTransData(){
         const stockDest=(sapStock[ean]&&sapStock[ean][stockKey])||0;
         const necessidade=Math.max(0,seguranca-stockDest);
         const param=occParams.find(p=>p.ean===ean);
-        const desc=sapData.find(r=>r.EAN_norm===ean)?.desc||'';
+        const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||'';
         const{lotes,maxValidade}=getLotes11(ean,minDate,antiFifo);
         let loteSugest=[],restNeed=necessidade;
         for(const l of lotes){if(restNeed<=0)break;const qty=Math.min(l.qt,restNeed);loteSugest.push({lote:l.lote,qty,validade:l.validade,validadeDate:l.validadeDate});restNeed-=qty;}
@@ -2645,7 +2667,30 @@ async function buildTransData(){
     }
 
     transData.ecommerce=buildRows(vB2C,'8',sixMoDate,false);
-    transData.qbrasil=buildRows(vQB,'11',eightMoDate,true); // QB dep 11 = QB stock
+
+    function buildRowsQB(vendaMap, minDate){
+      const eans=new Set(Object.keys(vendaMap));
+      const rows=[];
+      eans.forEach(ean=>{
+        const v3=calcAvgMonths(vendaMap[ean]||[],3);
+        const v6=calcAvgMonths(vendaMap[ean]||[],6);
+        if(v3<=0&&v6<=0)return;
+        const overKey='qb|'+ean;
+        const seguranca=transSegOverride[overKey]!==undefined?transSegOverride[overKey]:Math.ceil(v3)||1;
+        const stockDest=qbStock[ean]||0;
+        const necessidade=Math.max(0,seguranca-stockDest);
+        const param=occParams.find(p=>p.ean===ean);
+        const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||'';
+        const{lotes,maxValidade}=getLotes11(ean,minDate,true);
+        let loteSugest=[],restNeed=necessidade;
+        for(const l of lotes){if(restNeed<=0)break;const qty=Math.min(l.qt,restNeed);loteSugest.push({lote:l.lote,qty,validade:l.validade,validadeDate:l.validadeDate});restNeed-=qty;}
+        const stockDisp11=lotes.reduce((s,l)=>s+l.qt,0);
+        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0});
+      });
+      return rows.sort((a,b)=>b.necessidade-a.necessidade);
+    }
+    // For QB: use qbStock (QB's own stock) as current stock level
+    transData.qbrasil=buildRowsQB(vQB,eightMoDate);
 
     // Update cat filters
     ['Ec','Qb'].forEach((t,i)=>{
