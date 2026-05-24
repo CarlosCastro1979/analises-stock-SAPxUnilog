@@ -2693,11 +2693,11 @@ async function buildTransData(){
       const eans=new Set([...Object.keys(vendaMap)]);
       const rows=[];
       eans.forEach(ean=>{
+        const param=occParams.find(p=>p.ean===ean);
         // Skip discontinued products
         if(param?.descontinuado===true)return;
         // For B2C: skip if b2c=false
         if(stockKey==='8'&&param?.b2c===false)return;
-        const param=occParams.find(p=>p.ean===ean);
         const v3=calcAvgMonths(vendaMap[ean]||[],3);
         const v6=calcAvgMonths(vendaMap[ean]||[],6);
         if(v3<=0&&v6<=0)return;
@@ -2705,7 +2705,6 @@ async function buildTransData(){
         const seguranca=transSegOverride[overKey]!==undefined?transSegOverride[overKey]:Math.ceil(v3)||1;
         const stockDest=(sapStock[ean]&&sapStock[ean][stockKey])||0;
         const necessidade=Math.max(0,seguranca-stockDest);
-        const param=occParams.find(p=>p.ean===ean);
         const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||'';
         const{lotes,maxValidade}=getLotes11(ean,minDate,antiFifo);
         const cx=param?.unidades_cx||null;
@@ -2745,7 +2744,6 @@ async function buildTransData(){
         const seguranca=transSegOverride[overKey]!==undefined?transSegOverride[overKey]:Math.ceil(v3)||1;
         const stockDest=qbStock[ean]||0;
         const necessidade=Math.max(0,seguranca-stockDest);
-        const param=occParams.find(p=>p.ean===ean);
         const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||'';
         const{lotes,maxValidade}=getLotes11(ean,minDate,true);
         const cx=param?.unidades_cx||null;
