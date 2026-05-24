@@ -1595,19 +1595,9 @@ function renderCadastro(){
       <td><input class="cad-inp" type="number" min="1" value="${item.qty_per_pos||''}" onblur="cadAutoSave('${item.ean}','qty_per_pos',parseInt(this.value)||null)" placeholder="0" style="width:70px"></td>
       <td><input class="cad-inp" type="number" min="1" value="${item.unidades_cx||''}" onblur="cadAutoSave('${item.ean}','unidades_cx',parseInt(this.value)||null)" placeholder="—" style="width:60px"></td>
       <td class="cad-toggle"><div class="tw" onclick="cadToggleLote('${item.ean}',this)"><div class="tg ${item.lote_obrigatorio?'on':''}"><div class="tk"></div></div><span style="font-size:11px">${item.lote_obrigatorio?'Sim':'Não'}</span></div></td>
+      <td class="cad-toggle"><div class="tw" onclick="cadToggleB2c('${item.ean}',this)"><div class="tg ${item.b2c?'on':''}"><div class="tk"></div></div><span style="font-size:11px">${item.b2c?'Sim':'Não'}</span></div></td>
+      <td class="cad-toggle"><div class="tw" onclick="cadToggleDesc('${item.ean}',this)"><div class="tg ${item.descontinuado?'on':''}" style="${item.descontinuado?'background:var(--red)':''}"><div class="tk"></div></div><span style="font-size:11px;color:${item.descontinuado?'var(--red)':'inherit'}">${item.descontinuado?'Sim':'Não'}</span></div></td>
       <td><input class="cad-inp" value="${esc(item.notes)}" onblur="cadAutoSave('${item.ean}','notes',this.value)" placeholder="Notas…"></td>
-      <td class="cad-toggle">
-        <div class="tw" onclick="cadToggleB2c('${item.ean}',this)">
-          <div class="tg ${item.b2c?'on':''}"><div class="tk"></div></div>
-          <span style="font-size:11px">${item.b2c?'Sim':'Não'}</span>
-        </div>
-      </td>
-      <td class="cad-toggle">
-        <div class="tw" onclick="cadToggleDesc('${item.ean}',this)">
-          <div class="tg ${item.descontinuado?'on':''}" style="${item.descontinuado?'background:var(--red)':''}"><div class="tk"></div></div>
-          <span style="font-size:11px;color:${item.descontinuado?'var(--red)':'inherit'}">${item.descontinuado?'Sim':'Não'}</span>
-        </div>
-      </td>
     `;
     body.appendChild(tr);
   }
