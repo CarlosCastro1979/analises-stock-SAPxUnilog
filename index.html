@@ -2566,7 +2566,8 @@ const TRANS_MAT_EAN = {
 };
 
 let transData={ecommerce:[],qbrasil:[]};
-let transSegOverride={}; // user-edited stock segurança per EAN+tipo
+let transSegOverride={};
+let dfbSapDataCache=null; // user-edited stock segurança per EAN+tipo
 
 // ── TAB ──
 function transTab(name,el){
@@ -2584,14 +2585,31 @@ function transTab(name,el){
 }
 
 // ── UPLOAD VENDAS ──
-function renderAuditoria(){
-  if(!sapData){document.getElementById('auditEmpty').style.display='block';return;}
+async function renderAuditoria(){
   const srch=document.getElementById('auditSrch').value.toLowerCase();
   const catF=document.getElementById('auditCat').value;
 
+  // Load DFB SAP data - use cache, current sapData (if DFB), or fetch from Supabase
+  let dfbData=dfbSapDataCache;
+  if(!dfbData){
+    if(company==='DFB'&&sapData){
+      dfbData=sapData;dfbSapDataCache=sapData;
+    } else {
+      try{
+        const{data:rec}=await db.from('logistica_stock').select('sap_data').eq('id','DFB').single();
+        if(rec){dfbData=JSON.parse(rec.sap_data).filter(r=>Object.keys(DEPOT_MAP_DFB).includes(r.deposito));dfbSapDataCache=dfbData;}
+      }catch(e){}
+    }
+  }
+  if(!dfbData||!dfbData.length){
+    document.getElementById('auditEmpty').style.display='block';
+    document.getElementById('auditEmpty').innerHTML='<div class="empty-i">⚠️</div><div>Carrega os dados DFB primeiro (aba Dados → Processar e Guardar)</div>';
+    return;
+  }
+
   // EANs with stock in dep 11 (available)
   const stock11={};
-  (dfbSapDataCache||sapData).forEach(r=>{
+  dfbData.forEach(r=>{
     if(!r.EAN_norm||r.deposito!=='11'||r.qt<=0)return;
     if(!stock11[r.EAN_norm])stock11[r.EAN_norm]={qt:0,desc:''};
     stock11[r.EAN_norm].qt+=r.qt;
@@ -2600,7 +2618,7 @@ function renderAuditoria(){
 
   // EANs already in dep 8 (already in B2C)
   const inDep8=new Set();
-  (dfbSapDataCache||sapData).forEach(r=>{if(r.deposito==='8'&&r.qt>0)inDep8.add(r.EAN_norm);});
+  dfbData.forEach(r=>{if(r.deposito==='8'&&r.qt>0)inDep8.add(r.EAN_norm);});
 
   // Filter: in dep11, NOT in dep8, NOT b2c=false, NOT descontinuado
   let rows=[];
@@ -2645,7 +2663,6 @@ function renderAuditoria(){
   if(!rows.length)eRow(body,6,'Tudo configurado ✓');
 }
 
-let dfbSapDataCache=null;
 
 function exportAuditoriaXlsx(){
   const rows=[];
