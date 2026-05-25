@@ -739,7 +739,36 @@ select.cad-inp{cursor:pointer;}
   <div class="its" id="transIts">
     <div class="it active" id="transItEc" onclick="transTab('ecommerce',this)">🛒 Ecommerce (B2C)</div>
     <div class="it" id="transItQb" onclick="transTab('qbrasil',this)">🏢 Qbrasil</div>
+    <div class="it" id="transItAudit" onclick="transTab('auditoria',this)">🔍 Auditoria B2C</div>
     <div class="it" onclick="transTab('vendas',this)">📥 Carregar Vendas</div>
+  </div>
+
+  <!-- AUDITORIA B2C -->
+  <div id="trans-auditoria" style="display:none">
+    <div class="card">
+      <div class="ch">
+        <div class="ct">Auditoria B2C — Produtos disponíveis não configurados</div>
+        <button class="btn bg bs" onclick="exportAuditoriaXlsx()">⬇ Excel</button>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
+        Produtos com stock no dep. <strong>0011 — Disponível</strong> que <strong>não estão no dep. 0008</strong> e não têm B2C=Não nem estão marcados como descontinuados. Verifica se algum deveria estar no ecommerce.
+      </div>
+      <div class="tb">
+        <input class="inp is" id="auditSrch" placeholder="EAN ou descrição…" oninput="renderAuditoria()">
+        <select class="inp" id="auditCat" onchange="renderAuditoria()"><option value="">Todas as categorias</option></select>
+      </div>
+      <div class="kr" id="auditKpis"></div>
+      <div class="tw2"><table>
+        <thead><tr>
+          <th>Categoria</th><th>EAN</th><th>Descrição</th>
+          <th class="num">Stock Dep.0011</th>
+          <th>B2C no Cadastro</th>
+          <th>Acção</th>
+        </tr></thead>
+        <tbody id="auditBody"></tbody>
+      </table></div>
+      <div id="auditEmpty" class="empty" style="display:none"><div class="empty-i">✅</div><div>Todos os produtos disponíveis estão configurados para B2C</div></div>
+    </div>
   </div>
 
   <!-- CARREGAR VENDAS -->
@@ -921,10 +950,13 @@ async function init(){
         // Show/hide tabs based on company
         const itEc=document.getElementById('transItEc');
         const itQb=document.getElementById('transItQb');
+        const itAudit=document.getElementById('transItAudit');
         const divEc=document.getElementById('trans-ecommerce');
         const divQb=document.getElementById('trans-qbrasil');
         if(company==='QB'){
           if(itEc)itEc.style.display='none';
+          if(itAudit)itAudit.style.display='none';
+          const divAudit=document.getElementById('trans-auditoria');if(divAudit)divAudit.style.display='none';
           if(divEc)divEc.style.display='none';
           // Activate Qbrasil tab
           document.querySelectorAll('#transIts .it').forEach(x=>x.classList.remove('active'));
@@ -2543,6 +2575,7 @@ function transTab(name,el){
   ['ecommerce','qbrasil','vendas'].forEach(n=>{
     const d=document.getElementById('trans-'+n);if(d)d.style.display=n===name?'':'none';
   });
+  if(name==='auditoria')renderAuditoria();
   if(name==='vendas')loadVendasHist();
   if(name==='ecommerce'){
     if(transData.ecommerce.length)renderTrans('ecommerce');
@@ -2551,6 +2584,83 @@ function transTab(name,el){
 }
 
 // ── UPLOAD VENDAS ──
+function renderAuditoria(){
+  if(!sapData){document.getElementById('auditEmpty').style.display='block';return;}
+  const srch=document.getElementById('auditSrch').value.toLowerCase();
+  const catF=document.getElementById('auditCat').value;
+
+  // EANs with stock in dep 11 (available)
+  const stock11={};
+  (dfbSapDataCache||sapData).forEach(r=>{
+    if(!r.EAN_norm||r.deposito!=='11'||r.qt<=0)return;
+    if(!stock11[r.EAN_norm])stock11[r.EAN_norm]={qt:0,desc:''};
+    stock11[r.EAN_norm].qt+=r.qt;
+    if(r.desc)stock11[r.EAN_norm].desc=r.desc;
+  });
+
+  // EANs already in dep 8 (already in B2C)
+  const inDep8=new Set();
+  (dfbSapDataCache||sapData).forEach(r=>{if(r.deposito==='8'&&r.qt>0)inDep8.add(r.EAN_norm);});
+
+  // Filter: in dep11, NOT in dep8, NOT b2c=false, NOT descontinuado
+  let rows=[];
+  Object.entries(stock11).forEach(([ean,v])=>{
+    if(inDep8.has(ean))return; // already in B2C
+    const param=occParams.find(p=>p.ean===ean);
+    if(param?.descontinuado===true)return; // discontinued
+    if(param?.b2c===false)return; // explicitly not B2C
+    rows.push({ean,desc:v.desc,qt:v.qt,cat:param?.cat||'',b2cStatus:param?'Não definido':'Sem cadastro'});
+  });
+
+  // Update cat filter
+  const cats=[...new Set(rows.map(r=>r.cat).filter(Boolean))].sort();
+  const catSel=document.getElementById('auditCat');const catCur=catSel.value;
+  catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  catSel.value=cats.includes(catCur)?catCur:'';
+  const catActive=catSel.value;
+
+  if(srch)rows=rows.filter(r=>r.ean.includes(srch)||r.desc.toLowerCase().includes(srch));
+  if(catActive)rows=rows.filter(r=>r.cat===catActive);
+  rows.sort((a,b)=>String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'))||String(a.desc).localeCompare(String(b.desc)));
+
+  document.getElementById('auditKpis').innerHTML=`
+    <div class="kpi"><div class="kl">Produtos a verificar</div><div class="kv r">${fmt(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Stock total dep.0011</div><div class="kv b">${fmt(rows.reduce((s,r)=>s+r.qt,0))}</div></div>
+  `;
+
+  const body=document.getElementById('auditBody');body.innerHTML='';
+  document.getElementById('auditEmpty').style.display=rows.length===0?'block':'none';
+  for(const r of rows){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td style="font-size:11px">${r.cat||'<span style="color:var(--muted)">Sem categoria</span>'}</td>
+      <td><span class="badge bneu">${r.ean}</span></td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.desc}</td>
+      <td class="num">${fmt(r.qt)}</td>
+      <td><span class="badge ${r.b2cStatus==='Sem cadastro'?'berr':'bwarn'}">${r.b2cStatus}</span></td>
+      <td style="font-size:11px;color:var(--muted)">→ Ir ao Cadastro e definir B2C Sim/Não</td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!rows.length)eRow(body,6,'Tudo configurado ✓');
+}
+
+let dfbSapDataCache=null;
+
+function exportAuditoriaXlsx(){
+  const rows=[];
+  document.querySelectorAll('#auditBody tr').forEach(tr=>{
+    const cells=tr.querySelectorAll('td');
+    if(cells.length<5)return;
+    rows.push({Categoria:cells[0].textContent,EAN:cells[1].textContent.trim(),Descricao:cells[2].textContent,StockDep0011:parseInt(cells[3].textContent.replace(/\./g,''))||0,B2C:cells[4].textContent.trim()});
+  });
+  if(!rows.length){toast('Sem dados','error');return;}
+  const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Auditoria B2C');
+  XLSX.writeFile(wb,`auditoria_b2c_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+
 async function limparVendas(){
   if(!confirm('Apagar TODOS os dados de vendas do Supabase? Esta acção não pode ser desfeita.'))return;
   const status=document.getElementById('transVendasStatus');
@@ -2828,6 +2938,7 @@ async function buildTransData(){
 
     renderTrans('ecommerce');
     renderTrans('qbrasil');
+    dfbSapDataCache=dfbSapData;
     toast('Transferências calculadas ✓','success');
   }catch(e){toast('Erro: '+e.message,'error');}
 }
