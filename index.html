@@ -2580,6 +2580,9 @@ async function uploadVendas(){
         const mes=dateStr.includes('.')?`${dp[3]}-${dp[2]}`:`${dp[1]}-${dp[2]}`;
         const orgVendas=String(row['Organização vendas']||'');
         const canal=String(row['Canal distribuição']||'');
+        const emissor=String(row['Emissor da ordem']||'');
+        // Exclude generic customers BR00002 and BR00003
+        if(emissor.includes('BR00002')||emissor.includes('BR00003'))return;
         let emp='';
         if(orgVendas.includes('QB01'))emp='QB';
         else if(canal.includes('09'))emp='B2C';
