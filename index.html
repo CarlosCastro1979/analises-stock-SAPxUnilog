@@ -2796,7 +2796,7 @@ async function buildTransData(){
           }
         }
         const stockDisp11=lotes.reduce((s,l)=>s+l.qt,0);
-        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0,notB2C:notB2C||false});
+        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0,notB2C:false});
       });
       return rows.sort((a,b)=>b.necessidade-a.necessidade);
     }
