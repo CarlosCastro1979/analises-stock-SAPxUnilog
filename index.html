@@ -789,7 +789,7 @@ select.cad-inp{cursor:pointer;}
           <th class="num">Média 6M</th>
           <th class="num">Stock B2C</th>
           <th class="num">Cobertura</th>
-          <th class="num" title="Editável — sugestão = média 3 meses">Stock Seg. ✏️</th>
+          <th class="num" title="Média ajustada — sugestão = média 3M">Média Ajust. ✏️</th>
           <th class="num">Necessidade</th>
           <th>Lotes Sugeridos</th>
           <th>Estado</th>
@@ -831,7 +831,7 @@ select.cad-inp{cursor:pointer;}
           <th class="num">Média 6M</th>
           <th class="num">Stock QB</th>
           <th class="num">Cobertura</th>
-          <th class="num" title="Editável — sugestão = média 3 meses">Stock Seg. ✏️</th>
+          <th class="num" title="Média ajustada — sugestão = média 3M">Média Ajust. ✏️</th>
           <th class="num">Necessidade</th>
           <th>Lotes Sugeridos</th>
           <th>Estado</th>
@@ -2851,9 +2851,10 @@ function renderTrans(tipo){
     const param=occParams.find(p=>p.ean===r.ean);
     const cx=param?.unidades_cx||null;
     // Coverage = stock / media3 months
-    const cobertura=r.media3>0?Math.round(r.stockDest/r.media3*10)/10:null;
-    const coberturaIdeal=r.seguranca>0&&r.media3>0?Math.round(r.seguranca/r.media3*10)/10:1;
-    const coberturaMax=coberturaIdeal*1.25;
+    // Cobertura = stock actual / media ajustada (campo editavel)
+    const mediaAjust=r.seguranca||r.media3||1;
+    const cobertura=mediaAjust>0?Math.round(r.stockDest/mediaAjust*10)/10:null;
+    const coberturaMax=1.25;
     const stockMax=Math.ceil(r.seguranca*1.25);
     const excessoStock=r.stockDest-stockMax;
     // Cobertura color
@@ -2875,6 +2876,7 @@ function renderTrans(tipo){
     const lotesHtmlFinal=lotesHtml+(returnHtml||'');
 
     const tr=document.createElement('tr');
+    tr.dataset.eanTrans=r.ean;
     if(excessoStock>0)tr.style.background='#fffbeb';
     else if(r.necessidade>0&&!r.semValidade)tr.style.background='#fff5f5';
     tr.innerHTML=`
@@ -2884,7 +2886,7 @@ function renderTrans(tipo){
       <td class="num">${fmt(r.media3)}</td>
       <td class="num" style="color:var(--muted)">${fmt(r.media6)}</td>
       <td class="num">${fmt(r.stockDest)}</td>
-      <td class="num" style="font-weight:700;color:${covColor}">${cobertura!==null?cobertura+'m':'—'}</td>
+      <td class="num cov-cell" style="font-weight:700;color:${covColor}">${cobertura!==null?cobertura+'m':'—'}</td>
       <td class="num"><input type="number" min="0" value="${r.seguranca}"
         style="width:65px;text-align:right;font-family:var(--mono);font-size:12px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;background:var(--bg3)"
         onchange="updateSeg('${overKey}',this.value,'${tipo}')"
@@ -2901,14 +2903,40 @@ function renderTrans(tipo){
 function updateSeg(key,val,tipo){
   const n=parseInt(val)||0;
   transSegOverride[key]=n;
-  // Recalc necessidade for this row
   const isEc=tipo==='ecommerce';
   const rows=isEc?transData.ecommerce:transData.qbrasil;
-  const stockKey=isEc?'8':'11';
   const ean=key.split('|')[1];
   const row=rows.find(r=>r.ean===ean);
-  if(row){row.seguranca=n;row.necessidade=Math.max(0,n-row.stockDest);}
-  renderTrans(tipo);
+  if(!row)return;
+  row.seguranca=n;
+  row.necessidade=Math.max(0,n-row.stockDest);
+
+  // Update only the affected row cells without re-rendering the whole table
+  const tr=document.querySelector('[data-ean-trans="'+ean+'"]');
+  if(!tr){renderTrans(tipo);return;}
+
+  const mediaAjust=n||row.media3||1;
+  const cobertura=Math.round(row.stockDest/mediaAjust*10)/10;
+  const coberturaMax=1.25;
+  const covColor=cobertura>coberturaMax?'var(--red)':cobertura<0.5?'var(--yellow)':'var(--green)';
+  const stockMax=Math.ceil(n*1.25);
+  const excessoStock=row.stockDest-stockMax;
+
+  // Update cobertura cell
+  const covCell=tr.querySelector('.cov-cell');
+  if(covCell){covCell.style.color=covColor;covCell.textContent=cobertura!==null?cobertura+'m':'—';}
+
+  // Update necessidade cell
+  const needCell=tr.querySelector('.need-cell');
+  if(needCell){
+    needCell.style.color=row.necessidade>0?'var(--red)':excessoStock>0?'var(--yellow)':'var(--green)';
+    needCell.textContent=row.necessidade>0?row.necessidade.toLocaleString('pt-BR'):excessoStock>0?'Excesso':'—';
+  }
+
+  // Update row background
+  if(excessoStock>0)tr.style.background='#fffbeb';
+  else if(row.necessidade>0&&!row.semValidade)tr.style.background='#fff5f5';
+  else tr.style.background='';
 }
 
 // ── EXPORT ──
