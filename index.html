@@ -1586,66 +1586,19 @@ function renderCadastro(){
     if(edited)tr.style.background='#fffbeb';
     const cadDeps=DKS.filter(dk=>sapData&&sapData.some(r=>r.EAN_norm===item.ean&&r.deposito===dk));
     const cadDepHtml=cadDeps.length?cadDeps.map(dk=>`<span class="badge bgray" style="margin-right:2px;font-size:9px">${DEPOT_MAP[dk].label.split('—')[1].trim()}</span>`).join(''):'<span style="color:var(--muted);font-size:11px">—</span>';
-    // Build row using helper to avoid quote escaping issues
-    const cells=[
-      ['cat','input','cad-inp',item.cat],
-      ['subcat','input','cad-inp',item.subcat]
-    ];
+    // Build cadastro row
     const ean=item.ean;
-    const R=document.createElement;
-    function td(html){const t=document.createElement('td');t.innerHTML=html;return t;}
-    function tdInput(field,val,placeholder,extraStyle){
-      const t=document.createElement('td');
-      const i=document.createElement('input');
-      i.className='cad-inp';i.value=val||'';i.placeholder=placeholder||'';
-      if(extraStyle)i.style.cssText=extraStyle;
-      i.setAttribute('list','cad_'+field+'_dl');
-      i.addEventListener('blur',function(){cadAutoSave(ean,field,this.value);});
-      t.appendChild(i);
-      const dl=document.createElement('datalist');dl.id='cad_'+field+'_dl';
-      (field==='cat'?allCats:allSubs).forEach(c=>{const o=document.createElement('option');o.value=c;dl.appendChild(o);});
-      t.appendChild(dl);return t;
-    }
-    function tdNum(field,val,placeholder,w){
-      const t=document.createElement('td');
-      const i=document.createElement('input');
-      i.className='cad-inp';i.type='number';i.min='1';i.value=val||'';i.placeholder=placeholder||'';
-      i.style.width=w||'70px';
-      i.addEventListener('blur',function(){cadAutoSave(ean,field,parseInt(this.value)||null);});
-      t.appendChild(i);return t;
-    }
-    function tdToggle(fn,state,labelY,labelN,redWhenOn){
-      const t=document.createElement('td');t.className='cad-toggle';
-      const tw=document.createElement('div');tw.className='tw';
-      const tg=document.createElement('div');tg.className='tg'+(state?' on':'');
-      if(redWhenOn&&state)tg.style.background='var(--red)';
-      tg.innerHTML='<div class="tk"></div>';
-      const sp=document.createElement('span');sp.style.fontSize='11px';
-      sp.textContent=state?labelY:labelN;
-      if(redWhenOn&&state)sp.style.color='var(--red)';
-      tw.appendChild(tg);tw.appendChild(sp);
-      tw.onclick=function(){fn(ean,this);};
-      t.appendChild(tw);return t;
-    }
-    function tdNotes(val){
-      const t=document.createElement('td');
-      const i=document.createElement('input');
-      i.className='cad-inp';i.value=esc(val)||'';i.placeholder='Notas…';
-      i.addEventListener('blur',function(){cadAutoSave(ean,'notes',this.value);});
-      t.appendChild(i);return t;
-    }
-    function tdSpan(html,style){const t=document.createElement('td');if(style)t.style.cssText=style;t.innerHTML=html;return t;}
-    tr.appendChild(tdInput('cat',item.cat,'Categoria…'));
-    tr.appendChild(tdInput('subcat',item.subcat,'Subcategoria…'));
-    tr.appendChild(tdSpan('<span class="badge bneu">'+ean+'</span>'));
-    tr.appendChild(tdSpan(item.desc,'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px'));
-    tr.appendChild(tdSpan(cadDepHtml,'white-space:nowrap'));
-    tr.appendChild(tdNum('qty_per_pos',item.qty_per_pos,'0','70px'));
-    tr.appendChild(tdNum('unidades_cx',item.unidades_cx,'—','60px'));
-    tr.appendChild(tdToggle(cadToggleLote,item.lote_obrigatorio,'Sim','Não',false));
-    tr.appendChild(tdToggle(cadToggleB2c,item.b2c,'Sim','Não',false));
-    tr.appendChild(tdToggle(cadToggleDesc,item.descontinuado,'Sim','Não',true));
-    tr.appendChild(tdNotes(item.notes));
+    tr.appendChild((function(){const t=document.createElement('td');const i=document.createElement('input');i.className='cad-inp';i.setAttribute('list','cad_cat_dl_r');i.value=item.cat||'';i.placeholder='Categoria…';i.addEventListener('blur',function(){cadAutoSave(ean,'cat',this.value);});const dl=document.createElement('datalist');dl.id='cad_cat_dl_r';allCats.forEach(c=>{const o=document.createElement('option');o.value=c;dl.appendChild(o);});t.appendChild(i);t.appendChild(dl);return t;})());
+    tr.appendChild((function(){const t=document.createElement('td');const i=document.createElement('input');i.className='cad-inp';i.setAttribute('list','cad_sub_dl_r');i.value=item.subcat||'';i.placeholder='Subcategoria…';i.addEventListener('blur',function(){cadAutoSave(ean,'subcat',this.value);});const dl=document.createElement('datalist');dl.id='cad_sub_dl_r';allSubs.forEach(c=>{const o=document.createElement('option');o.value=c;dl.appendChild(o);});t.appendChild(i);t.appendChild(dl);return t;})());
+    tr.appendChild((function(){const t=document.createElement('td');t.innerHTML='<span class="badge bneu">'+ean+'</span>';return t;})());
+    tr.appendChild((function(){const t=document.createElement('td');t.style.cssText='max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px';t.title=item.desc||'';t.textContent=item.desc||'';return t;})());
+    tr.appendChild((function(){const t=document.createElement('td');t.style.whiteSpace='nowrap';t.innerHTML=cadDepHtml;return t;})());
+    tr.appendChild((function(){const t=document.createElement('td');const i=document.createElement('input');i.className='cad-inp';i.type='number';i.min='1';i.value=item.qty_per_pos||'';i.placeholder='0';i.style.width='70px';i.addEventListener('blur',function(){cadAutoSave(ean,'qty_per_pos',parseInt(this.value)||null);});t.appendChild(i);return t;})());
+    tr.appendChild((function(){const t=document.createElement('td');const i=document.createElement('input');i.className='cad-inp';i.type='number';i.min='1';i.value=item.unidades_cx||'';i.placeholder='—';i.style.width='60px';i.addEventListener('blur',function(){cadAutoSave(ean,'unidades_cx',parseInt(this.value)||null);});t.appendChild(i);return t;})());
+    tr.appendChild((function(){const t=document.createElement('td');t.className='cad-toggle';const tw=document.createElement('div');tw.className='tw';const tg=document.createElement('div');tg.className='tg'+(item.lote_obrigatorio?' on':'');tg.innerHTML='<div class="tk"></div>';const sp=document.createElement('span');sp.style.fontSize='11px';sp.textContent=item.lote_obrigatorio?'Sim':'Não';tw.appendChild(tg);tw.appendChild(sp);tw.onclick=function(){cadToggleLote(ean,this);};t.appendChild(tw);return t;})());
+    tr.appendChild((function(){const t=document.createElement('td');t.className='cad-toggle';const tw=document.createElement('div');tw.className='tw';const tg=document.createElement('div');tg.className='tg'+(item.b2c?' on':'');tg.innerHTML='<div class="tk"></div>';const sp=document.createElement('span');sp.style.fontSize='11px';sp.textContent=item.b2c?'Sim':'Não';tw.appendChild(tg);tw.appendChild(sp);tw.onclick=function(){cadToggleB2c(ean,this);};t.appendChild(tw);return t;})());
+    tr.appendChild((function(){const t=document.createElement('td');t.className='cad-toggle';const tw=document.createElement('div');tw.className='tw';const tg=document.createElement('div');tg.className='tg'+(item.descontinuado?' on':'');if(item.descontinuado)tg.style.background='var(--red)';tg.innerHTML='<div class="tk"></div>';const sp=document.createElement('span');sp.style.fontSize='11px';sp.textContent=item.descontinuado?'Sim':'Não';if(item.descontinuado)sp.style.color='var(--red)';tw.appendChild(tg);tw.appendChild(sp);tw.onclick=function(){cadToggleDesc(ean,this);};t.appendChild(tw);return t;})());
+    tr.appendChild((function(){const t=document.createElement('td');const i=document.createElement('input');i.className='cad-inp';i.value=item.notes||'';i.placeholder='Notas…';i.addEventListener('blur',function(){cadAutoSave(ean,'notes',this.value);});t.appendChild(i);return t;})());
         body.appendChild(tr);
   }
   if(!items.length)eRow(body,8,'Nenhum resultado');
