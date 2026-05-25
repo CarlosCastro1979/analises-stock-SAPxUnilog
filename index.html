@@ -2724,8 +2724,9 @@ async function buildTransData(){
         const param=occParams.find(p=>p.ean===ean);
         // Skip discontinued products
         if(param?.descontinuado===true)return;
-        // For B2C: skip if b2c=false
-        if(stockKey==='8'&&param?.b2c===false)return;
+        // For B2C: if b2c=false, only show if has stock in dep 8 (to recommend removal)
+        const notB2C=stockKey==='8'&&param?.b2c===false;
+        if(notB2C&&!(sapStock[ean]&&sapStock[ean]['8']>0))return;
         const v3=calcAvgMonths(vendaMap[ean]||[],3);
         const v6=calcAvgMonths(vendaMap[ean]||[],6);
         if(v3<=0&&v6<=0)return;
@@ -2754,7 +2755,7 @@ async function buildTransData(){
           }
         }
         const stockDisp11=lotes.reduce((s,l)=>s+l.qt,0);
-        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0});
+        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0,notB2C:notB2C||false});
       });
       return rows.sort((a,b)=>b.necessidade-a.necessidade);
     }
@@ -2795,7 +2796,7 @@ async function buildTransData(){
           }
         }
         const stockDisp11=lotes.reduce((s,l)=>s+l.qt,0);
-        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0});
+        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0,notB2C:notB2C||false});
       });
       return rows.sort((a,b)=>b.necessidade-a.necessidade);
     }
@@ -2852,7 +2853,14 @@ function renderTrans(tipo){
 
   for(const r of filtered){
     let estadoHtml='',lotesHtml='';
-    if(r.necessidade===0){
+    if(r.notB2C){
+      // Not a B2C product but has stock in dep 0008 - recommend removal
+      const cx=occParams.find(p=>p.ean===r.ean)?.unidades_cx||null;
+      const qtRetirar=r.stockDest;
+      const cxRetirar=cx&&cx>1?Math.floor(qtRetirar/cx):null;
+      estadoHtml='<span class="badge bwarn" style="background:#fde68a;color:#92400e">⚠ Não é artigo B2C</span>';
+      lotesHtml=`<span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Retirar ${fmt(qtRetirar)} un do dep.0008${cxRetirar?` (${cxRetirar} CX)`:''} → dep.0011</span>`;
+    } else if(r.necessidade===0){
       estadoHtml='<span class="badge bok">✓ Stock OK</span>';lotesHtml='—';
     } else if(r.semValidade){
       estadoHtml='<span class="badge bwarn">✗ Sem stock válido</span>';
