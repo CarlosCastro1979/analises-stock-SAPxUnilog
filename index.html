@@ -2743,7 +2743,8 @@ async function buildTransData(){
         if(notB2C&&!(sapStock[ean]&&sapStock[ean]['8']>0))return;
         const v3=calcAvgMonths(vendaMap[ean]||[],3);
         const v6=calcAvgMonths(vendaMap[ean]||[],6);
-        if(v3<=0&&v6<=0)return;
+        // Only skip if no sales AND no stock in destination depot
+        if(v3<=0&&v6<=0&&!(sapStock[ean]&&sapStock[ean][stockKey]>0))return;
         const overKey=stockKey+'|'+ean;
         const cxMin=param?.unidades_cx||null;
         const segSugest=stockKey==='8'&&cxMin?Math.max(Math.ceil(v3),cxMin):Math.ceil(v3)||1;
