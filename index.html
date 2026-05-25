@@ -2620,14 +2620,18 @@ async function renderAuditoria(){
 
   // Filter: in dep11, NOT in dep8, b2c=true or undefined, NOT descontinuado
   let rows=[];
+  let _dbg={total:0,inDep8:0,disc:0,b2cFalse:0,pass:0};
   Object.entries(stock11).forEach(([ean,v])=>{
-    if(inDep8.has(ean))return;
+    _dbg.total++;
+    if(inDep8.has(ean)){_dbg.inDep8++;return;}
     const param=occParams.find(p=>p.ean===ean);
-    if(param?.descontinuado===true)return;
-    if(param?.b2c===false)return;
+    if(param?.descontinuado===true){_dbg.disc++;return;}
+    if(param?.b2c===false){_dbg.b2cFalse++;return;}
+    _dbg.pass++;
     const b2cStatus=!param?'Sem cadastro':param.b2c===true?'B2C = Sim':'Não definido';
     rows.push({ean,desc:v.desc,qt:v.qt,cat:param?.cat||'',b2cStatus});
   });
+  console.log('audit filter:', _dbg, 'occParams:', occParams.length);
 
   // Update cat filter
   const cats=[...new Set(rows.map(r=>r.cat).filter(Boolean))].sort();
