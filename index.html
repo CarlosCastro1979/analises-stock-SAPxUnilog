@@ -145,6 +145,13 @@ tr.dr td:first-child{border-left:3px solid var(--red);}
 select.cad-inp{cursor:pointer;}
 .cad-toggle{text-align:center;vertical-align:middle;}
 
+/* RESIZABLE COLUMNS */
+.tw2 table{table-layout:fixed;}
+.tw2 th{position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tw2 th .resizer{position:absolute;right:0;top:0;width:5px;height:100%;cursor:col-resize;user-select:none;background:transparent;}
+.tw2 th .resizer:hover,.tw2 th .resizer.dragging{background:var(--red);}
+.tw2 td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
 /* INNER TABS */
 .its{display:flex;border-bottom:2px solid var(--border);margin-bottom:16px;}
 .it{padding:8px 16px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;}
@@ -1434,6 +1441,7 @@ function renderRecon(){
     body.appendChild(tr);
   }
   if(!rows.length)eRow(body,13,'Nenhum resultado');
+  setTimeout(applyResizable,0);
 }
 
 function findOther(ean,lote,curDk){const found=[];for(const dk of DKS){if(dk===curDk)continue;const m=(reconData[dk]||[]).find(r=>r.EAN_norm===ean&&r.Lote_norm===lote);if(m&&(m.qt_sap>0||m.qt_uni>0))found.push({label:DEPOT_MAP[dk].label.split('—')[1].trim(),qt_sap:m.qt_sap,qt_uni:m.qt_uni});}return found;}
@@ -1897,6 +1905,7 @@ function renderOccView(){
     body.appendChild(tr);
   }
   if(!rows.length)eRow(body,13,'Nenhum resultado');
+  setTimeout(applyResizable,0);
 }
 
 // ── OCC BASE ──
@@ -2902,6 +2911,7 @@ function renderTrans(tipo){
     body.appendChild(tr);
   }
   if(!filtered.length)eRow(body,11,'Clica "Calcular" para processar');
+  setTimeout(applyResizable,0);
 }
 
 function updateSeg(key,val,tipo){
@@ -2962,6 +2972,44 @@ function exportTransXlsx(tipo){
   XLSX.utils.book_append_sheet(wb,ws,isEc?'Ecommerce B2C':'Qbrasil');
   XLSX.writeFile(wb,`transferencias_${isEc?'ecommerce':'qbrasil'}_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
+
+
+// ── RESIZABLE COLUMNS ──
+function makeResizable(table){
+  const cols=table.querySelectorAll('th');
+  cols.forEach(th=>{
+    // Add resizer handle
+    const resizer=document.createElement('div');
+    resizer.className='resizer';
+    th.appendChild(resizer);
+    let startX,startW;
+    resizer.addEventListener('mousedown',e=>{
+      startX=e.pageX;
+      startW=th.offsetWidth;
+      resizer.classList.add('dragging');
+      const onMove=e=>{
+        const w=Math.max(40,startW+(e.pageX-startX));
+        th.style.width=w+'px';th.style.minWidth=w+'px';
+      };
+      const onUp=()=>{
+        resizer.classList.remove('dragging');
+        document.removeEventListener('mousemove',onMove);
+        document.removeEventListener('mouseup',onUp);
+      };
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
+      e.preventDefault();
+    });
+  });
+}
+// Apply to all tables after render
+function applyResizable(){
+  document.querySelectorAll('.tw2 table').forEach(t=>{
+    if(!t.dataset.resizable){makeResizable(t);t.dataset.resizable='1';}
+  });
+}
+// Hook into nav tab clicks
+const _origNavClick=document.querySelectorAll('.nt');
 
 
 init();
