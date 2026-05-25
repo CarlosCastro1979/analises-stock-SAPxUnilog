@@ -2614,9 +2614,11 @@ async function renderAuditoria(){
     if(r.desc)stock11[r.EAN_norm].desc=r.desc;
   });
 
+  console.log('dfbData total:', dfbData.length, 'deps:', [...new Set(dfbData.map(r=>r.deposito))], 'stock11 count:', Object.keys(stock11).length);
   // EANs already in dep 8 (already in B2C)
   const inDep8=new Set();
   dfbData.forEach(r=>{if(r.deposito==='8'&&r.qt>0)inDep8.add(r.EAN_norm);});
+  console.log('inDep8:', inDep8.size, 'rows before filter:', Object.keys(stock11).filter(e=>!inDep8.has(e)).length);
 
   // Filter: in dep11, NOT in dep8, NOT b2c=false, NOT descontinuado
   let rows=[];
