@@ -2747,8 +2747,8 @@ async function buildTransData(){
       const eans=new Set(Object.keys(vendaMap));
       const rows=[];
       eans.forEach(ean=>{
-        const paramCheck=occParams.find(p=>p.ean===ean);
-        if(paramCheck?.descontinuado===true)return;
+        const param=occParams.find(p=>p.ean===ean);
+        if(param?.descontinuado===true)return;
         const v3=calcAvgMonths(vendaMap[ean]||[],3);
         const v6=calcAvgMonths(vendaMap[ean]||[],6);
         if(v3<=0&&v6<=0)return;
