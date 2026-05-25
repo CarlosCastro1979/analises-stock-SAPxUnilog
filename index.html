@@ -2651,6 +2651,7 @@ async function renderAuditoria(){
 
   const body=document.getElementById('auditBody');body.innerHTML='';
   document.getElementById('auditEmpty').style.display=rows.length===0?'block':'none';
+  console.log('rows to render:', rows.length, rows[0]);
   for(const r of rows){
     const tr=document.createElement('tr');
     tr.innerHTML=`
