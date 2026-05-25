@@ -2711,7 +2711,11 @@ async function buildTransData(){
     }
 
     function buildRows(vendaMap, stockKey, minDate, antiFifo){
-      const eans=new Set([...Object.keys(vendaMap)]);
+      // Include EANs with sales AND EANs with actual stock in the destination depot
+      const eans=new Set([
+        ...Object.keys(vendaMap),
+        ...Object.keys(sapStock).filter(ean=>sapStock[ean][stockKey]>0)
+      ]);
       const rows=[];
       eans.forEach(ean=>{
         const param=occParams.find(p=>p.ean===ean);
