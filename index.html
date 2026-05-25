@@ -751,7 +751,7 @@ select.cad-inp{cursor:pointer;}
         <button class="btn bg bs" onclick="exportAuditoriaXlsx()">⬇ Excel</button>
       </div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
-        Produtos com stock no dep. <strong>0011 — Disponível</strong> que <strong>não estão no dep. 0008</strong> e não têm B2C=Não nem estão marcados como descontinuados. Verifica se algum deveria estar no ecommerce.
+        Produtos com stock no dep. <strong>0011 — Disponível</strong>, <strong>não estão no dep. 0008</strong>, têm <strong>B2C=Sim</strong> (ou não definido) e não estão descontinuados. Verifica se algum deveria ser transferido para o ecommerce.
       </div>
       <div class="tb">
         <input class="inp is" id="auditSrch" placeholder="EAN ou descrição…" oninput="renderAuditoria()">
@@ -767,7 +767,7 @@ select.cad-inp{cursor:pointer;}
         </tr></thead>
         <tbody id="auditBody"></tbody>
       </table></div>
-      <div id="auditEmpty" class="empty" style="display:none"><div class="empty-i">✅</div><div>Todos os produtos disponíveis estão configurados para B2C</div></div>
+      <div id="auditEmpty" class="empty" style="display:none"><div class="empty-i">✅</div><div>Todos os produtos B2C disponíveis já estão no dep. 0008 ✓</div></div>
     </div>
   </div>
 
@@ -2614,20 +2614,19 @@ async function renderAuditoria(){
     if(r.desc)stock11[r.EAN_norm].desc=r.desc;
   });
 
-  console.log('dfbData total:', dfbData.length, 'deps:', [...new Set(dfbData.map(r=>r.deposito))], 'stock11 count:', Object.keys(stock11).length);
   // EANs already in dep 8 (already in B2C)
   const inDep8=new Set();
   dfbData.forEach(r=>{if(r.deposito==='8'&&r.qt>0)inDep8.add(r.EAN_norm);});
-  console.log('inDep8:', inDep8.size, 'rows before filter:', Object.keys(stock11).filter(e=>!inDep8.has(e)).length);
 
-  // Filter: in dep11, NOT in dep8, NOT b2c=false, NOT descontinuado
+  // Filter: in dep11, NOT in dep8, b2c=true or undefined, NOT descontinuado
   let rows=[];
   Object.entries(stock11).forEach(([ean,v])=>{
-    if(inDep8.has(ean))return; // already in B2C
+    if(inDep8.has(ean))return;
     const param=occParams.find(p=>p.ean===ean);
-    if(param?.descontinuado===true){console.log('skip disc:', ean);return;} // discontinued
-    if(param?.b2c===false){console.log('skip b2c=false:', ean);return;} // explicitly not B2C
-    rows.push({ean,desc:v.desc,qt:v.qt,cat:param?.cat||'',b2cStatus:param?'Não definido':'Sem cadastro'});
+    if(param?.descontinuado===true)return;
+    if(param?.b2c===false)return;
+    const b2cStatus=!param?'Sem cadastro':param.b2c===true?'B2C = Sim':'Não definido';
+    rows.push({ean,desc:v.desc,qt:v.qt,cat:param?.cat||'',b2cStatus});
   });
 
   // Update cat filter
@@ -2655,7 +2654,7 @@ async function renderAuditoria(){
       <td><span class="badge bneu">${r.ean}</span></td>
       <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.desc}</td>
       <td class="num">${fmt(r.qt)}</td>
-      <td><span class="badge ${r.b2cStatus==='Sem cadastro'?'berr':'bwarn'}">${r.b2cStatus}</span></td>
+      <td><span class="badge ${r.b2cStatus==='B2C = Sim'?'bok':r.b2cStatus==='Sem cadastro'?'berr':'bwarn'}">${r.b2cStatus}</span></td>
       <td style="font-size:11px;color:var(--muted)">→ Ir ao Cadastro e definir B2C Sim/Não</td>
     `;
     body.appendChild(tr);
