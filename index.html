@@ -2625,8 +2625,8 @@ async function renderAuditoria(){
   Object.entries(stock11).forEach(([ean,v])=>{
     if(inDep8.has(ean))return; // already in B2C
     const param=occParams.find(p=>p.ean===ean);
-    if(param?.descontinuado===true)return; // discontinued
-    if(param?.b2c===false)return; // explicitly not B2C
+    if(param?.descontinuado===true){console.log('skip disc:', ean);return;} // discontinued
+    if(param?.b2c===false){console.log('skip b2c=false:', ean);return;} // explicitly not B2C
     rows.push({ean,desc:v.desc,qt:v.qt,cat:param?.cat||'',b2cStatus:param?'Não definido':'Sem cadastro'});
   });
 
