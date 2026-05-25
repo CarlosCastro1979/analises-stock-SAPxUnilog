@@ -2608,6 +2608,7 @@ async function renderAuditoria(){
   }
 
   // EANs with stock in dep 11 (available)
+  console.log('dfbData length:', dfbData.length, 'sample dep:', dfbData.slice(0,3).map(r=>r.deposito));
   const stock11={};
   dfbData.forEach(r=>{
     if(!r.EAN_norm||r.deposito!=='11'||r.qt<=0)return;
