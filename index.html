@@ -1580,25 +1580,47 @@ function renderCadastro(){
   });
   document.getElementById('cadCount').textContent=`${items.length} artigos`;
   const body=document.getElementById('cadBody');body.innerHTML='';
+  // Event delegation for inputs and toggles
+  body.onblur=function(e){
+    const el=e.target;const ean=el.dataset.ean;if(!ean)return;
+    if(el.dataset.field){
+      const val=el.dataset.int?parseInt(el.value)||null:el.value;
+      cadAutoSave(ean,el.dataset.field,val);
+    }
+  };
+  body.onclick=function(e){
+    const tw=e.target.closest('[data-toggle]');if(!tw)return;
+    const ean=tw.dataset.ean;const type=tw.dataset.toggle;
+    if(type==='lote')cadToggleLote(ean,tw);
+    else if(type==='b2c')cadToggleB2c(ean,tw);
+    else if(type==='desc')cadToggleDesc(ean,tw);
+  };
   for(const item of items){
     const edited=!!cadEdits[item.ean];
     const tr=document.createElement('tr');
     if(edited)tr.style.background='#fffbeb';
     const cadDeps=DKS.filter(dk=>sapData&&sapData.some(r=>r.EAN_norm===item.ean&&r.deposito===dk));
     const cadDepHtml=cadDeps.length?cadDeps.map(dk=>`<span class="badge bgray" style="margin-right:2px;font-size:9px">${DEPOT_MAP[dk].label.split('—')[1].trim()}</span>`).join(''):'<span style="color:var(--muted);font-size:11px">—</span>';
-    // Build cadastro row
+    // Build cadastro row via innerHTML - safe with proper escaping
     const ean=item.ean;
-    tr.appendChild((function(){const t=document.createElement('td');const i=document.createElement('input');i.className='cad-inp';i.setAttribute('list','cad_cat_dl_r');i.value=item.cat||'';i.placeholder='Categoria…';i.addEventListener('blur',function(){cadAutoSave(ean,'cat',this.value);});const dl=document.createElement('datalist');dl.id='cad_cat_dl_r';allCats.forEach(c=>{const o=document.createElement('option');o.value=c;dl.appendChild(o);});t.appendChild(i);t.appendChild(dl);return t;})());
-    tr.appendChild((function(){const t=document.createElement('td');const i=document.createElement('input');i.className='cad-inp';i.setAttribute('list','cad_sub_dl_r');i.value=item.subcat||'';i.placeholder='Subcategoria…';i.addEventListener('blur',function(){cadAutoSave(ean,'subcat',this.value);});const dl=document.createElement('datalist');dl.id='cad_sub_dl_r';allSubs.forEach(c=>{const o=document.createElement('option');o.value=c;dl.appendChild(o);});t.appendChild(i);t.appendChild(dl);return t;})());
-    tr.appendChild((function(){const t=document.createElement('td');t.innerHTML='<span class="badge bneu">'+ean+'</span>';return t;})());
-    tr.appendChild((function(){const t=document.createElement('td');t.style.cssText='max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px';t.title=item.desc||'';t.textContent=item.desc||'';return t;})());
-    tr.appendChild((function(){const t=document.createElement('td');t.style.whiteSpace='nowrap';t.innerHTML=cadDepHtml;return t;})());
-    tr.appendChild((function(){const t=document.createElement('td');const i=document.createElement('input');i.className='cad-inp';i.type='number';i.min='1';i.value=item.qty_per_pos||'';i.placeholder='0';i.style.width='70px';i.addEventListener('blur',function(){cadAutoSave(ean,'qty_per_pos',parseInt(this.value)||null);});t.appendChild(i);return t;})());
-    tr.appendChild((function(){const t=document.createElement('td');const i=document.createElement('input');i.className='cad-inp';i.type='number';i.min='1';i.value=item.unidades_cx||'';i.placeholder='—';i.style.width='60px';i.addEventListener('blur',function(){cadAutoSave(ean,'unidades_cx',parseInt(this.value)||null);});t.appendChild(i);return t;})());
-    tr.appendChild((function(){const t=document.createElement('td');t.className='cad-toggle';const tw=document.createElement('div');tw.className='tw';const tg=document.createElement('div');tg.className='tg'+(item.lote_obrigatorio?' on':'');tg.innerHTML='<div class="tk"></div>';const sp=document.createElement('span');sp.style.fontSize='11px';sp.textContent=item.lote_obrigatorio?'Sim':'Não';tw.appendChild(tg);tw.appendChild(sp);tw.onclick=function(){cadToggleLote(ean,this);};t.appendChild(tw);return t;})());
-    tr.appendChild((function(){const t=document.createElement('td');t.className='cad-toggle';const tw=document.createElement('div');tw.className='tw';const tg=document.createElement('div');tg.className='tg'+(item.b2c?' on':'');tg.innerHTML='<div class="tk"></div>';const sp=document.createElement('span');sp.style.fontSize='11px';sp.textContent=item.b2c?'Sim':'Não';tw.appendChild(tg);tw.appendChild(sp);tw.onclick=function(){cadToggleB2c(ean,this);};t.appendChild(tw);return t;})());
-    tr.appendChild((function(){const t=document.createElement('td');t.className='cad-toggle';const tw=document.createElement('div');tw.className='tw';const tg=document.createElement('div');tg.className='tg'+(item.descontinuado?' on':'');if(item.descontinuado)tg.style.background='var(--red)';tg.innerHTML='<div class="tk"></div>';const sp=document.createElement('span');sp.style.fontSize='11px';sp.textContent=item.descontinuado?'Sim':'Não';if(item.descontinuado)sp.style.color='var(--red)';tw.appendChild(tg);tw.appendChild(sp);tw.onclick=function(){cadToggleDesc(ean,this);};t.appendChild(tw);return t;})());
-    tr.appendChild((function(){const t=document.createElement('td');const i=document.createElement('input');i.className='cad-inp';i.value=item.notes||'';i.placeholder='Notas…';i.addEventListener('blur',function(){cadAutoSave(ean,'notes',this.value);});t.appendChild(i);return t;})());
+    const lotOn=item.lote_obrigatorio?'on':'';
+    const b2cOn=item.b2c?'on':'';
+    const descOn=item.descontinuado?'on':'';
+    const descRed=item.descontinuado?'background:var(--red)':'';
+    const descColor=item.descontinuado?'color:var(--red)':'';
+    tr.dataset.ean=ean;
+    tr.innerHTML=
+      '<td><input class="cad-inp" data-field="cat" data-ean="'+ean+'" value="'+esc(item.cat||'')+'" placeholder="Categoria…"></td>'+
+      '<td><input class="cad-inp" data-field="subcat" data-ean="'+ean+'" value="'+esc(item.subcat||'')+'" placeholder="Subcategoria…"></td>'+
+      '<td><span class="badge bneu">'+ean+'</span></td>'+
+      '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="'+esc(item.desc||'')+'">'+esc(item.desc||'')+'</td>'+
+      '<td style="white-space:nowrap">'+cadDepHtml+'</td>'+
+      '<td><input class="cad-inp" type="number" min="1" data-field="qty_per_pos" data-ean="'+ean+'" data-int="1" value="'+(item.qty_per_pos||'')+'" placeholder="0" style="width:70px"></td>'+
+      '<td><input class="cad-inp" type="number" min="1" data-field="unidades_cx" data-ean="'+ean+'" data-int="1" value="'+(item.unidades_cx||'')+'" placeholder="—" style="width:60px"></td>'+
+      '<td class="cad-toggle"><div class="tw" data-toggle="lote" data-ean="'+ean+'"><div class="tg '+lotOn+'"><div class="tk"></div></div><span style="font-size:11px">'+(item.lote_obrigatorio?'Sim':'Não')+'</span></div></td>'+
+      '<td class="cad-toggle"><div class="tw" data-toggle="b2c" data-ean="'+ean+'"><div class="tg '+b2cOn+'"><div class="tk"></div></div><span style="font-size:11px">'+(item.b2c?'Sim':'Não')+'</span></div></td>'+
+      '<td class="cad-toggle"><div class="tw" data-toggle="desc" data-ean="'+ean+'"><div class="tg '+descOn+'" style="'+descRed+'"><div class="tk"></div></div><span style="font-size:11px;'+descColor+'">'+(item.descontinuado?'Sim':'Não')+'</span></div></td>'+
+      '<td><input class="cad-inp" data-field="notes" data-ean="'+ean+'" value="'+esc(item.notes||'')+'" placeholder="Notas…"></td>';
         body.appendChild(tr);
   }
   if(!items.length)eRow(body,8,'Nenhum resultado');
