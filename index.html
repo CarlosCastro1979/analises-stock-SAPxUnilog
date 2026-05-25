@@ -755,6 +755,7 @@ select.cad-inp{cursor:pointer;}
           <div style="font-size:12px;font-weight:600;margin-bottom:10px">📂 Carregar ficheiro de vendas</div>
           <input type="file" id="transVendasFileInput" accept=".xlsx,.xls" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;width:100%;font-size:12px;color:var(--text);box-sizing:border-box">
           <button class="btn bp" style="margin-top:10px;width:100%" onclick="uploadVendas()">⬆ Processar e Guardar no Supabase</button>
+          <button class="btn bg" style="margin-top:6px;width:100%;color:var(--red);border-color:var(--red)" onclick="limparVendas()">🗑 Limpar todos os dados de vendas</button>
           <div id="transVendasStatus" style="font-size:11px;margin-top:8px;color:var(--muted)"></div>
         </div>
         <div class="card" style="background:var(--bg3)" id="transVendasHistCard">
@@ -2550,6 +2551,19 @@ function transTab(name,el){
 }
 
 // ── UPLOAD VENDAS ──
+async function limparVendas(){
+  if(!confirm('Apagar TODOS os dados de vendas do Supabase? Esta acção não pode ser desfeita.'))return;
+  const status=document.getElementById('transVendasStatus');
+  status.textContent='A apagar…';status.style.color='var(--muted)';
+  try{
+    const{error}=await db.from('logistica_vendas').delete().neq('id',0);
+    if(error){status.textContent='Erro: '+error.message;status.style.color='var(--red)';return;}
+    status.textContent='✓ Dados apagados. Carrega o ficheiro de vendas novamente.';
+    status.style.color='var(--green)';
+    loadVendasHist();
+  }catch(e){status.textContent='Erro: '+e.message;status.style.color='var(--red)';}
+}
+
 async function uploadVendas(){
   const input=document.getElementById('transVendasFileInput');
   const status=document.getElementById('transVendasStatus');
