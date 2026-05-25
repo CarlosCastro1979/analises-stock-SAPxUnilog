@@ -2714,7 +2714,9 @@ async function buildTransData(){
         const v6=calcAvgMonths(vendaMap[ean]||[],6);
         if(v3<=0&&v6<=0)return;
         const overKey=stockKey+'|'+ean;
-        const seguranca=transSegOverride[overKey]!==undefined?transSegOverride[overKey]:Math.ceil(v3)||1;
+        const cxMin=param?.unidades_cx||null;
+        const segSugest=stockKey==='8'&&cxMin?Math.max(Math.ceil(v3),cxMin):Math.ceil(v3)||1;
+        const seguranca=transSegOverride[overKey]!==undefined?transSegOverride[overKey]:segSugest;
         const stockDest=(sapStock[ean]&&sapStock[ean][stockKey])||0;
         const necessidade=Math.max(0,seguranca-stockDest);
         const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||'';
@@ -2753,7 +2755,9 @@ async function buildTransData(){
         const v6=calcAvgMonths(vendaMap[ean]||[],6);
         if(v3<=0&&v6<=0)return;
         const overKey='qb|'+ean;
-        const seguranca=transSegOverride[overKey]!==undefined?transSegOverride[overKey]:Math.ceil(v3)||1;
+        const cxMinQb=param?.unidades_cx||null;
+        const segSugestQb=cxMinQb?Math.max(Math.ceil(v3),cxMinQb):Math.ceil(v3)||1;
+        const seguranca=transSegOverride[overKey]!==undefined?transSegOverride[overKey]:segSugestQb;
         const stockDest=qbStock[ean]||0;
         const necessidade=Math.max(0,seguranca-stockDest);
         const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||'';
