@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526143001 -->
+<!DOCTYPE html><!-- v20260526150001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2900,7 +2900,12 @@ async function buildTransData(){
           }
         }
         const stockDisp11=lotes.reduce((s,l)=>s+l.qt,0);
-        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0,notB2C:notB2C||false});
+        // Lotes already in destination depot (for excess return logic)
+        const lotesDest=[];
+        (dfbSapData||[]).filter(r=>r.EAN_norm===ean&&r.deposito===stockKey&&r.qt>0).forEach(r=>{
+          lotesDest.push({lote:r.Lote_norm,qt:r.qt,validade:r.validade});
+        });
+        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,lotesDest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0,notB2C:notB2C||false});
       });
       return rows.sort((a,b)=>b.necessidade-a.necessidade);
     }
@@ -2941,7 +2946,11 @@ async function buildTransData(){
           }
         }
         const stockDisp11=lotes.reduce((s,l)=>s+l.qt,0);
-        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0,notB2C:false});
+        const lotesDest=[];
+        (qbSapData||dfbSapData||[]).filter(r=>r.EAN_norm===ean&&r.deposito==='11'&&r.qt>0).forEach(r=>{
+          lotesDest.push({lote:r.Lote_norm,qt:r.qt,validade:r.validade});
+        });
+        rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,lotesDest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0,notB2C:false});
       });
       return rows.sort((a,b)=>b.necessidade-a.necessidade);
     }
@@ -3028,8 +3037,8 @@ function renderTrans(tipo){
     // Cobertura = stock actual / media ajustada (campo editavel)
     const mediaAjust=r.seguranca||r.media3||1;
     const cobertura=mediaAjust>0?Math.round(r.stockDest/mediaAjust*10)/10:null;
-    const coberturaMax=1.25;
-    const stockMax=Math.ceil(r.seguranca*1.25);
+    const coberturaMax=1;
+    const stockMax=r.seguranca;
     const excessoStock=r.stockDest-stockMax;
     // Cobertura color
     const covColor=cobertura===null?'var(--muted)':cobertura>coberturaMax?'var(--red)':cobertura<0.5?'var(--yellow)':'var(--green)';
@@ -3038,12 +3047,19 @@ function renderTrans(tipo){
     let returnHtml='';
     if(excessoStock>0){
       const qtDevolver=excessoStock;
-      if(cx&&cx>1){
+      const lotesDest=r.lotesDest||[];
+      // Check if excess fits cleanly in a single lote (can return whole CX)
+      if(cx&&cx>1&&lotesDest.length===1&&qtDevolver>=cx){
         const cxDevolver=Math.floor(qtDevolver/cx);
-        if(cxDevolver>0)returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Devolver ao dep.0011: ${fmt(cxDevolver)} CX (${fmt(cxDevolver*cx)} un)</span></div>`;
-        else returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Devolver ao dep.0011: ${fmt(qtDevolver)} un</span></div>`;
+        returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Devolver ao dep.0011: ${fmt(cxDevolver)} CX (${fmt(cxDevolver*cx)} un) · Lote ${lotesDest[0].lote||'—'}</span></div>`;
+      } else if(!cx||cx<=1){
+        // No CX constraint — simple unit return
+        const loteTxt=lotesDest.length===1?` · Lote ${lotesDest[0].lote||'—'}`:'';
+        returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Devolver ao dep.0011: ${fmt(qtDevolver)} un${loteTxt}</span></div>`;
       } else {
-        returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Devolver ao dep.0011: ${fmt(qtDevolver)} un</span></div>`;
+        // Multiple lotes or excess < 1 CX — just flag as attention point
+        const lotesInfo=lotesDest.map(l=>`Lote ${l.lote||'—'}: ${fmt(l.qt)}un`).join(', ');
+        returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fef3c7;color:#92400e;font-size:10px" title="Excesso em ${lotesDest.length} lote(s) — verificar manualmente">⚠ ${fmt(qtDevolver)} un excesso (${lotesDest.length} lote${lotesDest.length>1?'s':''}${lotesDest.length<=2?': '+lotesInfo:''})</span></div>`;
       }
     }
     // Add return to lotesHtml
@@ -3092,9 +3108,9 @@ function updateSeg(key,val,tipo){
 
   const mediaAjust=n||row.media3||1;
   const cobertura=Math.round(row.stockDest/mediaAjust*10)/10;
-  const coberturaMax=1.25;
+  const coberturaMax=1;
   const covColor=cobertura>coberturaMax?'var(--red)':cobertura<0.5?'var(--yellow)':'var(--green)';
-  const stockMax=Math.ceil(n*1.25);
+  const stockMax=n;
   const excessoStock=row.stockDest-stockMax;
 
   // Update cobertura cell
@@ -3124,7 +3140,7 @@ function exportTransXlsx(tipo){
     let lotesTxt='';
     let estadoTxt='';
     const cx=occParams.find(p=>p.ean===r.ean)?.unidades_cx||null;
-    const stockMax=r.seguranca?Math.ceil(r.seguranca*1.25):0;
+    const stockMax=r.seguranca||0;
     const excessoStock=r.stockDest-stockMax;
 
     if(r.notB2C){
