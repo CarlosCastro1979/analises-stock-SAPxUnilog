@@ -2591,6 +2591,7 @@ async function renderAuditoria(){
 
   // Load occParams if not yet loaded
   if(!occParams||!occParams.length)await loadOccParams();
+  alert('occParams: '+occParams.length);
 
   // Always load fresh from Supabase to get all depots
   let dfbData=null;
@@ -2598,10 +2599,11 @@ async function renderAuditoria(){
     const{data:rec}=await db.from('logistica_stock').select('sap_data').eq('id','DFB').single();
     if(rec){
       const allData=JSON.parse(rec.sap_data);
-      dfbData=allData; // no depot filter - need all depots for audit
+      dfbData=allData;
     }
-  }catch(e){}
+  }catch(e){alert('Supabase error: '+e.message);}
   if(!dfbData&&company==='DFB'&&sapData)dfbData=sapData;
+  alert('dfbData: '+(dfbData?dfbData.length:'null')+' deps: '+[...new Set((dfbData||[]).map(r=>r.deposito))]);
   if(!dfbData||!dfbData.length){
     document.getElementById('auditEmpty').style.display='block';
     document.getElementById('auditEmpty').innerHTML='<div class="empty-i">⚠️</div><div>Carrega os dados DFB primeiro (aba Dados → Processar e Guardar)</div>';
