@@ -1,9 +1,10 @@
-<!DOCTYPE html><!-- v20260526123501 -->
+<!DOCTYPE html><!-- v20260526140001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Performance Logística — Delta Foods Brasil</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8102e'/><text x='16' y='22' font-family='Arial' font-weight='700' font-size='13' fill='white' text-anchor='middle'>DF</text></svg>">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -966,6 +967,7 @@ async function init(){
         } else {
           if(itEc){itEc.style.display='';itEc.classList.add('active');}
           if(itQb){itQb.style.display='';itQb.classList.remove('active');}
+          if(itAudit)itAudit.style.display='';
           if(divEc)divEc.style.display='';
           if(divQb)divQb.style.display='none';
           if(transData.ecommerce.length)renderTrans('ecommerce');
@@ -2573,7 +2575,7 @@ let dfbSapDataCache=null; // user-edited stock segurança per EAN+tipo
 function transTab(name,el){
   el.closest('.page').querySelectorAll('.it').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  ['ecommerce','qbrasil','vendas'].forEach(n=>{
+  ['ecommerce','qbrasil','auditoria','vendas'].forEach(n=>{
     const d=document.getElementById('trans-'+n);if(d)d.style.display=n===name?'':'none';
   });
   if(name==='auditoria')renderAuditoria();
