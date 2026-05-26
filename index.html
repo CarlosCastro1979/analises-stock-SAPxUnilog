@@ -1489,7 +1489,7 @@ function renderSusp(){
   // Update cat dropdown
   const cats=[...new Set(suspData.map(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return p?.cat||autoCat(r.desc).cat||'';}).filter(Boolean))].sort();
   const catSel=document.getElementById('suspCat');const catCur=catSel.value;
-  catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>'<option value="'+c+'">'+c+'</option>').join('');
   catSel.value=cats.includes(catCur)?catCur:'';
   const catF=catSel.value;
 
@@ -2632,7 +2632,7 @@ async function renderAuditoria(){
   // Update cat filter
   const cats=[...new Set(rows.map(r=>r.cat).filter(Boolean))].sort();
   const catSel=document.getElementById('auditCat');const catCur=catSel.value;
-  catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>'<option value="'+c+'">'+c+'</option>').join('');
   catSel.value=cats.includes(catCur)?catCur:'';
   const catActive=catSel.value;
 
@@ -2640,10 +2640,9 @@ async function renderAuditoria(){
   if(catActive)rows=rows.filter(r=>r.cat===catActive);
   rows.sort((a,b)=>String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'))||String(a.desc).localeCompare(String(b.desc)));
 
-  document.getElementById('auditKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Produtos a verificar</div><div class="kv r">${fmt(rows.length)}</div></div>
-    <div class="kpi"><div class="kl">Stock total dep.0011</div><div class="kv b">${fmt(rows.reduce((s,r)=>s+r.qt,0))}</div></div>
-  `;
+  document.getElementById('auditKpis').innerHTML=
+    '<div class="kpi"><div class="kl">Produtos a verificar</div><div class="kv r">'+fmt(rows.length)+'</div></div>'+
+    '<div class="kpi"><div class="kl">Stock total dep.0011</div><div class="kv b">'+fmt(rows.reduce((s,r)=>s+r.qt,0))+'</div></div>';
 
   const body=document.getElementById('auditBody');body.innerHTML='';
   document.getElementById('auditEmpty').style.display=rows.length===0?'block':'none';
