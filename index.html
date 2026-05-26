@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526140001 -->
+<!DOCTYPE html><!-- v20260526141501 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -3120,15 +3120,49 @@ function exportTransXlsx(tipo){
   const rows=isEc?transData.ecommerce:transData.qbrasil;
   if(!rows.length){toast('Clica "Calcular" primeiro','error');return;}
   const data=rows.map(r=>{
-    const lotesTxt=r.necessidade>0?r.lotes.map(l=>`Lote ${l.lote||'—'}: ${l.qty}un val.${l.validade||'—'}`).join(' | '):'Stock OK';
-    return{Categoria:r.cat,EAN:r.ean,Descricao:r.desc,
-      Media3M:r.media3,Media6M:r.media6,
-      StockDestino:r.stockDest,StockSeguranca:r.seguranca,
-      Necessidade:r.necessidade||0,LotesSugeridos:lotesTxt,
-      Estado:r.necessidade===0?'OK':r.semValidade?'Sem stock válido':'Necessita transferência'};
+    // Lotes text — match renderTrans logic
+    let lotesTxt='';
+    let estadoTxt='';
+    const cx=occParams.find(p=>p.ean===r.ean)?.unidades_cx||null;
+    const stockMax=r.seguranca?Math.ceil(r.seguranca*1.25):0;
+    const excessoStock=r.stockDest-stockMax;
+
+    if(r.notB2C){
+      const qtRetirar=r.stockDest;
+      const cxRetirar=cx&&cx>1?Math.floor(qtRetirar/cx):null;
+      estadoTxt='Não é artigo B2C';
+      lotesTxt=`Retirar ${qtRetirar} un do dep.0008${cxRetirar?` (${cxRetirar} CX)`:''} → dep.0011`;
+    } else if(r.necessidade===0&&excessoStock<=0){
+      estadoTxt='Stock OK';
+      lotesTxt='—';
+    } else if(r.necessidade===0&&excessoStock>0){
+      estadoTxt='Stock excessivo';
+      const qtDev=excessoStock;
+      const cxDev=cx&&cx>1?Math.floor(qtDev/cx):null;
+      lotesTxt=cxDev?`Devolver ao dep.0011: ${cxDev} CX (${cxDev*cx} un)`:`Devolver ao dep.0011: ${qtDev} un`;
+    } else if(r.semValidade){
+      estadoTxt='Sem stock válido';
+      lotesTxt=r.maxValidade?`Máx. disponível: val. ${r.maxValidade} (abaixo do mínimo)`:r.lotes.map(l=>`Lote ${l.lote||'—'}: ${l.qty}un val.${l.validade||'—'}`).join(' | ')||'Sem stock no dep. 0011';
+    } else {
+      estadoTxt=`Necessita transferência (${r.necessidade} un)`;
+      lotesTxt=r.lotes.map(l=>`Lote ${l.lote||'—'}: ${l.qty}un val.${l.validade||'—'}`).join(' | ');
+    }
+
+    return{
+      Categoria:r.cat,
+      EAN:r.ean,
+      Descricao:r.desc,
+      Media3M:r.media3,
+      Media6M:r.media6,
+      StockDestino:r.stockDest,
+      MediaAjustada:r.seguranca,
+      Necessidade:r.necessidade||0,
+      LotesSugeridos:lotesTxt,
+      Estado:estadoTxt
+    };
   });
   const ws=XLSX.utils.json_to_sheet(data);
-  ws['!cols']=[{wch:16},{wch:14},{wch:32},{wch:10},{wch:10},{wch:12},{wch:13},{wch:11},{wch:55},{wch:20}];
+  ws['!cols']=[{wch:16},{wch:14},{wch:32},{wch:10},{wch:10},{wch:12},{wch:13},{wch:11},{wch:55},{wch:25}];
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,isEc?'Ecommerce B2C':'Qbrasil');
   XLSX.writeFile(wb,`transferencias_${isEc?'ecommerce':'qbrasil'}_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
