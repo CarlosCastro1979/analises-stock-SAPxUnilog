@@ -2589,6 +2589,9 @@ async function renderAuditoria(){
   const srch=document.getElementById('auditSrch').value.toLowerCase();
   const catF=document.getElementById('auditCat').value;
 
+  // Load occParams if not yet loaded
+  if(!occParams||!occParams.length)await loadOccParams();
+
   // Always load fresh from Supabase to get all depots
   let dfbData=null;
   try{
