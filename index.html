@@ -2620,18 +2620,14 @@ async function renderAuditoria(){
 
   // Filter: in dep11, NOT in dep8, b2c=true or undefined, NOT descontinuado
   let rows=[];
-  let _dbg={total:0,inDep8:0,disc:0,b2cFalse:0,pass:0};
   Object.entries(stock11).forEach(([ean,v])=>{
-    _dbg.total++;
-    if(inDep8.has(ean)){_dbg.inDep8++;return;}
+    if(inDep8.has(ean))return;
     const param=occParams.find(p=>p.ean===ean);
-    if(param?.descontinuado===true){_dbg.disc++;return;}
-    if(param?.b2c===false){_dbg.b2cFalse++;return;}
-    _dbg.pass++;
+    if(param?.descontinuado===true)return;
+    if(param?.b2c===false)return;
     const b2cStatus=!param?'Sem cadastro':param.b2c===true?'B2C = Sim':'Não definido';
     rows.push({ean,desc:v.desc,qt:v.qt,cat:param?.cat||'',b2cStatus});
   });
-  console.log('audit filter:', _dbg, 'occParams:', occParams.length);
 
   // Update cat filter
   const cats=[...new Set(rows.map(r=>r.cat).filter(Boolean))].sort();
@@ -2651,17 +2647,16 @@ async function renderAuditoria(){
 
   const body=document.getElementById('auditBody');body.innerHTML='';
   document.getElementById('auditEmpty').style.display=rows.length===0?'block':'none';
-  console.log('rows to render:', rows.length, rows[0]);
   for(const r of rows){
     const tr=document.createElement('tr');
-    tr.innerHTML=`
-      <td style="font-size:11px">${r.cat||'<span style="color:var(--muted)">Sem categoria</span>'}</td>
-      <td><span class="badge bneu">${r.ean}</span></td>
-      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.desc}</td>
-      <td class="num">${fmt(r.qt)}</td>
-      <td><span class="badge ${r.b2cStatus==='B2C = Sim'?'bok':r.b2cStatus==='Sem cadastro'?'berr':'bwarn'}">${r.b2cStatus}</span></td>
-      <td style="font-size:11px;color:var(--muted)">→ Ir ao Cadastro e definir B2C Sim/Não</td>
-    `;
+    const badgeCls=r.b2cStatus==='B2C = Sim'?'bok':r.b2cStatus==='Sem cadastro'?'berr':'bwarn';
+    tr.innerHTML=
+      '<td style="font-size:11px">'+(r.cat||'<span style="color:var(--muted)">Sem categoria</span>')+'</td>'+
+      '<td><span class="badge bneu">'+r.ean+'</span></td>'+
+      '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(r.desc)+'</td>'+
+      '<td class="num">'+fmt(r.qt)+'</td>'+
+      '<td><span class="badge '+badgeCls+'">'+r.b2cStatus+'</span></td>'+
+      '<td style="font-size:11px;color:var(--muted)">→ Ir ao Cadastro e definir B2C Sim/Não</td>';
     body.appendChild(tr);
   }
   if(!rows.length)eRow(body,6,'Tudo configurado ✓');
