@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526141501 -->
+<!DOCTYPE html><!-- v20260526143001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -3036,12 +3036,12 @@ function renderTrans(tipo){
 
     // Return recommendation (too much stock)
     let returnHtml='';
-    if(excessoStock>0&&r.media3>0){
+    if(excessoStock>0){
       const qtDevolver=excessoStock;
-      // Find lotes to return (by depot stock key - need lotes in dest depot)
       if(cx&&cx>1){
         const cxDevolver=Math.floor(qtDevolver/cx);
         if(cxDevolver>0)returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Devolver ao dep.0011: ${fmt(cxDevolver)} CX (${fmt(cxDevolver*cx)} un)</span></div>`;
+        else returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Devolver ao dep.0011: ${fmt(qtDevolver)} un</span></div>`;
       } else {
         returnHtml=`<div style="margin-top:4px"><span class="badge" style="background:#fde68a;color:#92400e;font-size:10px">↩ Devolver ao dep.0011: ${fmt(qtDevolver)} un</span></div>`;
       }
