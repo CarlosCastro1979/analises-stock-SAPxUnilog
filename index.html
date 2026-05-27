@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526171001 -->
+<!DOCTYPE html><!-- v20260526173001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -89,6 +89,27 @@ select.inp{cursor:pointer;}
 .dpl{padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--border2);color:var(--text2);transition:all .15s;font-family:var(--mono);background:#fff;}
 .dpl:hover{color:var(--text);border-color:#9aacb8;}
 .dpl.active{background:var(--red);color:#fff;border-color:var(--red);}
+
+/* MULTISELECT */
+.ms-wrap{position:relative;display:inline-block;}
+.ms-btn{display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border2);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;cursor:pointer;white-space:nowrap;min-width:160px;max-width:220px;user-select:none;}
+.ms-btn:hover{border-color:#9aacb8;}
+.ms-btn.active{border-color:var(--red);background:#fff5f5;}
+.ms-btn-lbl{flex:1;overflow:hidden;text-overflow:ellipsis;}
+.ms-btn-arr{font-size:9px;color:var(--muted);transition:transform .15s;}
+.ms-wrap.open .ms-btn-arr{transform:rotate(180deg);}
+.ms-drop{position:absolute;top:calc(100% + 4px);left:0;min-width:100%;max-width:280px;background:var(--bg);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:999;overflow:hidden;}
+.ms-search{padding:8px;border-bottom:1px solid var(--border);}
+.ms-search input{width:100%;border:1px solid var(--border2);border-radius:5px;padding:5px 8px;font-size:12px;background:var(--bg3);color:var(--text);outline:none;box-sizing:border-box;}
+.ms-actions{display:flex;gap:4px;padding:4px 8px;border-bottom:1px solid var(--border);}
+.ms-actions button{flex:1;padding:3px 0;font-size:10px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--muted);cursor:pointer;}
+.ms-actions button:hover{background:var(--navy3);color:#fff;}
+.ms-list{max-height:220px;overflow-y:auto;}
+.ms-item{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:12px;cursor:pointer;color:var(--text);}
+.ms-item:hover{background:var(--bg3);}
+.ms-item input[type=checkbox]{accent-color:var(--red);width:13px;height:13px;cursor:pointer;}
+.ms-item.checked{background:#fff5f5;}
+.ms-badge{display:inline-block;background:var(--red);color:#fff;border-radius:9px;padding:0 5px;font-size:10px;font-weight:700;min-width:16px;text-align:center;}
 
 /* TABLE */
 .tw2{overflow-x:auto;}
@@ -285,8 +306,8 @@ select.cad-inp{cursor:pointer;}
         <option value="diverg">Divergência (ambos têm)</option>
         <option value="ok">OK</option>
       </select>
-      <select class="inp" id="reconCat" onchange="document.getElementById('reconSub').value='';renderRecon()"><option value="">Todas as categorias</option></select>
-      <select class="inp" id="reconSub" onchange="renderRecon()"><option value="">Todas as subcategorias</option></select>
+      <div class="ms-wrap" id="ms-reconCat" data-placeholder="Categorias" data-onchange="renderRecon"><div class="ms-btn" onclick="msTogOpen('reconCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('reconCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('reconCat')">Todas</button><button onclick="msClrAll('reconCat')">Limpar</button></div><div class="ms-list"></div></div></div>
+      <div class="ms-wrap" id="ms-reconSub" data-placeholder="Subcategorias" data-onchange="renderRecon"><div class="ms-btn" onclick="msTogOpen('reconSub')"><span class="ms-btn-lbl">Todas as subcategorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('reconSub',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('reconSub')">Todas</button><button onclick="msClrAll('reconSub')">Limpar</button></div><div class="ms-list"></div></div></div>
       <select class="inp" id="reconValidade" onchange="renderRecon()">
         <option value="">Toda a validade</option>
         <option value="vencido">Vencidos</option>
@@ -335,7 +356,8 @@ select.cad-inp{cursor:pointer;}
     </div>
     <div class="tb">
       <input class="inp is" id="eanSrch" placeholder="EAN ou descrição…" oninput="renderEanView()">
-      <select class="inp" id="eanCat" onchange="renderEanView()"><option value="">Todas as categorias</option></select>
+      <div class="ms-wrap" id="ms-eanCat" data-placeholder="Categorias" data-onchange="renderEanView"><div class="ms-btn" onclick="msTogOpen('eanCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('eanCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('eanCat')">Todas</button><button onclick="msClrAll('eanCat')">Limpar</button></div><div class="ms-list"></div></div></div>
+      <select class="inp" id="eanCat" style="display:none"></select>
       <select class="inp" id="eanEstado" onchange="renderEanView()">
         <option value="">Todos</option>
         <option value="diff">Com diferença</option>
@@ -381,7 +403,8 @@ select.cad-inp{cursor:pointer;}
         <option value="similar">Com similar no SAP</option>
         <option value="no_sim">Sem similar</option>
       </select>
-      <select class="inp" id="suspCat" onchange="renderSusp()"><option value="">Todas as categorias</option></select>
+      <select class="inp" id="suspCat" style="display:none"></select>
+      <div class="ms-wrap" id="ms-suspCat" data-placeholder="Categorias" data-onchange="renderSusp"><div class="ms-btn" onclick="msTogOpen('suspCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('suspCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('suspCat')">Todas</button><button onclick="msClrAll('suspCat')">Limpar</button></div><div class="ms-list"></div></div></div>
       <input class="inp" type="number" id="suspMinQt" placeholder="Qt mínima" style="width:100px" min="1" oninput="renderSusp()">
     </div>
     <div class="kr" id="suspKpis"></div>
@@ -451,14 +474,10 @@ select.cad-inp{cursor:pointer;}
       </div>
       <div class="tb">
         <input class="inp is" id="cadSrch" placeholder="EAN ou descrição…" oninput="renderCadastro()">
-        <select class="inp" id="cadCat" onchange="document.getElementById('cadSub').value='';renderCadastro()">
-          <option value="">Todas as categorias</option>
-          <option value="__sem__">— Sem categoria —</option>
-        </select>
-        <select class="inp" id="cadSub" onchange="renderCadastro()">
-          <option value="">Todas as subcategorias</option>
-          <option value="__sem__">— Sem subcategoria —</option>
-        </select>
+        <div class="ms-wrap" id="ms-cadCat" data-placeholder="Categorias" data-onchange="renderCadastro"><div class="ms-btn" onclick="msTogOpen('cadCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('cadCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('cadCat')">Todas</button><button onclick="msClrAll('cadCat')">Limpar</button></div><div class="ms-list"></div></div></div>
+        <div class="ms-wrap" id="ms-cadSub" data-placeholder="Subcategorias" data-onchange="renderCadastro"><div class="ms-btn" onclick="msTogOpen('cadSub')"><span class="ms-btn-lbl">Todas as subcategorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('cadSub',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('cadSub')">Todas</button><button onclick="msClrAll('cadSub')">Limpar</button></div><div class="ms-list"></div></div></div>
+        <select class="inp" id="cadCat" style="display:none"><option value="">Todas as categorias</option><option value="__sem__">— Sem categoria —</option></select>
+        <select class="inp" id="cadSub" style="display:none"><option value="">Todas as subcategorias</option><option value="__sem__">— Sem subcategoria —</option></select>
         <select class="inp" id="cadLote" onchange="renderCadastro()">
           <option value="">Lote — todos</option>
           <option value="1">Lote obrigatório</option>
@@ -522,8 +541,10 @@ select.cad-inp{cursor:pointer;}
       <div class="ch"><div class="ct">Stock vs Ocupação de Posições</div><button class="btn bg bs" onclick="exportOccXlsx()">⬇ Excel</button></div>
       <div class="tb">
         <input class="inp is" id="ovSrch" placeholder="EAN ou descrição…" oninput="renderOccView()">
-        <select class="inp" id="ovCat" onchange="document.getElementById('ovSub').value='';renderOccView()"><option value="">Todas as categorias</option></select>
-        <select class="inp" id="ovSub" onchange="renderOccView()"><option value="">Todas as subcategorias</option></select>
+        <div class="ms-wrap" id="ms-ovCat" data-placeholder="Categorias" data-onchange="renderOccView"><div class="ms-btn" onclick="msTogOpen('ovCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('ovCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('ovCat')">Todas</button><button onclick="msClrAll('ovCat')">Limpar</button></div><div class="ms-list"></div></div></div>
+        <div class="ms-wrap" id="ms-ovSub" data-placeholder="Subcategorias" data-onchange="renderOccView"><div class="ms-btn" onclick="msTogOpen('ovSub')"><span class="ms-btn-lbl">Todas as subcategorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('ovSub',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('ovSub')">Todas</button><button onclick="msClrAll('ovSub')">Limpar</button></div><div class="ms-list"></div></div></div>
+        <select class="inp" id="ovCat" style="display:none"></select>
+        <select class="inp" id="ovSub" style="display:none"></select>
         <select class="inp" id="ovDep" onchange="renderOccView()">
           <option value="">Todos os depósitos</option>
           <option value="11">0011 — Disponível</option>
@@ -1485,19 +1506,17 @@ function _renderEanView(){
     estado:r.qt_sap===0&&r.qt_uni>0?'Só Unilog':r.qt_uni===0&&r.qt_sap>0?'Só SAP':r.qt_sap===r.qt_uni?'OK':'Divergência'
   }));
 
-  // Update cat filter
+  // Update cat multiselect
   const cats=[...new Set(rows.map(r=>r.cat).filter(Boolean))].sort();
-  const catSel=document.getElementById('eanCat');const catCur=catSel.value;
-  catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
-  catSel.value=cats.includes(catCur)?catCur:'';
+  msUpdate('eanCat',cats,'Categorias','renderEanView');
+  const selCats=msGet('eanCat');
 
   // Filters
   const srch=document.getElementById('eanSrch').value.toLowerCase();
-  const catF=catSel.value;
   const estadoF=document.getElementById('eanEstado').value;
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch));
   if(!showAllEan)rows=rows.filter(r=>r.diff!==0);
-  if(catF)rows=rows.filter(r=>r.cat===catF);
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
   if(estadoF==='diff')rows=rows.filter(r=>r.diff!==0);
   else if(estadoF==='ok')rows=rows.filter(r=>r.diff===0);
   else if(estadoF==='only_sap')rows=rows.filter(r=>r.qt_uni===0&&r.qt_sap>0);
@@ -1610,19 +1629,14 @@ function _renderRecon(){
   let rows=[...(reconData[activeDepot]||[])];
   const srch=document.getElementById('reconSrch').value.toLowerCase();
   const estado=document.getElementById('reconEstado').value;
-  // Update category options
-  const reconCatSel=document.getElementById('reconCat');const reconCatCur=reconCatSel.value;
+  // Update category/sub multiselects
   const reconCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
-  reconCatSel.innerHTML='<option value="">Todas as categorias</option>'+reconCats.map(c=>`<option value="${c}">${c}</option>`).join('');
-  reconCatSel.value=reconCats.includes(reconCatCur)?reconCatCur:'';
-  const catF=reconCatSel.value; // read AFTER restoring
-  // Update subcategory options based on selected category
-  const reconSubSrc=catF?occParams.filter(p=>p.cat===catF):occParams;
+  msUpdate('reconCat',reconCats,'Categorias','renderRecon');
+  const selCats=msGet('reconCat');
+  const reconSubSrc=selCats.size?occParams.filter(p=>selCats.has(p.cat)):occParams;
   const reconSubs=[...new Set(reconSubSrc.map(p=>p.subcat).filter(Boolean))].sort();
-  const reconSubSel=document.getElementById('reconSub');const reconSubCur=reconSubSel.value;
-  reconSubSel.innerHTML='<option value="">Todas as subcategorias</option>'+reconSubs.map(c=>`<option value="${c}">${c}</option>`).join('');
-  reconSubSel.value=reconSubs.includes(reconSubCur)?reconSubCur:'';
-  const subF=reconSubSel.value; // read AFTER restoring
+  msUpdate('reconSub',reconSubs,'Subcategorias','renderRecon');
+  const selSubs=msGet('reconSub');
   const valF=document.getElementById('reconValidade').value;
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(!showAll)rows=rows.filter(r=>r.diff!==0);
@@ -1631,8 +1645,8 @@ function _renderRecon(){
   else if(estado==='only_uni')rows=rows.filter(r=>r.qt_sap===0&&r.qt_uni>0);
   else if(estado==='diverg')rows=rows.filter(r=>r.qt_sap>0&&r.qt_uni>0&&r.diff!==0);
   else if(estado==='ok')rows=rows.filter(r=>r.diff===0);
-  if(catF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||'')===(catF);});}
-  if(subF){rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.subcat||'')===(subF);});}
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
+  if(selSubs.size)rows=rows.filter(r=>selSubs.has(r.subcat));
   const minDiffVal=parseFloat(document.getElementById('reconMinDiff').value)||0;if(minDiffVal>0)rows=rows.filter(r=>Math.abs(r.diff)>=minDiffVal);
   if(valF){
     const today=new Date();today.setHours(0,0,0,0);
@@ -1725,19 +1739,17 @@ function _renderSusp(){
   const flt=document.getElementById('suspFlt').value;
   const minQt=parseInt(document.getElementById('suspMinQt').value)||0;
 
-  // Update cat dropdown
+  // Update cat multiselect
   const cats=[...new Set(suspData.map(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return p?.cat||autoCat(r.desc).cat||'';}).filter(Boolean))].sort();
-  const catSel=document.getElementById('suspCat');const catCur=catSel.value;
-  catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>'<option value="'+c+'">'+c+'</option>').join('');
-  catSel.value=cats.includes(catCur)?catCur:'';
-  const catF=catSel.value;
+  msUpdate('suspCat',cats,'Categorias','renderSusp');
+  const selCats=msGet('suspCat');
 
   // Filter rows
   let rows=[...suspData];
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
   if(flt==='similar')rows=rows.filter(r=>r.similar);
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
-  if(catF)rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||autoCat(r.desc).cat||'')===catF;});
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat||autoCat(r.desc).cat||''));
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
   rows.forEach(r=>{if(!r.cat){const p=occParams.find(x=>x.ean===r.EAN_norm);r.cat=p?.cat||autoCat(r.desc).cat||'';}});
   applySort('susp',rows);updateSortHeaders('susp');
@@ -1809,8 +1821,6 @@ function renderCadastro(){if(_renderCadastroBusy)return;_renderCadastroBusy=true
 function _renderCadastro(){
   if(!sapData){document.getElementById('cadBody').innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros SAP primeiro</td></tr>';return;}
   const srch=document.getElementById('cadSrch').value.toLowerCase();
-  const catF=document.getElementById('cadCat').value;
-  const subF=document.getElementById('cadSub').value;
   const loteF=document.getElementById('cadLote').value;
   const semF=document.getElementById('cadSemParam').value;
   // Only EANs with at least 1 row with qt > 0 in valid deposits
@@ -1833,19 +1843,15 @@ function _renderCadastro(){
       hasParam:!!p};
   });
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
-  const allSubs=[...new Set(occParams.map(p=>p.subcat).filter(Boolean))].sort();
-  const csel=document.getElementById('cadCat');const ccur=csel.value;
-  csel.innerHTML='<option value="">Todas as categorias</option><option value="__sem__">— Sem categoria —</option>'+allCats.map(c=>`<option value="${c}">${c}</option>`).join('');csel.value=ccur;
-  const ssel=document.getElementById('cadSub');const scur=ssel.value;
-  const subSrc=ccur&&ccur!=='__sem__'?occParams.filter(p=>p.cat===ccur):occParams;
-  const filtSubs=[...new Set(subSrc.map(p=>p.subcat).filter(Boolean))].sort();
-  ssel.innerHTML='<option value="">Todas as subcategorias</option><option value="__sem__">— Sem subcategoria —</option>'+filtSubs.map(c=>`<option value="${c}">${c}</option>`).join('');
-  ssel.value=filtSubs.includes(scur)?scur:'';
+  msUpdate('cadCat',allCats,'Categorias','renderCadastro');
+  const selCats=msGet('cadCat');
+  const subSrc2=selCats.size?occParams.filter(p=>selCats.has(p.cat)):occParams;
+  const allSubs=[...new Set(subSrc2.map(p=>p.subcat).filter(Boolean))].sort();
+  msUpdate('cadSub',allSubs,'Subcategorias','renderCadastro');
+  const selSubs=msGet('cadSub');
   if(srch)items=items.filter(i=>i.ean.includes(srch)||i.desc.toLowerCase().includes(srch));
-  if(catF==='__sem__')items=items.filter(i=>!i.cat);
-  else if(catF)items=items.filter(i=>i.cat===catF);
-  if(subF==='__sem__')items=items.filter(i=>!i.subcat);
-  else if(subF)items=items.filter(i=>i.subcat===subF);
+  if(selCats.size)items=items.filter(i=>selCats.has(i.cat));
+  if(selSubs.size)items=items.filter(i=>selSubs.has(i.subcat));
   if(loteF==='1')items=items.filter(i=>i.lote_obrigatorio===true);
   else if(loteF==='0')items=items.filter(i=>i.lote_obrigatorio===false&&i.hasParam);
   else if(loteF==='vazio')items=items.filter(i=>!i.hasParam);
@@ -1986,15 +1992,15 @@ async function saveCadastroAll(){
 function exportCadastroXlsx(){
   if(!sapData)return;
   const srch=document.getElementById('cadSrch').value.toLowerCase();
-  const catF=document.getElementById('cadCat').value;
-  const subF=document.getElementById('cadSub').value;
+  const selCats=msGet('cadCat');
+  const selSubs=msGet('cadSub');
   const loteF=document.getElementById('cadLote').value;
   const semF=document.getElementById('cadSemParam').value;
   const eanStock2={};sapData.forEach(r=>{if(!r.EAN_norm)return;if(!eanStock2[r.EAN_norm])eanStock2[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc,total:0};eanStock2[r.EAN_norm].total+=r.qt;});const eanMap=Object.fromEntries(Object.entries(eanStock2).filter(([,v])=>v.total>0));
   let items=Object.values(eanMap).map(e=>{const p=occParams.find(x=>x.ean===e.ean);return{ean:e.ean,desc:e.desc,cat:p?.cat||'',subcat:p?.subcat||'',qty_per_pos:p?.qty_per_pos||null,lote_obrigatorio:p?.lote_obrigatorio!==undefined?p.lote_obrigatorio:true,notes:p?.notes||'',hasParam:!!p};});
   if(srch)items=items.filter(i=>i.ean.includes(srch)||i.desc.toLowerCase().includes(srch));
-  if(catF==='__sem__')items=items.filter(i=>!i.cat);else if(catF)items=items.filter(i=>i.cat===catF);
-  if(subF==='__sem__')items=items.filter(i=>!i.subcat);else if(subF)items=items.filter(i=>i.subcat===subF);
+  if(selCats.size)items=items.filter(i=>selCats.has(i.cat));
+  if(selSubs.size)items=items.filter(i=>selSubs.has(i.subcat));
   if(loteF==='1')items=items.filter(i=>i.lote_obrigatorio===true);else if(loteF==='0')items=items.filter(i=>i.lote_obrigatorio===false&&i.hasParam);else if(loteF==='vazio')items=items.filter(i=>!i.hasParam);
   if(semF==='sem_cat')items=items.filter(i=>!i.cat);else if(semF==='sem_sub')items=items.filter(i=>!i.subcat);else if(semF==='sem_qpp')items=items.filter(i=>!i.qty_per_pos||i.qty_per_pos<=1);
   const rows=items.map(i=>({EAN:i.ean,Descricao:i.desc,Categoria:i.cat,Subcategoria:i.subcat,UnPosicao:i.qty_per_pos||'',LoteObrigatorio:i.lote_obrigatorio?'Sim':'Não',Notas:i.notes}));
@@ -2006,12 +2012,12 @@ function exportSuspXlsx(){
   let rows=[...suspData];
   const srch=document.getElementById('suspSrch').value.toLowerCase();
   const flt=document.getElementById('suspFlt').value;
-  const catFActive=document.getElementById('suspCat').value;
+  const catFActive=msGet('suspCat');
   const minQt=parseInt(document.getElementById('suspMinQt').value)||0;
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||(r.desc||'').toLowerCase().includes(srch)||(r.Lote_norm||'').toLowerCase().includes(srch));
   if(flt==='similar')rows=rows.filter(r=>r.similar);
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
-  if(catFActive)rows=rows.filter(r=>(occParams.find(p=>p.ean===r.EAN_norm)?.cat||'')=== catFActive);
+  if(catFActive.size)rows=rows.filter(r=>catFActive.has(occParams.find(p=>p.ean===r.EAN_norm)?.cat||''));
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
   if(!rows.length){toast('Sem dados','error');return;}
   const data=rows.map(r=>{
@@ -2046,8 +2052,9 @@ async function loadOccParams(){
 function updateOccFilters(){
   const cats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
   const subs=[...new Set(occParams.map(p=>p.subcat).filter(Boolean))].sort();
-  ['ovCat','obCat'].forEach(id=>{const sel=document.getElementById(id);if(!sel)return;const cur=sel.value;sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');sel.value=cur;});
-  const ovSub=document.getElementById('ovSub');if(ovSub){const cur=ovSub.value;ovSub.innerHTML='<option value="">Todas as subcategorias</option>'+subs.map(c=>`<option value="${c}">`+c+'</option>').join('');ovSub.value=cur;}
+  // obCat is a real select (OccBase filter); ovCat/ovSub are now multiselects updated in renderOccView
+  const obCat=document.getElementById('obCat');
+  if(obCat){const cur=obCat.value;obCat.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');obCat.value=cur;}
   document.getElementById('m_cat_dl').innerHTML=cats.map(c=>`<option value="${c}">`).join('');
   document.getElementById('m_sub_dl').innerHTML=subs.map(c=>`<option value="${c}">`).join('');
 }
@@ -2058,15 +2065,15 @@ function renderOccView(){if(_renderOccViewBusy)return;_renderOccViewBusy=true;tr
 function _renderOccView(){
   if(!uniData){document.getElementById('ovBody').innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros para ver a ocupação</td></tr>';return;}
   const srch=document.getElementById('ovSrch').value.toLowerCase();
-  const catF=document.getElementById('ovCat').value;
-  const subF=document.getElementById('ovSub').value;
   const depF=document.getElementById('ovDep').value;
   const alertF=document.getElementById('ovAlerta').value;
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
-  const catSel=document.getElementById('ovCat');catSel.innerHTML='<option value="">Todas as categorias</option>'+allCats.map(c=>`<option value="${c}">${c}</option>`).join('');catSel.value=allCats.includes(catF)?catF:'';const catActive=catSel.value;
-  const subSrc=catActive?occParams.filter(p=>p.cat===catActive):occParams;
+  msUpdate('ovCat',allCats,'Categorias','renderOccView');
+  const selCats=msGet('ovCat');
+  const subSrc=selCats.size?occParams.filter(p=>selCats.has(p.cat)):occParams;
   const allSubs=[...new Set(subSrc.map(p=>p.subcat).filter(Boolean))].sort();
-  const subSel=document.getElementById('ovSub');subSel.innerHTML='<option value="">Todas as subcategorias</option>'+allSubs.map(c=>`<option value="${c}">${c}</option>`).join('');subSel.value=allSubs.includes(subF)?subF:'';const subActive=subSel.value;
+  msUpdate('ovSub',allSubs,'Subcategorias','renderOccView');
+  const selSubs=msGet('ovSub');
   const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2']};
   const filteredClasses=depF?(depClassMap[depF]||[]):null;
   const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
@@ -2120,8 +2127,8 @@ function _renderOccView(){
     return{ean,desc:v.desc,qt:v.qt,param,posReal,posOtimizadas,poupanca,underutil:totalSubutil>0||totalConsolidavel>0,loteDetail,totalSubutil,totalConsolidavel,nLotes:v.lotes.length,cat:param?.cat||'',subcat:param?.subcat||''};
   });
   if(srch)rows=rows.filter(r=>r.ean.includes(srch)||r.desc.toLowerCase().includes(srch));
-  if(catActive)rows=rows.filter(r=>r.cat===catActive);
-  if(subActive)rows=rows.filter(r=>r.subcat===subActive);
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
+  if(selSubs.size)rows=rows.filter(r=>selSubs.has(r.subcat));
   if(alertF==='sub')rows=rows.filter(r=>r.underutil);
   else if(alertF==='sem')rows=rows.filter(r=>!r.param);
   // Add qpp field for sorting
@@ -2236,8 +2243,8 @@ function exportOccXlsx(){
   if(!uniData)return;
   // Re-run the same logic as renderOccView to get fully computed rows
   const srch=document.getElementById('ovSrch').value.toLowerCase();
-  const catF=document.getElementById('ovCat').value;
-  const subF=document.getElementById('ovSub').value;
+  const selCats=msGet('ovCat');
+  const selSubs=msGet('ovSub');
   const depF=document.getElementById('ovDep').value;
   const alertF=document.getElementById('ovAlerta').value;
   const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2']};
@@ -2306,10 +2313,9 @@ function exportOccXlsx(){
     return{Categoria:param?.cat||'',Subcategoria:param?.subcat||'',EAN:ean,Descricao:v.desc,Depositos:deps,StockUnilog:v.qt,UnPosicao:qpp||'',PosReais:posReal,PosOptimizadas:posReal-poupanca,PosALibertar:poupanca||'',LoteObrigatorio:param?.lote_obrigatorio!==false?'Sim':'Não',Recomendacao:rec};
   });
   // Apply filters
-  const catActive=catF;const subActive=subF;
   if(srch)rows=rows.filter(r=>r.EAN.includes(srch)||r.Descricao.toLowerCase().includes(srch));
-  if(catActive)rows=rows.filter(r=>r.Categoria===catActive);
-  if(subActive)rows=rows.filter(r=>r.Subcategoria===subActive);
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.Categoria));
+  if(selSubs.size)rows=rows.filter(r=>selSubs.has(r.Subcategoria));
   if(alertF==='sub')rows=rows.filter(r=>r.PosALibertar>0);
   else if(alertF==='sem')rows=rows.filter(r=>!r.UnPosicao);
   rows.sort((a,b)=>{const cc=String(a.Categoria||'zzz').localeCompare(String(b.Categoria||'zzz'));if(cc!==0)return cc;const sc=String(a.Subcategoria||'').localeCompare(String(b.Subcategoria||''));if(sc!==0)return sc;return String(a.Descricao||'').localeCompare(String(b.Descricao||''));});
@@ -2347,6 +2353,123 @@ async function renderHistory(){
     }
   }catch(e){}
 }
+
+// ══════════════════════════════════════════
+// MULTISELECT ENGINE
+// ══════════════════════════════════════════
+const msState={};  // id -> Set of selected values
+let msOpenId=null;
+
+function msRender(id,options,placeholder,onChangeFn){
+  const wrap=document.getElementById('ms-'+id);
+  if(!wrap)return;
+  if(!msState[id])msState[id]=new Set();
+  const sel=msState[id];
+  const srchEl=wrap.querySelector('.ms-search input');
+  const srchVal=srchEl?srchEl.value.toLowerCase():'';
+  const filtered=options.filter(o=>o.toLowerCase().includes(srchVal));
+  const list=wrap.querySelector('.ms-list');
+  if(list){
+    list.innerHTML=filtered.map(o=>`
+      <div class="ms-item${sel.has(o)?' checked':''}" onclick="msTog('${id}','${o.replace(/'/g,"\\'")}',event)">
+        <input type="checkbox" ${sel.has(o)?'checked':''} onclick="event.stopPropagation();msTog('${id}','${o.replace(/'/g,"\\'")}',event)">
+        <span>${o}</span>
+      </div>`).join('');
+  }
+  const btn=wrap.querySelector('.ms-btn');
+  const lbl=wrap.querySelector('.ms-btn-lbl');
+  if(lbl){
+    if(sel.size===0){lbl.textContent=placeholder||'Todas';btn.classList.remove('active');}
+    else if(sel.size===1){lbl.textContent=[...sel][0];btn.classList.add('active');}
+    else{lbl.innerHTML=`${placeholder||'Categorias'} <span class="ms-badge">${sel.size}</span>`;btn.classList.add('active');}
+  }
+}
+
+function msTogOpen(id){
+  if(msOpenId&&msOpenId!==id){
+    const prev=document.getElementById('ms-'+msOpenId);
+    if(prev){prev.classList.remove('open');prev.querySelector('.ms-drop').style.display='none';}
+  }
+  const wrap=document.getElementById('ms-'+id);
+  if(!wrap)return;
+  const drop=wrap.querySelector('.ms-drop');
+  const isOpen=wrap.classList.toggle('open');
+  drop.style.display=isOpen?'block':'none';
+  msOpenId=isOpen?id:null;
+  if(isOpen){const si=wrap.querySelector('.ms-search input');if(si){si.value='';si.focus();}}
+}
+
+function msTog(id,val,e){
+  if(e)e.stopPropagation();
+  if(!msState[id])msState[id]=new Set();
+  if(msState[id].has(val))msState[id].delete(val);
+  else msState[id].add(val);
+  // Re-render dropdown and re-run render fn
+  const wrap=document.getElementById('ms-'+id);
+  const onch=wrap?.dataset.onchange;
+  if(wrap){
+    const opts=[...wrap.querySelectorAll('.ms-item')].map(el=>el.querySelector('span').textContent);
+    msRender(id,opts,wrap.dataset.placeholder,null);
+  }
+  if(onch)window[onch]();
+}
+
+function msSelAll(id){
+  const wrap=document.getElementById('ms-'+id);if(!wrap)return;
+  const opts=wrap._allOptions||[];
+  msState[id]=new Set(opts);
+  const onch=wrap.dataset.onchange;
+  msRender(id,opts,wrap.dataset.placeholder,null);
+  if(onch)window[onch]();
+}
+
+function msClrAll(id){
+  msState[id]=new Set();
+  const wrap=document.getElementById('ms-'+id);if(!wrap)return;
+  const opts=wrap._allOptions||[];
+  const onch=wrap.dataset.onchange;
+  msRender(id,opts,wrap.dataset.placeholder,null);
+  if(onch)window[onch]();
+}
+
+function msGet(id){return msState[id]||new Set();}
+
+function msFilter(rows,fieldFn,id){
+  const sel=msGet(id);
+  if(!sel.size)return rows;
+  return rows.filter(r=>sel.has(fieldFn(r)));
+}
+
+function msRenderSearch(id,srch){
+  const wrap=document.getElementById('ms-'+id);
+  if(!wrap)return;
+  const allItems=wrap._allOptions||[];
+  const filtered=srch?allItems.filter(o=>o.toLowerCase().includes(srch.toLowerCase())):allItems;
+  const sel=msState[id]||new Set();
+  const list=wrap.querySelector('.ms-list');
+  if(list)list.innerHTML=filtered.map(o=>`<div class="ms-item${sel.has(o)?' checked':''}" onclick="msTog('${id}','${o.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}',event)"><input type="checkbox" ${sel.has(o)?'checked':''} onclick="event.stopPropagation();msTog('${id}','${o.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}',event)"><span>${o}</span></div>`).join('');
+}
+
+function msUpdate(id,options,placeholder,onChangeFn){
+  const wrap=document.getElementById('ms-'+id);
+  if(!wrap)return;
+  wrap._allOptions=options;
+  wrap.dataset.placeholder=placeholder||'Todas';
+  wrap.dataset.onchange=onChangeFn||'';
+  if(!msState[id])msState[id]=new Set();
+  const optSet=new Set(options);
+  [...msState[id]].forEach(v=>{if(!optSet.has(v))msState[id].delete(v);});
+  msRender(id,options,placeholder,onChangeFn);
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('click',e=>{
+  if(msOpenId&&!e.target.closest('.ms-wrap')){
+    const wrap=document.getElementById('ms-'+msOpenId);
+    if(wrap){wrap.classList.remove('open');wrap.querySelector('.ms-drop').style.display='none';}
+    msOpenId=null;
+  }
+});
 
 // ── SORT ──
 function doSort(table,col){
