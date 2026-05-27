@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526195501-debug -->
+<!DOCTYPE html><!-- v20260526197001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1161,10 +1161,6 @@ function buildRecon(){
     let sapDep;
     if(catOnly){
       const catEANs=new Set(occParams.filter(p=>p.cat===catOnly).map(p=>p.ean));
-      console.log('[MUIM] catOnly='+catOnly+' catEANs='+[...catEANs].slice(0,5)+' occParams.length='+occParams.length);
-      console.log('[MUIM] uniData class 00 count='+uniData.filter(r=>r.classe==='00').length);
-      const uniMatches=uniData.filter(r=>r.classe==='00'&&catEANs.has(r.EAN_norm));
-      console.log('[MUIM] uniMatches='+uniMatches.length+' sample='+(uniMatches[0]?.EAN_norm||'none'));
       sapDep=sapData.filter(r=>r.deposito==='11'&&catEANs.has(r.EAN_norm));
     } else if(dk==='11'){
       const muimConf=Object.values(DEPOT_MAP).find(d=>d.catOnly);
@@ -2566,14 +2562,12 @@ function msTog(id,val,e){
   if(!msState[id])msState[id]=new Set();
   if(msState[id].has(val))msState[id].delete(val);
   else msState[id].add(val);
-  // Re-render dropdown and re-run render fn
   const wrap=document.getElementById('ms-'+id);
+  const opts=wrap?._allOptions||[];
   const onch=wrap?.dataset.onchange;
-  if(wrap){
-    const opts=[...wrap.querySelectorAll('.ms-item')].map(el=>el.querySelector('span').textContent);
-    msRender(id,opts,wrap.dataset.placeholder,null);
-  }
-  if(onch)window[onch]();
+  msRender(id,opts,wrap?.dataset.placeholder,null);
+  if(onch&&window[onch])window[onch]();
+  else if(onch)try{eval(onch+'()');}catch(err){}
 }
 
 function msSelAll(id){
@@ -2582,7 +2576,8 @@ function msSelAll(id){
   msState[id]=new Set(opts);
   const onch=wrap.dataset.onchange;
   msRender(id,opts,wrap.dataset.placeholder,null);
-  if(onch)window[onch]();
+  if(onch&&window[onch])window[onch]();
+  else if(onch)try{eval(onch+'()');}catch(err){}
 }
 
 function msClrAll(id){
@@ -2591,7 +2586,8 @@ function msClrAll(id){
   const opts=wrap._allOptions||[];
   const onch=wrap.dataset.onchange;
   msRender(id,opts,wrap.dataset.placeholder,null);
-  if(onch)window[onch]();
+  if(onch&&window[onch])window[onch]();
+  else if(onch)try{eval(onch+'()');}catch(err){}
 }
 
 function msGet(id){return msState[id]||new Set();}
