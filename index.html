@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526184001 -->
+<!DOCTYPE html><!-- v20260526185501 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1100,7 +1100,9 @@ function normSap(rows){
     .map(r=>({deposito:String(Math.round(nQty(r['Depósito']))),EAN_norm:nEAN(r['EAN11']),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(r['Lote.']),qt:nQty(r['Quantidade']),validade:String(r['Validade Lote']||'').trim(),preco:nQty(r['Preço']||r['Preco']||r['Preço Unit.']||r['Preço Unitário']||r['Price']||r['Valor']||0)}))
     .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito));
 }
-function normUni(rows){return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),vlr:nQty(r['Vlr Méd Un']||r['Vlr Med Un']||r['Valor Médio']||0),endereco:String(r['Endereço']||'').trim()}));}
+function normUni(rows){
+  return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()}));
+}
 
 // ── AUTO CATEGORY ──
 function autoCat(desc){
@@ -1378,7 +1380,7 @@ function updateLoadBanner(uploadedAt){
   const qtSap=(sapData||[]).reduce((s,r)=>s+r.qt,0);
   const qtUni=(uniData||[]).filter(r=>!['93','FI','SI'].includes(r.classe)).reduce((s,r)=>s+r.qt,0);
   const vlrSap=(sapData||[]).reduce((s,r)=>s+(r.qt*(r.preco||0)),0);
-  const vlrUni=(uniData||[]).filter(r=>!['93','FI','SI'].includes(r.classe)).reduce((s,r)=>s+(r.qt*(r.vlr||0)),0);
+  const vlrUni=(uniData||[]).filter(r=>!['93','FI','SI'].includes(r.classe)).reduce((s,r)=>s+(r.vlrTotal||r.qt*(r.vlr||0)),0);
   const difPares=sapPairs.size-uniPairs.size;
   const difQt=qtSap-qtUni;
   const difVlr=vlrSap-vlrUni;
@@ -1391,20 +1393,20 @@ function updateLoadBanner(uploadedAt){
   const temVlr=vlrSap>0||vlrUni>0;
   banner.style.display='block';
   banner.innerHTML=`
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:8px 0 4px">
-      <span style="font-size:11px;color:var(--muted)">☁️ <strong style="color:var(--text)">${company}</strong> · Processado em ${dtStr}</span>
-    </div>
-    <div class="kr" style="gap:12px;margin:0">
-      <div class="kpi"><div class="kl">EAN+Lote SAP</div><div class="kv">${fQ(sapPairs.size)}</div></div>
-      <div class="kpi"><div class="kl">EAN+Lote WMS</div><div class="kv">${fQ(uniPairs.size)}</div></div>
-      <div class="kpi"><div class="kl">Dif. Pares</div><div class="kv ${cls(difPares)}">${sign(difPares)}${fQ(Math.abs(difPares))}</div></div>
-      <div class="kpi" style="border-left:2px solid var(--border2)"><div class="kl">Qtd SAP</div><div class="kv">${fQ(qtSap)}</div></div>
-      <div class="kpi"><div class="kl">Qtd WMS</div><div class="kv">${fQ(qtUni)}</div></div>
-      <div class="kpi"><div class="kl">Dif. Qtd</div><div class="kv ${cls(difQt)}">${sign(difQt)}${fQ(Math.abs(difQt))}</div></div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">☁️ <strong style="color:var(--text)">${company}</strong> · Processado em ${dtStr}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <div class="kpi" style="min-width:100px;flex:1"><div class="kl">EAN+Lote SAP</div><div class="kv">${fQ(sapPairs.size)}</div></div>
+      <div class="kpi" style="min-width:100px;flex:1"><div class="kl">EAN+Lote WMS</div><div class="kv">${fQ(uniPairs.size)}</div></div>
+      <div class="kpi" style="min-width:100px;flex:1"><div class="kl">Dif. Pares</div><div class="kv ${cls(difPares)}">${sign(difPares)}${fQ(Math.abs(difPares))}</div></div>
+      <div style="width:1px;background:var(--border2);margin:0 4px;align-self:stretch"></div>
+      <div class="kpi" style="min-width:100px;flex:1"><div class="kl">Qtd SAP</div><div class="kv">${fQ(qtSap)}</div></div>
+      <div class="kpi" style="min-width:100px;flex:1"><div class="kl">Qtd WMS</div><div class="kv">${fQ(qtUni)}</div></div>
+      <div class="kpi" style="min-width:100px;flex:1"><div class="kl">Dif. Qtd</div><div class="kv ${cls(difQt)}">${sign(difQt)}${fQ(Math.abs(difQt))}</div></div>
       ${temVlr?`
-      <div class="kpi" style="border-left:2px solid var(--border2)"><div class="kl">Valor SAP</div><div class="kv b">${fV(vlrSap)}</div></div>
-      <div class="kpi"><div class="kl">Valor WMS</div><div class="kv b">${fV(vlrUni)}</div></div>
-      <div class="kpi"><div class="kl">Dif. Valor</div><div class="kv ${cls(difVlr)}">${sign(difVlr)}${fV(Math.abs(difVlr))}</div></div>`:''}
+      <div style="width:1px;background:var(--border2);margin:0 4px;align-self:stretch"></div>
+      <div class="kpi" style="min-width:130px;flex:1"><div class="kl">Valor SAP</div><div class="kv b">${fV(vlrSap)}</div></div>
+      <div class="kpi" style="min-width:130px;flex:1"><div class="kl">Valor WMS</div><div class="kv b">${fV(vlrUni)}</div></div>
+      <div class="kpi" style="min-width:130px;flex:1"><div class="kl">Dif. Valor</div><div class="kv ${cls(difVlr)}">${sign(difVlr)}${fV(Math.abs(difVlr))}</div></div>`:''}
     </div>
   `;
 }
