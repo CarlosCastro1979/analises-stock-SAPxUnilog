@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526197001 -->
+<!DOCTYPE html><!-- v20260526198001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1437,9 +1437,8 @@ function recalcBanner(){
   const uniPairs=new Set(uniF.map(r=>r.EAN_norm+'|'+r.Lote_norm));
   const qtSap=sapF.reduce((s,r)=>s+r.qt,0);
   const qtUni=uniF.reduce((s,r)=>s+r.qt,0);
-  const sapEANs=new Set(sapF.map(r=>r.EAN_norm));
   const vlrSap=sapF.reduce((s,r)=>s+(r.qt*(r.preco||0)),0);
-  const vlrUni=uniF.filter(r=>sapEANs.has(r.EAN_norm)).reduce((s,r)=>s+(r.vlrTotal||r.qt*(r.vlr||0)),0);
+  const vlrUni=uniF.reduce((s,r)=>s+(r.vlrTotal||r.qt*(r.vlr||0)),0);
   const difPares=sapPairs.size-uniPairs.size;
   const difQt=qtSap-qtUni;
   const difVlr=vlrSap-vlrUni;
