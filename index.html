@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526152001 -->
+<!DOCTYPE html><!-- v20260526154001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1468,7 +1468,10 @@ function renderRecon(){
     const notaKey=activeDepot+'|'+r.EAN_norm+'|'+r.Lote_norm;
     const notaVal=reconNotas[notaKey]?.nota||'';
     const others=findOther(r.EAN_norm,r.Lote_norm,activeDepot);
-    const otherHtml=others.map(o=>`<span class="badge binfo" style="margin-right:2px">${o.label}: S${fmt(o.qt_sap)} U${fmt(o.qt_uni)}</span>`).join('');
+    const otherHtml=others.map(o=>{
+      const endTxt=o.enderecos.length?o.enderecos.slice(0,3).join(', ')+(o.enderecos.length>3?' +'+(o.enderecos.length-3):''):'sem pos.';
+      return`<span class="badge binfo" style="margin-right:2px" title="Dep ${o.dep} — ${o.label} | SAP:${o.qt_sap} Uni:${o.qt_uni}">Dep${o.dep}: ${endTxt}</span>`;
+    }).join('');
     // Show depot/class badge only if multiple classes (i.e. not filtered to single depot)
     const uniClasses=r.uni_classes||[];
     const uniLocHtml=uniClasses.length>1?uniClasses.map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));const depNum=dk?'Dep '+dk.padStart(4,'0'):'?';return`<span class="badge binfo" style="margin-right:2px;margin-bottom:2px">${depNum}/Cl.${cl}</span>`;}).join(''):'';
@@ -1502,7 +1505,7 @@ function renderRecon(){
   setTimeout(applyResizable,0);
 }
 
-function findOther(ean,lote,curDk){const found=[];for(const dk of DKS){if(dk===curDk)continue;const m=(reconData[dk]||[]).find(r=>r.EAN_norm===ean&&r.Lote_norm===lote);if(m&&(m.qt_sap>0||m.qt_uni>0))found.push({label:DEPOT_MAP[dk].label.split('—')[1].trim(),qt_sap:m.qt_sap,qt_uni:m.qt_uni});}return found;}
+function findOther(ean,lote,curDk){const found=[];for(const dk of DKS){if(dk===curDk)continue;const m=(reconData[dk]||[]).find(r=>r.EAN_norm===ean&&r.Lote_norm===lote);if(m&&(m.qt_sap>0||m.qt_uni>0))found.push({label:DEPOT_MAP[dk].label.split('—')[1]?.trim()||DEPOT_MAP[dk].label,dep:dk.padStart(4,'0'),qt_sap:m.qt_sap,qt_uni:m.qt_uni,enderecos:m.uni_enderecos||[]});}return found;}
 
 // ── SUSPICIOUS ──
 function renderSusp(){
