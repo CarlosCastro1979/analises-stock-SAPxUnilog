@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526180001 -->
+<!DOCTYPE html><!-- v20260526181001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2520,6 +2520,9 @@ function initMultiselects(){
    'auditCat','transEcCat','transEcEstado','transQbCat','transQbEstado'
   ].forEach(id=>msFromSelect(id));
 }
+
+// Close dropdowns when clicking outside
+document.addEventListener('click',e=>{
   if(msOpenId&&!e.target.closest('.ms-wrap')){
     const wrap=document.getElementById('ms-'+msOpenId);
     if(wrap){wrap.classList.remove('open');wrap.querySelector('.ms-drop').style.display='none';}
