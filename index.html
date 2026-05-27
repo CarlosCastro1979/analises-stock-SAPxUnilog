@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526173001 -->
+<!DOCTYPE html><!-- v20260526174501 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -381,6 +381,8 @@ select.cad-inp{cursor:pointer;}
         <th class="num" onclick="doSort('ean','qt_uni')">Unilog Total</th>
         <th class="num" onclick="doSort('ean','diff')">Diferença</th>
         <th class="num" onclick="doSort('ean','absDiff')">|Dif| ↓</th>
+        <th class="num" onclick="doSort('ean','preco')">Preço SAP</th>
+        <th class="num" onclick="doSort('ean','valorDif')">Valor Dif.</th>
         <th onclick="doSort('ean','estado')">Estado</th>
         <th>Depósitos com dif.</th>
       </tr></thead>
@@ -1094,7 +1096,7 @@ function nQty(v){if(v===null||v===undefined||v==='')return 0;const n=parseFloat(
 function normSap(rows){
   return rows
     .filter(r=>r['Centro']&&r['Depósito']!==undefined&&r['Depósito']!=='')
-    .map(r=>({deposito:String(Math.round(nQty(r['Depósito']))),EAN_norm:nEAN(r['EAN11']),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(r['Lote.']),qt:nQty(r['Quantidade']),validade:String(r['Validade Lote']||'').trim()}))
+    .map(r=>({deposito:String(Math.round(nQty(r['Depósito']))),EAN_norm:nEAN(r['EAN11']),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(r['Lote.']),qt:nQty(r['Quantidade']),validade:String(r['Validade Lote']||'').trim(),preco:nQty(r['Preço'])||0}))
     .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito));
 }
 function normUni(rows){return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),endereco:String(r['Endereço']||'').trim()}));}
@@ -1484,6 +1486,10 @@ function _renderEanView(){
   if(!Object.keys(reconData).length){body.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
 
+  // Build price map: EAN -> highest price found in SAP data
+  const precoMap={};
+  (sapData||[]).forEach(r=>{if(r.EAN_norm&&r.preco>0){if(!precoMap[r.EAN_norm]||r.preco>precoMap[r.EAN_norm])precoMap[r.EAN_norm]=r.preco;}});
+
   // Aggregate all depots by EAN
   const byEan={};
   for(const dk of DKS){
@@ -1503,6 +1509,8 @@ function _renderEanView(){
     ...r,
     diff:r.qt_sap-r.qt_uni,
     absDiff:Math.abs(r.qt_sap-r.qt_uni),
+    preco:precoMap[r.EAN_norm]||0,
+    valorDif:Math.abs(r.qt_sap-r.qt_uni)*(precoMap[r.EAN_norm]||0),
     estado:r.qt_sap===0&&r.qt_uni>0?'Só Unilog':r.qt_uni===0&&r.qt_sap>0?'Só SAP':r.qt_sap===r.qt_uni?'OK':'Divergência'
   }));
 
@@ -1530,11 +1538,14 @@ function _renderEanView(){
   // KPIs
   const comDiff=rows.filter(r=>r.diff!==0).length;
   const totalAbsDiff=rows.reduce((s,r)=>s+r.absDiff,0);
+  const totalValor=rows.reduce((s,r)=>s+r.valorDif,0);
+  const temPreco=rows.some(r=>r.preco>0);
   document.getElementById('eanKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs</div><div class="kv">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com divergência</div><div class="kv r">${fmt(comDiff)}</div><div class="ks">${rows.length?Math.round(comDiff/rows.length*100):0}%</div></div>
     <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmt(rows.length-comDiff)}</div></div>
     <div class="kpi"><div class="kl">Total |Dif|</div><div class="kv y">${fmt(totalAbsDiff)}</div><div class="ks">unidades</div></div>
+    ${temPreco?`<div class="kpi"><div class="kl">Valor Total Dif.</div><div class="kv ${totalValor>0?'r':''}">${totalValor.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</div><div class="ks">preço SAP × |dif|</div></div>`:''}
   `;
 
   body.innerHTML='';
@@ -1564,6 +1575,8 @@ function _renderEanView(){
       <td class="num">${fmt(r.qt_uni)}</td>
       <td class="num ${r.diff>0?'pos':r.diff<0?'neg':''}">${r.diff>0?'+':''}${fmt(r.diff)}</td>
       <td class="num ${r.absDiff>0?'neg':''}">${fmt(r.absDiff)}</td>
+      <td class="num" style="color:var(--muted);font-size:11px">${r.preco>0?r.preco.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+      <td class="num ${r.valorDif>0?'neg':''}">${r.valorDif>0?r.valorDif.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}):'—'}</td>
       <td>${badge}</td>
       <td style="font-size:11px">${depHtml||'—'}</td>
     `;
@@ -1586,16 +1599,20 @@ function exportEanXlsx(){
       if(r.diff!==0)byEan[ean].Depositos_Dif.push(`${DEPOT_MAP[dk].label.split('—')[1]?.trim()||dk}(${r.diff>0?'+':''}${r.diff})`);
     }
   }
+  const precoMap2={};
+  (sapData||[]).forEach(r=>{if(r.EAN_norm&&r.preco>0){if(!precoMap2[r.EAN_norm]||r.preco>precoMap2[r.EAN_norm])precoMap2[r.EAN_norm]=r.preco;}});
   const data=Object.values(byEan).map(r=>({
     Categoria:r.Categoria,Subcategoria:r.Subcategoria,EAN:r.EAN_norm,Descricao:r.Descricao,
     SAP_Total:r.SAP_Total,Unilog_Total:r.Unilog_Total,
     Diferenca:r.SAP_Total-r.Unilog_Total,
     Abs_Diferenca:Math.abs(r.SAP_Total-r.Unilog_Total),
+    Preco_SAP:precoMap2[r.EAN_norm]||0,
+    Valor_Dif:Math.abs(r.SAP_Total-r.Unilog_Total)*(precoMap2[r.EAN_norm]||0),
     Estado:r.SAP_Total===r.Unilog_Total?'OK':r.SAP_Total===0?'Só Unilog':r.Unilog_Total===0?'Só SAP':'Divergência',
     Depositos_Com_Diferenca:r.Depositos_Dif.join(' | ')
   })).sort((a,b)=>b.Abs_Diferenca-a.Abs_Diferenca);
   const ws=XLSX.utils.json_to_sheet(data);
-  ws['!cols']=[{wch:16},{wch:14},{wch:14},{wch:32},{wch:10},{wch:12},{wch:10},{wch:10},{wch:14},{wch:50}];
+  ws['!cols']=[{wch:16},{wch:14},{wch:14},{wch:32},{wch:10},{wch:12},{wch:10},{wch:10},{wch:10},{wch:14},{wch:14},{wch:50}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Por EAN');
   XLSX.writeFile(wb,`conciliacao_por_ean_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
