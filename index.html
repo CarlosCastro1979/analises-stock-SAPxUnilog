@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526193001 -->
+<!DOCTYPE html><!-- v20260526195001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1388,6 +1388,7 @@ async function processAll(){
   if(!sapData||!uniData)return;
   company=document.getElementById('coSel').value;
   document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
+  await loadOccParams();
   buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();await autoSeedOcc();renderUpKpis();updateChip();
   try{
     const payload={id:company,company,uploaded_at:new Date().toISOString(),sap_rows:sapData.length,unilog_rows:uniData.length,sap_data:JSON.stringify(sapData),unilog_data:JSON.stringify(uniData),recon_summary:JSON.stringify(buildSummary())};
@@ -1488,7 +1489,11 @@ async function loadFromDB(silent=false){
     company=document.getElementById('coSel').value;
     const{data,error}=await db.from('logistica_stock').select('*').eq('id',company).single();
     if(error||!data){if(!silent)toast('Sem dados para '+company,'error');return;}
-    company=data.company;DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;DKS=Object.keys(DEPOT_MAP);sapData=JSON.parse(data.sap_data).filter(r=>DKS.includes(r.deposito));uniData=JSON.parse(data.unilog_data);
+    company=data.company;DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;DKS=Object.keys(DEPOT_MAP);
+    sapData=JSON.parse(data.sap_data).filter(r=>DKS.includes(r.deposito)||r.deposito==='11');
+    uniData=JSON.parse(data.unilog_data);
+    // Load occParams first so MUIM category filtering works in buildRecon
+    await loadOccParams();
     buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();renderUpKpis();updateChip();
     // Re-render active page if it needs data
     const activePage=document.querySelector('.page.active');
@@ -1980,13 +1985,18 @@ function _renderCadastro(){
   });
   document.getElementById('cadCount').textContent=`${items.length} artigos`;
   const body=document.getElementById('cadBody');body.innerHTML='';
-  // Event delegation for inputs and toggles
-  body.onblur=function(e){
-    const el=e.target;const ean=el.dataset.ean;if(!ean)return;
-    if(el.dataset.field){
+  // Debounce map for autosave
+  const _cadDebounce={};
+  // Event delegation: autosave on input with 500ms debounce
+  body.oninput=function(e){
+    const el=e.target;const ean=el.dataset.ean;if(!ean||!el.dataset.field)return;
+    // Visual feedback: yellow border while pending
+    el.style.borderColor='var(--yellow)';
+    clearTimeout(_cadDebounce[ean+'|'+el.dataset.field]);
+    _cadDebounce[ean+'|'+el.dataset.field]=setTimeout(()=>{
       const val=el.dataset.int?parseInt(el.value)||null:el.value;
-      cadAutoSave(ean,el.dataset.field,val);
-    }
+      cadAutoSave(ean,el.dataset.field,val).then(()=>{el.style.borderColor='var(--green)';setTimeout(()=>el.style.borderColor='',1000);});
+    },500);
   };
   body.onclick=function(e){
     const tw=e.target.closest('[data-toggle]');if(!tw)return;
@@ -2032,8 +2042,10 @@ async function cadAutoSave(ean,field,value){
   cadEdit(ean,field,value);
   const p=occParams.find(x=>x.ean===ean);
   const sapRow=sapData?.find(r=>r.EAN_norm===ean);
+  const uniRow=soUnilogData?.find(r=>r.EAN_norm===ean);
   const existing=p||{};const edits=cadEdits[ean]||{};
-  const payload={ean,descricao:existing.descricao||sapRow?.desc||'',
+  const payload={ean,
+    descricao:existing.descricao||sapRow?.desc||uniRow?.produto||'',
     cat:edits.cat!==undefined?edits.cat:(existing.cat||''),
     subcat:edits.subcat!==undefined?edits.subcat:(existing.subcat||''),
     qty_per_pos:edits.qty_per_pos!==undefined?edits.qty_per_pos:(existing.qty_per_pos||1),
@@ -2045,7 +2057,14 @@ async function cadAutoSave(ean,field,value){
     updated_at:new Date().toISOString()};
   try{
     const{error}=await db.from('logistica_occ_params').upsert(payload,{onConflict:'ean'});
-    if(!error){delete cadEdits[ean];await loadOccParams();showSaveIndicator();}
+    if(!error){
+      delete cadEdits[ean];
+      // Update occParams in memory without re-rendering (avoids interrupting user)
+      const idx=occParams.findIndex(x=>x.ean===ean);
+      if(idx>=0)occParams[idx]={...occParams[idx],...payload};
+      else occParams.push(payload);
+      showSaveIndicator();
+    }
   }catch(e){}
 }
 function showSaveIndicator(){
