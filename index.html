@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526170001 -->
+<!DOCTYPE html><!-- v20260526171001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -343,6 +343,10 @@ select.cad-inp{cursor:pointer;}
         <option value="only_sap">Só SAP</option>
         <option value="only_uni">Só Unilog</option>
       </select>
+      <div class="tw" onclick="toggleShowAllEan()">
+        <div class="tg" id="showAllEanTg"><div class="tk"></div></div>
+        <span id="tgEanLbl">Só diferenças</span>
+      </div>
     </div>
     <div class="kr" id="eanKpis"></div>
     <div class="tw2"><table>
@@ -1444,6 +1448,9 @@ function reconTab(name,el){
   if(name==='ean')renderEanView();
 }
 
+let showAllEan=false;
+function toggleShowAllEan(){showAllEan=!showAllEan;document.getElementById('showAllEanTg').classList.toggle('on',showAllEan);document.getElementById('tgEanLbl').textContent=showAllEan?'Mostrar tudo':'Só diferenças';renderEanView();}
+
 // ── RENDER EAN VIEW ──
 let _renderEanViewBusy=false;
 function renderEanView(){
@@ -1489,6 +1496,7 @@ function _renderEanView(){
   const catF=catSel.value;
   const estadoF=document.getElementById('eanEstado').value;
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch));
+  if(!showAllEan)rows=rows.filter(r=>r.diff!==0);
   if(catF)rows=rows.filter(r=>r.cat===catF);
   if(estadoF==='diff')rows=rows.filter(r=>r.diff!==0);
   else if(estadoF==='ok')rows=rows.filter(r=>r.diff===0);
