@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526190001 -->
+<!DOCTYPE html><!-- v20260526192001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -118,7 +118,7 @@ thead tr{border-bottom:1px solid var(--navy3);background:var(--navy3);}
 th{padding:10px 10px;text-align:left;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#e2e8f0;white-space:nowrap;cursor:pointer;user-select:none;}
 th:hover{color:#fff;}
 .kpi-sep{width:1px;height:16px;background:var(--border2);margin:0 4px;}
-#loadBanner{display:none;padding:8px 20px 12px;background:var(--navy2);border-bottom:1px solid var(--border);}
+#loadBanner{display:none;padding:12px 20px 16px;background:var(--navy2);border-bottom:1px solid var(--border);}
 th.desc::after{content:' ↓';color:#fca5a5;}
 th[onclick]{cursor:pointer;user-select:none;}
 th[onclick]:hover{color:var(--red);}
@@ -492,6 +492,7 @@ select.cad-inp{cursor:pointer;}
           <option value="sem_cat">Sem categoria</option>
           <option value="sem_sub">Sem subcategoria</option>
           <option value="sem_qpp">Sem un/posição</option>
+          <option value="so_unilog">⚠️ Só Unilog</option>
         </select>
       </div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;" id="cadCount"></div>
@@ -1023,7 +1024,7 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const db=supabase.createClient(SB_URL,SB_KEY);
 
 // Depot maps per company
-const DEPOT_MAP_DFB={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2'],label:'0044 — Avarias'}};
+const DEPOT_MAP_DFB={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2'],label:'0044 — Avarias'},'MUIM':{classes:['00'],label:'MUIM — Equipamento Profissional',catOnly:'Equipamento Profissional'}};
 const DEPOT_MAP_QB={'11':{classes:['00'],label:'0011 — Disponível'},'44':{classes:['A1','A2'],label:'0044 — Avarias'},'99':{classes:['104'],label:'0099 — Vencidos'}};
 let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
@@ -1152,9 +1153,36 @@ function buildRecon(){
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
   if(uniData)uniData.forEach(r=>{if(r.EAN_norm&&r.produto&&!dm[r.EAN_norm])dm[r.EAN_norm]=r.produto;});
   for(const dk of DKS){
-    const classes=DEPOT_MAP[dk].classes;
-    const sapDep=sapData.filter(r=>r.deposito===dk);
-    const uniDep=uniData.filter(r=>classes.includes(r.classe));
+    const depConf=DEPOT_MAP[dk];
+    const classes=depConf.classes;
+    const catOnly=depConf.catOnly||null; // e.g. MUIM only includes 'Equipamento Profissional'
+
+    // SAP: for MUIM use dep 11 rows filtered by catOnly; for dep 11 exclude catOnly EANs
+    let sapDep;
+    if(catOnly){
+      const catEANs=new Set(occParams.filter(p=>p.cat===catOnly).map(p=>p.ean));
+      sapDep=sapData.filter(r=>r.deposito==='11'&&catEANs.has(r.EAN_norm));
+    } else if(dk==='11'){
+      const muimConf=Object.values(DEPOT_MAP).find(d=>d.catOnly);
+      const muimCat=muimConf?.catOnly;
+      const muimEANs=muimCat?new Set(occParams.filter(p=>p.cat===muimCat).map(p=>p.ean)):new Set();
+      sapDep=sapData.filter(r=>r.deposito===dk&&!muimEANs.has(r.EAN_norm));
+    } else {
+      sapDep=sapData.filter(r=>r.deposito===dk);
+    }
+
+    // Unilog: filter by classes; for catOnly deps also filter by EAN category
+    let uniDep=uniData.filter(r=>classes.includes(r.classe));
+    if(catOnly){
+      const catEANs=new Set(occParams.filter(p=>p.cat===catOnly).map(p=>p.ean));
+      uniDep=uniDep.filter(r=>catEANs.has(r.EAN_norm));
+    } else if(dk==='11'){
+      const muimConf=Object.values(DEPOT_MAP).find(d=>d.catOnly);
+      const muimCat=muimConf?.catOnly;
+      const muimEANs=muimCat?new Set(occParams.filter(p=>p.cat===muimCat).map(p=>p.ean)):new Set();
+      uniDep=uniDep.filter(r=>!muimEANs.has(r.EAN_norm));
+    }
+
     const sA={};
     for(const r of sapDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!sA[k])sA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,desc:r.desc,validade:r.validade};sA[k].qt+=r.qt;}
     const uA={};
@@ -1397,7 +1425,7 @@ function updateLoadBanner(uploadedAt){
   banner.style.display='block';
   banner.innerHTML=`
     <div style="font-size:11px;color:var(--muted);margin-bottom:10px">☁️ <strong style="color:var(--text)">${company}</strong> · Processado em ${dtStr}</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr)${temVlr?';gap:8px':';gap:8px'};gap:8px;max-width:100%">
       <div class="kpi"><div class="kl">EAN+Lote SAP</div><div class="kv">${fQ(sapPairs.size)}</div></div>
       <div class="kpi"><div class="kl">EAN+Lote WMS</div><div class="kv">${fQ(uniPairs.size)}</div></div>
       <div class="kpi"><div class="kl">Dif. Pares</div><div class="kv ${cls(difPares)}">${sign(difPares)}${fQ(Math.abs(difPares))}</div></div>
@@ -1879,12 +1907,17 @@ function _renderCadastro(){
   // Only EANs with at least 1 row with qt > 0 in valid deposits
   const eanMap={};
   sapData.filter(r=>r.EAN_norm&&r.qt>0).forEach(r=>{
-    if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc};
+    if(!eanMap[r.EAN_norm])eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.desc,soUnilog:false};
+  });
+  // Also include EANs that are only in Unilog (need to be catalogued)
+  soUnilogData.forEach(r=>{
+    if(r.EAN_norm&&!eanMap[r.EAN_norm])
+      eanMap[r.EAN_norm]={ean:r.EAN_norm,desc:r.produto||'',soUnilog:true};
   });
   let items=Object.values(eanMap).map(e=>{
     const p=occParams.find(x=>x.ean===e.ean);
     const edited=cadEdits[e.ean];
-    return{ean:e.ean,desc:e.desc,
+    return{ean:e.ean,desc:e.desc,soUnilog:e.soUnilog||false,
       cat:edited?.cat!==undefined?edited.cat:(p?.cat||''),
       subcat:edited?.subcat!==undefined?edited.subcat:(p?.subcat||''),
       qty_per_pos:edited?.qty_per_pos!==undefined?edited.qty_per_pos:(p?.qty_per_pos||null),
@@ -1911,6 +1944,7 @@ function _renderCadastro(){
   if(semVals.has('sem_cat'))items=items.filter(i=>!i.cat);
   else if(semVals.has('sem_sub'))items=items.filter(i=>!i.subcat);
   else if(semVals.has('sem_qpp'))items=items.filter(i=>!i.qty_per_pos||i.qty_per_pos<=1);
+  else if(semVals.has('so_unilog'))items=items.filter(i=>i.soUnilog);
   const{col,dir}=cadSortState;
   items.sort((a,b)=>{
     if(col!=='cat'){const cc=String(a.cat||'').localeCompare(String(b.cat||''));if(cc!==0)return cc;}
@@ -1951,11 +1985,13 @@ function _renderCadastro(){
     const descRed=item.descontinuado?'background:var(--red)':'';
     const descColor=item.descontinuado?'color:var(--red)':'';
     tr.dataset.ean=ean;
+    if(item.soUnilog)tr.style.background='rgba(251,191,36,0.08)';
+    const unilogBadge=item.soUnilog?'<span class="badge bwarn" style="font-size:9px;margin-left:4px">Só Unilog</span>':'';
     tr.innerHTML=
       '<td><input class="cad-inp" data-field="cat" data-ean="'+ean+'" value="'+esc(item.cat||'')+'" placeholder="Categoria…"></td>'+
       '<td><input class="cad-inp" data-field="subcat" data-ean="'+ean+'" value="'+esc(item.subcat||'')+'" placeholder="Subcategoria…"></td>'+
       '<td><span class="badge bneu">'+ean+'</span></td>'+
-      '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="'+esc(item.desc||'')+'">'+esc(item.desc||'')+'</td>'+
+      '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="'+esc(item.desc||'')+'">'+esc(item.desc||'')+unilogBadge+'</td>'+
       '<td style="white-space:nowrap">'+cadDepHtml+'</td>'+
       '<td><input class="cad-inp" type="number" min="1" data-field="qty_per_pos" data-ean="'+ean+'" data-int="1" value="'+(item.qty_per_pos||'')+'" placeholder="0" style="width:70px"></td>'+
       '<td><input class="cad-inp" type="number" min="1" data-field="unidades_cx" data-ean="'+ean+'" data-int="1" value="'+(item.unidades_cx||'')+'" placeholder="—" style="width:60px"></td>'+
