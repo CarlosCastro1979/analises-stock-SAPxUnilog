@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526183001 -->
+<!DOCTYPE html><!-- v20260526184001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -118,7 +118,7 @@ thead tr{border-bottom:1px solid var(--navy3);background:var(--navy3);}
 th{padding:10px 10px;text-align:left;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#e2e8f0;white-space:nowrap;cursor:pointer;user-select:none;}
 th:hover{color:#fff;}
 .kpi-sep{width:1px;height:16px;background:var(--border2);margin:0 4px;}
-#loadBanner{display:none;align-items:center;gap:12px;padding:6px 16px;background:var(--navy2);border-bottom:1px solid var(--border);font-size:12px;flex-wrap:wrap;}
+#loadBanner{display:none;padding:8px 20px 12px;background:var(--navy2);border-bottom:1px solid var(--border);}
 th.desc::after{content:' ↓';color:#fca5a5;}
 th[onclick]{cursor:pointer;user-select:none;}
 th[onclick]:hover{color:var(--red);}
@@ -1100,7 +1100,7 @@ function normSap(rows){
     .map(r=>({deposito:String(Math.round(nQty(r['Depósito']))),EAN_norm:nEAN(r['EAN11']),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(r['Lote.']),qt:nQty(r['Quantidade']),validade:String(r['Validade Lote']||'').trim(),preco:nQty(r['Preço']||r['Preco']||r['Preço Unit.']||r['Preço Unitário']||r['Price']||r['Valor']||0)}))
     .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito));
 }
-function normUni(rows){return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),endereco:String(r['Endereço']||'').trim()}));}
+function normUni(rows){return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),vlr:nQty(r['Vlr Méd Un']||r['Vlr Med Un']||r['Valor Médio']||0),endereco:String(r['Endereço']||'').trim()}));}
 
 // ── AUTO CATEGORY ──
 function autoCat(desc){
@@ -1373,32 +1373,39 @@ function buildSummary(){const s={};for(const dk of DKS){const rows=reconData[dk]
 function updateLoadBanner(uploadedAt){
   const banner=document.getElementById('loadBanner');
   if(!banner)return;
-  // EAN+lote únicos
   const sapPairs=new Set((sapData||[]).map(r=>r.EAN_norm+'|'+r.Lote_norm));
-  const uniPairs=new Set((uniData||[]).map(r=>r.EAN_norm+'|'+r.Lote_norm));
-  // Valor stock (qty × preço)
+  const uniPairs=new Set((uniData||[]).filter(r=>!['93','FI','SI'].includes(r.classe)).map(r=>r.EAN_norm+'|'+r.Lote_norm));
   const qtSap=(sapData||[]).reduce((s,r)=>s+r.qt,0);
-  const qtUni=(uniData||[]).reduce((s,r)=>s+r.qt,0);
+  const qtUni=(uniData||[]).filter(r=>!['93','FI','SI'].includes(r.classe)).reduce((s,r)=>s+r.qt,0);
   const vlrSap=(sapData||[]).reduce((s,r)=>s+(r.qt*(r.preco||0)),0);
-  const vlrUni=(uniData||[]).reduce((s,r)=>s+(r.qt*(r.preco||0)),0);
-  const difPairs=sapPairs.size-uniPairs.size;
+  const vlrUni=(uniData||[]).filter(r=>!['93','FI','SI'].includes(r.classe)).reduce((s,r)=>s+(r.qt*(r.vlr||0)),0);
+  const difPares=sapPairs.size-uniPairs.size;
+  const difQt=qtSap-qtUni;
   const difVlr=vlrSap-vlrUni;
   const dt=uploadedAt?new Date(uploadedAt):new Date();
   const dtStr=dt.toLocaleDateString('pt-BR')+' '+dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-  const fmtVlr=v=>Math.abs(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-  banner.style.display='flex';
+  const fV=v=>Math.abs(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});
+  const fQ=v=>v.toLocaleString('pt-BR');
+  const sign=v=>v>0?'+':v<0?'-':'';
+  const cls=v=>v!==0?'neg':'pos';
+  const temVlr=vlrSap>0||vlrUni>0;
+  banner.style.display='block';
   banner.innerHTML=`
-    <span style="color:var(--muted);font-size:11px">☁️ ${company} · ${dtStr}</span>
-    <span class="kpi-sep"></span>
-    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">EAN+Lote SAP</span> <strong>${fmt(sapPairs.size)}</strong></span>
-    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">EAN+Lote WMS</span> <strong>${fmt(uniPairs.size)}</strong></span>
-    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">Dif. pares</span> <strong class="${difPairs!==0?'neg':''}">${difPairs>0?'+':''}${fmt(difPairs)}</strong></span>
-    <span class="kpi-sep"></span>
-    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">Qt SAP</span> <strong>${fmt(qtSap)}</strong></span>
-    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">Qt WMS</span> <strong>${fmt(qtUni)}</strong></span>
-    ${vlrSap>0?`<span class="kpi-sep"></span>
-    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">Valor SAP</span> <strong>${fmtVlr(vlrSap)}</strong></span>
-    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">Dif. Valor</span> <strong class="${difVlr!==0?'neg':''}">${difVlr>0?'+':''}${fmtVlr(difVlr)}</strong></span>`:''}
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:8px 0 4px">
+      <span style="font-size:11px;color:var(--muted)">☁️ <strong style="color:var(--text)">${company}</strong> · Processado em ${dtStr}</span>
+    </div>
+    <div class="kr" style="gap:12px;margin:0">
+      <div class="kpi"><div class="kl">EAN+Lote SAP</div><div class="kv">${fQ(sapPairs.size)}</div></div>
+      <div class="kpi"><div class="kl">EAN+Lote WMS</div><div class="kv">${fQ(uniPairs.size)}</div></div>
+      <div class="kpi"><div class="kl">Dif. Pares</div><div class="kv ${cls(difPares)}">${sign(difPares)}${fQ(Math.abs(difPares))}</div></div>
+      <div class="kpi" style="border-left:2px solid var(--border2)"><div class="kl">Qtd SAP</div><div class="kv">${fQ(qtSap)}</div></div>
+      <div class="kpi"><div class="kl">Qtd WMS</div><div class="kv">${fQ(qtUni)}</div></div>
+      <div class="kpi"><div class="kl">Dif. Qtd</div><div class="kv ${cls(difQt)}">${sign(difQt)}${fQ(Math.abs(difQt))}</div></div>
+      ${temVlr?`
+      <div class="kpi" style="border-left:2px solid var(--border2)"><div class="kl">Valor SAP</div><div class="kv b">${fV(vlrSap)}</div></div>
+      <div class="kpi"><div class="kl">Valor WMS</div><div class="kv b">${fV(vlrUni)}</div></div>
+      <div class="kpi"><div class="kl">Dif. Valor</div><div class="kv ${cls(difVlr)}">${sign(difVlr)}${fV(Math.abs(difVlr))}</div></div>`:''}
+    </div>
   `;
 }
 
