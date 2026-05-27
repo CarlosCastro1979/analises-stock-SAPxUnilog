@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526198001 -->
+<!DOCTYPE html><!-- v20260526200501 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -240,6 +240,7 @@ select.cad-inp{cursor:pointer;}
   <div class="nt" data-page="occupation">📦 Ocupação</div>
   <div class="nt" data-page="reclamacoes">🚨 Reclamações<span id="recBadge" class="bc" style="display:none;background:#f59e0b;color:#fff"></span></div>
   <div class="nt" data-page="transferencias">🔄 Transferências</div>
+  <div class="nt" data-page="pecas">🔧 Peças AT</div>
   <div class="nt" data-page="history">📋 Histórico</div>
 </div>
 
@@ -974,6 +975,47 @@ select.cad-inp{cursor:pointer;}
   </div>
 </div>
 
+<!-- ══ PEÇAS AT ══ -->
+<div class="page" id="page-pecas">
+  <div class="card">
+    <div class="ch">
+      <div class="ct">Peças AT — Depósito 0033</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bg bs" onclick="exportPecasXlsx()">⬇ Excel</button>
+        <button class="btn bg bs" onclick="gerarPedidoPecas()">📋 Pedido 12M</button>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
+      Stock actual do dep. <strong>0033</strong>. Peças com stock zero mantêm-se visíveis. Consumo médio calculado a partir do histórico de uploads.
+    </div>
+    <div class="tb">
+      <input class="inp is" id="pecasSrch" placeholder="Código SAP ou descrição…" oninput="renderPecas()">
+      <select class="inp" id="pecasEstado" onchange="renderPecas()">
+        <option value="">Todos</option>
+        <option value="stock">Com stock</option>
+        <option value="zero">Stock zero</option>
+        <option value="repor">Necessita reposição</option>
+      </select>
+    </div>
+    <div class="kr" id="pecasKpis"></div>
+    <div class="tw2"><table>
+      <thead><tr>
+        <th onclick="doSort('pecas','material')">Cód. SAP</th>
+        <th onclick="doSort('pecas','desc')">Descrição</th>
+        <th class="num" onclick="doSort('pecas','qt')">Stock Actual</th>
+        <th class="num" onclick="doSort('pecas','preco')">Preço Un.</th>
+        <th class="num" onclick="doSort('pecas','valorTotal')">Valor Total</th>
+        <th class="num" onclick="doSort('pecas','consumoMedio')">Consumo Méd./Mês</th>
+        <th class="num" onclick="doSort('pecas','cobertura')">Cobertura (meses)</th>
+        <th class="num" onclick="doSort('pecas','pedido12m')">Pedido 12M</th>
+        <th>Último snapshot</th>
+      </tr></thead>
+      <tbody id="pecasBody"></tbody>
+    </table></div>
+    <div id="pecasEmpty" class="empty" style="display:none"><div class="empty-i">🔧</div><div>Carrega o ficheiro SAP para ver as peças</div></div>
+  </div>
+</div>
+
 <!-- ══ HISTÓRICO ══ -->
 <div class="page" id="page-history">
   <div class="card">
@@ -1031,7 +1073,7 @@ let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','FI','SI','Total',''];
 
 let sapData=null,uniData=null,reconData={},suspData=[],occParams=[],reconNotas={},cadEdits={};
-let showAll=false,activeDepot='11',editOccId=null,company='DFB',sorts={};
+let showAll=false,activeDepot='11',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
 async function init(){
@@ -1047,6 +1089,7 @@ async function init(){
       if(t.dataset.page==='cadastro')renderCadastro();
       if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
       if(t.dataset.page==='reclamacoes'){loadReclamacoes();}
+      if(t.dataset.page==='pecas'){renderPecas();}
       if(t.dataset.page==='transferencias'){
         // Show/hide tabs based on company
         const itEc=document.getElementById('transItEc');
@@ -1085,7 +1128,7 @@ async function init(){
 function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok':'');document.getElementById('dbLbl').textContent=ok?'Supabase OK':'offline';}
 
 // ── FILES ──
-function loadSap(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{sapData=normSap(rows);document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
+function loadSap(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{window._rawSapRows=rows;sapData=normSap(rows);document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
 function loadUni(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{uniData=normUni(rows);document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
 function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast('Erro: '+err.message,'error');}};r.readAsArrayBuffer(file);}
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
@@ -1095,6 +1138,12 @@ function nEAN(v){if(v===null||v===undefined||v==='')return'';const s=String(v).t
 function nLote(v){if(v===null||v===undefined)return'';const s=String(v).trim();return(s===''||s==='nan'||s==='None')?'':s;}
 function nQty(v){if(v===null||v===undefined||v==='')return 0;const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?0:n;}
 // Only process deposits defined in DEPOT_MAP — all others ignored automatically
+function normSapPecas(rows){
+  return rows
+    .filter(r=>r['Centro']&&String(Math.round(nQty(r['Depósito']||0)))==='33')
+    .map(r=>({material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),qt:nQty(r['Quantidade']),preco:nQty(r['Preço']||r['Preco']||0),lote:nLote(r['Lote.'])}))
+    .filter(r=>r.material);
+}
 function normSap(rows){
   return rows
     .filter(r=>r['Centro']&&r['Depósito']!==undefined&&r['Depósito']!=='')
@@ -1389,7 +1438,7 @@ async function processAll(){
   company=document.getElementById('coSel').value;
   document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
   await loadOccParams();
-  buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();await autoSeedOcc();renderUpKpis();updateChip();
+  buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();await autoSeedOcc();await processPecas();renderUpKpis();updateChip();
   try{
     const payload={id:company,company,uploaded_at:new Date().toISOString(),sap_rows:sapData.length,unilog_rows:uniData.length,sap_data:JSON.stringify(sapData),unilog_data:JSON.stringify(uniData),recon_summary:JSON.stringify(buildSummary())};
     const{error}=await db.from('logistica_stock').upsert(payload,{onConflict:'id'});
@@ -1493,7 +1542,7 @@ async function loadFromDB(silent=false){
     uniData=JSON.parse(data.unilog_data);
     // Load occParams first so MUIM category filtering works in buildRecon
     await loadOccParams();
-    buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();renderUpKpis();updateChip();
+    buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();await processPecas();renderUpKpis();updateChip();
     // Re-render active page if it needs data
     const activePage=document.querySelector('.page.active');
     if(activePage){
@@ -1501,6 +1550,7 @@ async function loadFromDB(silent=false){
       if(activePage.id==='page-recon')renderReconPage();
       if(activePage.id==='page-suspeitos')renderSusp();
       if(activePage.id==='page-cadastro')renderCadastro();
+      if(activePage.id==='page-pecas')renderPecas();
     }
     updateLoadBanner(data.uploaded_at);
     if(!silent)toast('Carregado: '+company,'success');
@@ -2675,6 +2725,175 @@ document.addEventListener('click',e=>{
   }
 });
 
+// ══════════════════════════════════════════
+// PEÇAS AT
+// ══════════════════════════════════════════
+
+async function processPecas(){
+  if(!sapData&&!window._rawSapRows)return;
+  // Get dep 33 rows from raw SAP data before normSap filtered them
+  // We need to re-read from the raw rows stored during load
+  const raw33=window._rawSapRows?normSapPecas(window._rawSapRows):[];
+  if(!raw33.length)return;
+
+  const now=new Date().toISOString();
+
+  // 1. Upsert snapshot
+  const snapshot={company,snapshot_at:now,rows:JSON.stringify(raw33)};
+  try{
+    await db.from('pecas_at_snapshots').insert(snapshot);
+  }catch(e){}
+
+  // 2. Load all catalogue entries (never delete)
+  await loadPecasData();
+}
+
+async function loadPecasData(){
+  try{
+    // Load catalogue
+    const{data:cat}=await db.from('pecas_at').select('*').eq('company',company);
+    const catMap={};(cat||[]).forEach(p=>catMap[p.material]=p);
+
+    // Load all snapshots for this company ordered by time
+    const{data:snaps}=await db.from('pecas_at_snapshots').select('snapshot_at,rows').eq('company',company).order('snapshot_at',{ascending:true});
+
+    // Build consumption history per material
+    const history={}; // material -> [{at, qt}]
+    (snaps||[]).forEach(s=>{
+      const rows=JSON.parse(s.rows||'[]');
+      rows.forEach(r=>{
+        if(!history[r.material])history[r.material]=[];
+        history[r.material].push({at:new Date(s.snapshot_at),qt:r.qt,preco:r.preco,desc:r.desc});
+      });
+    });
+
+    // Calculate monthly consumption per material
+    const consumo={};
+    Object.entries(history).forEach(([mat,pts])=>{
+      if(pts.length<2){consumo[mat]=0;return;}
+      // Sum of all decreases (consumptions)
+      let totalConsumo=0;
+      for(let i=1;i<pts.length;i++){
+        const diff=pts[i-1].qt-pts[i].qt;
+        if(diff>0)totalConsumo+=diff; // only count decreases
+      }
+      // Time span in months
+      const spanMs=pts[pts.length-1].at-pts[0].at;
+      const spanMonths=Math.max(spanMs/(1000*60*60*24*30),0.1);
+      consumo[mat]=totalConsumo/spanMonths;
+    });
+
+    // Latest stock from most recent snapshot
+    const latestSnap=(snaps||[]).length>0?JSON.parse(snaps[snaps.length-1].rows||'[]'):[];
+    const latestMap={};latestSnap.forEach(r=>latestMap[r.material]=r);
+
+    // Merge: all known materials (catalogue union latest snap)
+    const allMats=new Set([...Object.keys(catMap),...Object.keys(latestMap),...Object.keys(history)]);
+    pecasData=[...allMats].map(mat=>{
+      const cat=catMap[mat];
+      const latest=latestMap[mat];
+      const hist=history[mat]||[];
+      const qt=latest?.qt??cat?.qt_ultimo??0;
+      const preco=latest?.preco||cat?.preco||0;
+      const desc=latest?.desc||cat?.descricao||'';
+      const cm=consumo[mat]||0;
+      const cobertura=cm>0?qt/cm:qt>0?999:0;
+      const pedido12m=Math.max(0,Math.ceil(cm*12)-qt);
+      return{material:mat,desc,qt,preco,valorTotal:qt*preco,consumoMedio:Math.round(cm*10)/10,cobertura:Math.round(cobertura*10)/10,pedido12m,ultimoSnap:hist.length>0?hist[hist.length-1].at.toLocaleDateString('pt-BR'):'—',nSnapshots:hist.length};
+    });
+
+    // Upsert catalogue with latest values
+    const upserts=pecasData.map(p=>({company,material:p.material,descricao:p.desc,preco:p.preco,qt_ultimo:p.qt,updated_at:new Date().toISOString()}));
+    if(upserts.length)await db.from('pecas_at').upsert(upserts,{onConflict:'company,material'});
+
+  }catch(e){console.error('loadPecasData',e);}
+}
+
+let _pecasSortState={col:'pedido12m',dir:-1};
+function renderPecas(){
+  const body=document.getElementById('pecasBody');
+  const empty=document.getElementById('pecasEmpty');
+  if(!pecasData.length){body.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+
+  const srch=document.getElementById('pecasSrch').value.toLowerCase();
+  const estadoF=document.getElementById('pecasEstado').value;
+
+  let rows=[...pecasData];
+  if(srch)rows=rows.filter(r=>r.material.toLowerCase().includes(srch)||r.desc.toLowerCase().includes(srch));
+  if(estadoF==='stock')rows=rows.filter(r=>r.qt>0);
+  else if(estadoF==='zero')rows=rows.filter(r=>r.qt===0);
+  else if(estadoF==='repor')rows=rows.filter(r=>r.pedido12m>0);
+
+  if(sorts['pecas'])applySort('pecas',rows);
+  else rows.sort((a,b)=>b.pedido12m-a.pedido12m||b.qt-a.qt);
+  updateSortHeaders('pecas');
+
+  const totalValor=rows.reduce((s,r)=>s+r.valorTotal,0);
+  const comStock=rows.filter(r=>r.qt>0).length;
+  const aRepor=rows.filter(r=>r.pedido12m>0).length;
+  document.getElementById('pecasKpis').innerHTML=`
+    <div class="kpi"><div class="kl">Total peças</div><div class="kv">${fmt(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Com stock</div><div class="kv g">${fmt(comStock)}</div></div>
+    <div class="kpi"><div class="kl">Stock zero</div><div class="kv ${rows.length-comStock>0?'r':''}">${fmt(rows.length-comStock)}</div></div>
+    <div class="kpi"><div class="kl">A repor</div><div class="kv y">${fmt(aRepor)}</div></div>
+    <div class="kpi"><div class="kl">Valor stock</div><div class="kv b">${totalValor.toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0})}</div></div>
+  `;
+
+  body.innerHTML='';
+  for(const r of rows){
+    const tr=document.createElement('tr');
+    if(r.qt===0)tr.style.opacity='0.6';
+    if(r.pedido12m>0)tr.style.background='rgba(251,191,36,0.08)';
+    tr.innerHTML=`
+      <td><span class="badge bneu" style="font-family:var(--mono);font-size:11px">${r.material}</span></td>
+      <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
+      <td class="num ${r.qt===0?'neg':''}">${fmt(r.qt)}</td>
+      <td class="num" style="color:var(--muted);font-size:11px">${r.preco>0?r.preco.toLocaleString('pt-BR',{minimumFractionDigits:2}):'—'}</td>
+      <td class="num">${r.valorTotal>0?r.valorTotal.toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0}):'—'}</td>
+      <td class="num">${r.consumoMedio>0?r.consumoMedio.toLocaleString('pt-BR',{minimumFractionDigits:1}):'<span style="color:var(--muted)">sem dados</span>'}</td>
+      <td class="num ${r.cobertura<3&&r.consumoMedio>0?'neg':r.cobertura<6&&r.consumoMedio>0?'y':''}">${r.consumoMedio>0?(r.cobertura>=999?'∞':r.cobertura.toLocaleString('pt-BR',{minimumFractionDigits:1})):'—'}</td>
+      <td class="num ${r.pedido12m>0?'neg':''}">${r.pedido12m>0?fmt(r.pedido12m):'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${r.ultimoSnap}${r.nSnapshots>1?' ('+r.nSnapshots+' snaps)':''}</td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+function exportPecasXlsx(){
+  if(!pecasData.length){toast('Sem dados','error');return;}
+  const data=pecasData.map(r=>({
+    Codigo_SAP:r.material,Descricao:r.desc,Stock_Actual:r.qt,
+    Preco_Un:r.preco,Valor_Total:r.valorTotal,
+    Consumo_Medio_Mes:r.consumoMedio,Cobertura_Meses:r.cobertura>=999?'Sem consumo':r.cobertura,
+    Pedido_12M:r.pedido12m,Ultimo_Snapshot:r.ultimoSnap
+  }));
+  const ws=XLSX.utils.json_to_sheet(data);
+  ws['!cols']=[{wch:14},{wch:35},{wch:12},{wch:12},{wch:14},{wch:18},{wch:16},{wch:12},{wch:18}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Peças AT');
+  XLSX.writeFile(wb,`pecas_at_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function gerarPedidoPecas(){
+  const rows=pecasData.filter(r=>r.pedido12m>0);
+  if(!rows.length){toast('Nenhuma peça necessita reposição','error');return;}
+  const data=rows.map(r=>({
+    Codigo_SAP:r.material,Descricao:r.desc,Stock_Actual:r.qt,
+    Consumo_Medio_Mes:r.consumoMedio,Cobertura_Actual_Meses:r.cobertura,
+    Qtd_Pedido_12M:r.pedido12m,Preco_Un:r.preco,
+    Valor_Pedido:r.pedido12m*r.preco
+  }));
+  const totalValor=data.reduce((s,r)=>s+r.Valor_Pedido,0);
+  data.push({Codigo_SAP:'TOTAL',Descricao:'',Stock_Actual:'',Consumo_Medio_Mes:'',Cobertura_Actual_Meses:'',Qtd_Pedido_12M:'',Preco_Un:'',Valor_Pedido:totalValor});
+  const ws=XLSX.utils.json_to_sheet(data);
+  ws['!cols']=[{wch:14},{wch:35},{wch:12},{wch:18},{wch:20},{wch:16},{wch:12},{wch:14}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Pedido 12M');
+  XLSX.writeFile(wb,`pedido_pecas_12m_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  toast('Pedido gerado: '+rows.length+' peças','success');
+}
+
 // ── SORT ──
 function doSort(table,col){
   const s=sorts[table];
@@ -2690,6 +2909,7 @@ function doSort(table,col){
   else if(table==='rec')renderRecLista();
   else if(table==='hist')renderHistory();
   else if(table==='ean')renderEanView();
+  else if(table==='pecas')renderPecas();
 }
 function applySort(table,rows){
   const s=sorts[table];if(!s)return;
