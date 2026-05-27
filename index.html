@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526150001 -->
+<!DOCTYPE html><!-- v20260526152001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -98,6 +98,8 @@ th{padding:10px 10px;text-align:left;font-family:var(--mono);font-size:10px;font
 th:hover{color:#fff;}
 th.asc::after{content:' ↑';color:#fca5a5;}
 th.desc::after{content:' ↓';color:#fca5a5;}
+th[onclick]{cursor:pointer;user-select:none;}
+th[onclick]:hover{color:var(--red);}
 td{padding:8px 10px;border-bottom:1px solid #edf0f5;vertical-align:middle;color:var(--text);}
 tbody tr:nth-child(even) td{background:#f7f9fc;}
 tr:hover td{background:#ebf4ff !important;}
@@ -486,8 +488,15 @@ select.cad-inp{cursor:pointer;}
       <div class="kr" id="ovKpis"></div>
       <div class="tw2"><table>
         <thead><tr>
-          <th>EAN</th><th>Categoria</th><th>Subcategoria</th><th>Descrição</th>
-          <th class="num">Stock Unilog</th><th class="num">Un/Pos</th><th class="num">Pos. Reais</th><th class="num">Pos. Optimizadas</th><th class="num">Poupança</th>
+          <th onclick="doSort('occ','ean')">EAN</th>
+          <th onclick="doSort('occ','cat')">Categoria</th>
+          <th onclick="doSort('occ','subcat')">Subcategoria</th>
+          <th onclick="doSort('occ','desc')">Descrição</th>
+          <th class="num" onclick="doSort('occ','qt')">Stock Unilog</th>
+          <th class="num" onclick="doSort('occ','qpp')">Un/Pos</th>
+          <th class="num" onclick="doSort('occ','posReal')">Pos. Reais</th>
+          <th class="num" onclick="doSort('occ','posOtimizadas')">Pos. Optimizadas</th>
+          <th class="num" onclick="doSort('occ','poupanca')">Poupança</th>
           <th>Depósito(s)</th><th>Recomendação</th>
         </tr></thead>
         <tbody id="ovBody"></tbody>
@@ -761,9 +770,11 @@ select.cad-inp{cursor:pointer;}
       <div class="kr" id="auditKpis"></div>
       <div class="tw2"><table>
         <thead><tr>
-          <th>Categoria</th><th>EAN</th><th>Descrição</th>
-          <th class="num">Stock Dep.0011</th>
-          <th>B2C no Cadastro</th>
+          <th onclick="doSort('audit','cat')">Categoria</th>
+          <th onclick="doSort('audit','ean')">EAN</th>
+          <th onclick="doSort('audit','desc')">Descrição</th>
+          <th class="num" onclick="doSort('audit','stock11')">Stock Dep.0011</th>
+          <th onclick="doSort('audit','b2cTxt')">B2C no Cadastro</th>
           <th>Acção</th>
         </tr></thead>
         <tbody id="auditBody"></tbody>
@@ -822,15 +833,17 @@ select.cad-inp{cursor:pointer;}
       <div class="kr" id="transEcKpis"></div>
       <div class="tw2"><table>
         <thead><tr>
-          <th>Cat.</th><th>EAN</th><th>Descrição</th>
-          <th class="num">Média 3M</th>
-          <th class="num">Média 6M</th>
-          <th class="num">Stock B2C</th>
-          <th class="num">Cobertura</th>
+          <th onclick="doSort('transEc','cat')">Cat.</th>
+          <th onclick="doSort('transEc','ean')">EAN</th>
+          <th onclick="doSort('transEc','desc')">Descrição</th>
+          <th class="num" onclick="doSort('transEc','media3')">Média 3M</th>
+          <th class="num" onclick="doSort('transEc','media6')">Média 6M</th>
+          <th class="num" onclick="doSort('transEc','stockDest')">Stock B2C</th>
+          <th class="num" onclick="doSort('transEc','cobertura')">Cobertura</th>
           <th class="num" title="Média ajustada — sugestão = média 3M">Média Ajust. ✏️</th>
-          <th class="num">Necessidade</th>
+          <th class="num" onclick="doSort('transEc','necessidade')">Necessidade</th>
           <th>Lotes Sugeridos</th>
-          <th>Estado</th>
+          <th onclick="doSort('transEc','estadoTxt')">Estado</th>
         </tr></thead>
         <tbody id="transEcBody"></tbody>
       </table></div>
@@ -864,15 +877,17 @@ select.cad-inp{cursor:pointer;}
       <div class="kr" id="transQbKpis"></div>
       <div class="tw2"><table>
         <thead><tr>
-          <th>Cat.</th><th>EAN</th><th>Descrição</th>
-          <th class="num">Média 3M</th>
-          <th class="num">Média 6M</th>
-          <th class="num">Stock QB</th>
-          <th class="num">Cobertura</th>
+          <th onclick="doSort('transQb','cat')">Cat.</th>
+          <th onclick="doSort('transQb','ean')">EAN</th>
+          <th onclick="doSort('transQb','desc')">Descrição</th>
+          <th class="num" onclick="doSort('transQb','media3')">Média 3M</th>
+          <th class="num" onclick="doSort('transQb','media6')">Média 6M</th>
+          <th class="num" onclick="doSort('transQb','stockDest')">Stock QB</th>
+          <th class="num" onclick="doSort('transQb','cobertura')">Cobertura</th>
           <th class="num" title="Média ajustada — sugestão = média 3M">Média Ajust. ✏️</th>
-          <th class="num">Necessidade</th>
+          <th class="num" onclick="doSort('transQb','necessidade')">Necessidade</th>
           <th>Lotes Sugeridos</th>
-          <th>Estado</th>
+          <th onclick="doSort('transQb','estadoTxt')">Estado</th>
         </tr></thead>
         <tbody id="transQbBody"></tbody>
       </table></div>
@@ -886,7 +901,14 @@ select.cad-inp{cursor:pointer;}
   <div class="card">
     <div class="ch"><div class="ct">Histórico de Uploads</div></div>
     <div class="tw2"><table>
-      <thead><tr><th>Data/Hora</th><th>Empresa</th><th class="num">SAP</th><th class="num">Unilog</th><th class="num">Diferenças</th><th class="num">% OK</th></tr></thead>
+      <thead><tr>
+        <th onclick="doSort('hist','uploaded_at')">Data/Hora</th>
+        <th onclick="doSort('hist','company')">Empresa</th>
+        <th class="num" onclick="doSort('hist','sap_rows')">SAP</th>
+        <th class="num" onclick="doSort('hist','unilog_rows')">Unilog</th>
+        <th class="num" onclick="doSort('hist','diffs')">Diferenças</th>
+        <th class="num" onclick="doSort('hist','pct')">% OK</th>
+      </tr></thead>
       <tbody id="histBody"></tbody>
     </table></div>
     <div id="histEmpty" class="empty" style="display:none"><div class="empty-i">📋</div><div>Nenhum registo</div></div>
@@ -1211,7 +1233,7 @@ function renderSoUnilog(){
 
   if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||(r.produto||'').toLowerCase().includes(srch)||(r.Lote_norm||'').toLowerCase().includes(srch));
   if(classeActive)rows=rows.filter(r=>r.classe===classeActive);
-  applySort('su',rows);
+  applySort('su',rows);updateSortHeaders('su');
 
   const uniqueEANs=new Set(rows.map(r=>r.EAN_norm)).size;
   const totalQt=rows.reduce((s,r)=>s+r.qt,0);
@@ -1428,6 +1450,7 @@ function renderRecon(){
   // Default sort: desc alphabetical
   if(!sorts['recon']){rows.sort((a,b)=>String(a.desc||'').localeCompare(String(b.desc||'')));}
   else applySort('recon',rows);
+  updateSortHeaders('recon');
 
   const all=reconData[activeDepot]||[];const diffs=all.filter(r=>r.diff!==0).length;const pct=all.length>0?Math.round((all.length-diffs)/all.length*100):0;
   document.getElementById('reconKpis').innerHTML=`
@@ -1502,7 +1525,7 @@ function renderSusp(){
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
   if(catF)rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||autoCat(r.desc).cat||'')===catF;});
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
-  applySort('susp',rows);
+  applySort('susp',rows);updateSortHeaders('susp');
 
   const withSim=suspData.filter(r=>r.similar).length;
   document.getElementById('suspKpis').innerHTML=`
@@ -1882,7 +1905,11 @@ function renderOccView(){
   if(subActive)rows=rows.filter(r=>r.subcat===subActive);
   if(alertF==='sub')rows=rows.filter(r=>r.underutil);
   else if(alertF==='sem')rows=rows.filter(r=>!r.param);
-  rows.sort((a,b)=>{const cc=String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'));if(cc!==0)return cc;const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;return String(a.desc||'').localeCompare(String(b.desc||''));});
+  // Add qpp field for sorting
+  rows.forEach(r=>{r.qpp=r.param?.qty_per_pos||0;});
+  if(sorts['occ'])applySort('occ',rows);
+  else rows.sort((a,b)=>{const cc=String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'));if(cc!==0)return cc;const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;return String(a.desc||'').localeCompare(String(b.desc||''));});
+  updateSortHeaders('occ');
   const filteredEANs=new Set(rows.map(r=>r.ean));
   const filteredEnderecos=new Set(uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!==''&&!isDC(r.endereco)&&filteredEANs.has(r.EAN_norm)).map(r=>r.endereco));
   const tP=filteredEnderecos.size;const tPoup=rows.reduce((s,r)=>s+(r.poupanca||0),0);const tOpt=tP-tPoup;const uC=rows.reduce((s,r)=>s+(r.totalSubutil||0)+(r.totalConsolidavel||0),0);
@@ -2078,16 +2105,58 @@ function exportOccXlsx(){
 // ── HISTORY ──
 async function renderHistory(){
   try{
-    const{data}=await db.from('logistica_history').select('*').order('uploaded_at',{ascending:false}).limit(50);
+    const{data}=await db.from('logistica_history').select('*').limit(200);
     const body=document.getElementById('histBody');body.innerHTML='';const empty=document.getElementById('histEmpty');
     if(!data||!data.length){empty.style.display='block';return;}empty.style.display='none';
-    for(const row of data){const dt=new Date(row.uploaded_at);const summary=row.summary?JSON.parse(row.summary):{};const td=Object.values(summary).reduce((s,d)=>s+(d.diffs||0),0);const ti=Object.values(summary).reduce((s,d)=>s+(d.total||0),0);const pct=ti>0?Math.round((ti-td)/ti*100):0;const tr=document.createElement('tr');tr.innerHTML=`<td style="font-family:var(--mono);font-size:11px">${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td><td><span class="co-chip">${row.company}</span></td><td class="num">${fmt(row.sap_rows)}</td><td class="num">${fmt(row.unilog_rows)}</td><td class="num ${td>0?'neg':''}">${fmt(td)}</td><td class="num ${pct>=95?'pos':pct<80?'neg':''}">${pct}%</td>`;body.appendChild(tr);}
+    // Enrich with computed fields for sorting
+    const rows=data.map(row=>{
+      const dt=new Date(row.uploaded_at);
+      const summary=row.summary?JSON.parse(row.summary):{};
+      const diffs=Object.values(summary).reduce((s,d)=>s+(d.diffs||0),0);
+      const total=Object.values(summary).reduce((s,d)=>s+(d.total||0),0);
+      const pct=total>0?Math.round((total-diffs)/total*100):0;
+      return{...row,diffs,pct,_dt:dt};
+    });
+    if(sorts['hist'])applySort('hist',rows);
+    else rows.sort((a,b)=>b._dt-a._dt);
+    updateSortHeaders('hist');
+    for(const row of rows){
+      const td=row._dt;const diffs=row.diffs;const pct=row.pct;
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td style="font-family:var(--mono);font-size:11px">${td.toLocaleDateString('pt-BR')} ${td.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td><td><span class="co-chip">${row.company}</span></td><td class="num">${fmt(row.sap_rows)}</td><td class="num">${fmt(row.unilog_rows)}</td><td class="num ${diffs>0?'neg':''}">${fmt(diffs)}</td><td class="num ${pct>=95?'pos':pct<80?'neg':''}">${pct}%</td>`;
+      body.appendChild(tr);
+    }
   }catch(e){}
 }
 
 // ── SORT ──
-function doSort(table,col){const s=sorts[table];sorts[table]=s&&s.col===col?{col,dir:-s.dir}:{col,dir:1};if(table==='recon')renderRecon();if(table==='susp')renderSusp();}
-function applySort(table,rows){const s=sorts[table];if(!s)return;rows.sort((a,b)=>{const va=a[s.col]??'',vb=b[s.col]??'';return s.dir*(typeof va==='number'?va-vb:String(va).localeCompare(String(vb)));});}
+function doSort(table,col){
+  const s=sorts[table];
+  sorts[table]=s&&s.col===col?{col,dir:-s.dir}:{col,dir:1};
+  updateSortHeaders(table);
+  if(table==='recon')renderRecon();
+  else if(table==='susp')renderSusp();
+  else if(table==='su')renderSoUnilog();
+  else if(table==='occ')renderOccView();
+  else if(table==='transEc')renderTrans('ecommerce');
+  else if(table==='transQb')renderTrans('qbrasil');
+  else if(table==='audit')renderAuditoria();
+  else if(table==='rec')renderRecLista();
+  else if(table==='hist')renderHistory();
+}
+function applySort(table,rows){
+  const s=sorts[table];if(!s)return;
+  rows.sort((a,b)=>{const va=a[s.col]??'',vb=b[s.col]??'';return s.dir*(typeof va==='number'?va-vb:String(va).localeCompare(String(vb)));});
+}
+function updateSortHeaders(table){
+  // Map table key → th onclick pattern to find the right headers
+  document.querySelectorAll(`th[onclick^="doSort('${table}'"]`).forEach(th=>{
+    th.classList.remove('asc','desc');
+    const m=th.getAttribute('onclick').match(/doSort\('.*?','(.*?)'\)/);
+    if(m&&sorts[table]&&sorts[table].col===m[1])
+      th.classList.add(sorts[table].dir===1?'asc':'desc');
+  });
+}
 
 // ── INNER TABS ──
 function innerTab(name,el){el.closest('.page').querySelectorAll('.it').forEach(t=>t.classList.remove('active'));el.classList.add('active');document.getElementById('occView').style.display=name==='view'?'':'none';document.getElementById('occBase').style.display=name==='base'?'':'none';if(name==='base')renderOccBase();if(name==='view')renderOccView();}
@@ -2154,7 +2223,7 @@ function renderRecLista(){
   if(area)rows=rows.filter(r=>r.area===area);
   if(estado)rows=rows.filter(r=>r.estado===estado);
   if(mes)rows=rows.filter(r=>r.criado_em?.startsWith(mes));
-  applySort('rec',rows);
+  applySort('rec',rows);updateSortHeaders('rec');
 
   const abertas=rows.filter(r=>r.estado==='aberta').length;
   const tratamento=rows.filter(r=>r.estado==='em_tratamento').length;
@@ -2631,7 +2700,7 @@ async function renderAuditoria(){
     if(param?.descontinuado===true)return;
     if(param?.b2c===false)return; // only skip if explicitly false
     const b2cStatus=!param?'Sem cadastro':param.b2c===true?'B2C = Sim':'Não definido';
-    rows.push({ean,desc:v.desc,qt:v.qt,cat:param?.cat||'',b2cStatus});
+    rows.push({ean,desc:v.desc,qt:v.qt,stock11:v.qt,cat:param?.cat||'',b2cStatus,b2cTxt:b2cStatus});
   });
 
   // Update cat filter
@@ -2643,7 +2712,9 @@ async function renderAuditoria(){
 
   if(srch)rows=rows.filter(r=>r.ean.includes(srch)||r.desc.toLowerCase().includes(srch));
   if(catActive)rows=rows.filter(r=>r.cat===catActive);
-  rows.sort((a,b)=>String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'))||String(a.desc).localeCompare(String(b.desc)));
+  if(sorts['audit'])applySort('audit',rows);
+  else rows.sort((a,b)=>String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'))||String(a.desc).localeCompare(String(b.desc)));
+  updateSortHeaders('audit');
 
   document.getElementById('auditKpis').innerHTML=
     '<div class="kpi"><div class="kl">Produtos a verificar</div><div class="kv r">'+fmt(rows.length)+'</div></div>'+
@@ -2990,6 +3061,18 @@ function renderTrans(tipo){
   if(estadoF==='ok')filtered=filtered.filter(r=>r.necessidade===0);
   else if(estadoF==='need')filtered=filtered.filter(r=>r.necessidade>0&&!r.semValidade);
   else if(estadoF==='nostock')filtered=filtered.filter(r=>r.semValidade);
+
+  // Enrich with sortable computed fields
+  const minMesesSort=isEc?6:8;
+  filtered.forEach(r=>{
+    r.cobertura=r.seguranca>0?Math.round(r.stockDest/r.seguranca*10)/10:0;
+    r.estadoTxt=r.notB2C?'Não é artigo B2C':r.necessidade===0&&r.stockDest>r.seguranca?'Stock excessivo':r.necessidade===0?'Stock OK':r.semValidade?'Sem stock válido':'Necessita transferência';
+  });
+
+  const sortKey=isEc?'transEc':'transQb';
+  if(sorts[sortKey])applySort(sortKey,filtered);
+  else filtered.sort((a,b)=>b.necessidade-a.necessidade);
+  updateSortHeaders(sortKey);
 
   // Update company chip
   const tcc=document.getElementById('transCoChip');if(tcc)tcc.textContent=company;
