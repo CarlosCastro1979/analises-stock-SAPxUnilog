@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526161001 -->
+<!DOCTYPE html><!-- v20260526163001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1216,7 +1216,9 @@ function buildSoUnilog(){
   badge.style.display=uniqueEANs.size>0?'':'none';
 }
 
-function renderSoUnilog(){
+let _renderSoUnilogBusy=false;
+function renderSoUnilog(){if(_renderSoUnilogBusy)return;_renderSoUnilogBusy=true;try{_renderSoUnilog();}finally{_renderSoUnilogBusy=false;}}
+function _renderSoUnilog(){
   let rows=[...soUnilogData];
   const srch=document.getElementById('suSrch').value.toLowerCase();
   const classeF=document.getElementById('suClasse').value;
@@ -1404,7 +1406,13 @@ function renderDepotPills(){
 
 function toggleShowAll(){showAll=!showAll;document.getElementById('showAllTg').classList.toggle('on',showAll);document.getElementById('tgLbl').textContent=showAll?'Mostrar tudo':'Só diferenças';renderRecon();}
 
+let _renderReconBusy=false;
 function renderRecon(){
+  if(_renderReconBusy)return;
+  _renderReconBusy=true;
+  try{ _renderRecon(); }finally{ _renderReconBusy=false; }
+}
+function _renderRecon(){
   if(!reconData[activeDepot])return;
   let rows=[...(reconData[activeDepot]||[])];
   const srch=document.getElementById('reconSrch').value.toLowerCase();
@@ -1509,7 +1517,9 @@ function renderRecon(){
 function findOther(ean,lote,curDk){const found=[];for(const dk of DKS){if(dk===curDk)continue;const m=(reconData[dk]||[]).find(r=>r.EAN_norm===ean&&r.Lote_norm===lote);if(m&&(m.qt_sap>0||m.qt_uni>0))found.push({label:DEPOT_MAP[dk].label.split('—')[1]?.trim()||DEPOT_MAP[dk].label,dep:dk.padStart(4,'0'),qt_sap:m.qt_sap,qt_uni:m.qt_uni,enderecos:m.uni_enderecos||[]});}return found;}
 
 // ── SUSPICIOUS ──
-function renderSusp(){
+let _renderSuspBusy=false;
+function renderSusp(){if(_renderSuspBusy)return;_renderSuspBusy=true;try{_renderSusp();}finally{_renderSuspBusy=false;}}
+function _renderSusp(){
   // Read filter values first
   const srch=document.getElementById('suspSrch').value.toLowerCase();
   const flt=document.getElementById('suspFlt').value;
@@ -1593,7 +1603,9 @@ function cadTab(name,el){
   document.getElementById('cad-duplicados').style.display=name==='duplicados'?'':'none';
   if(name==='duplicados')renderDuplicados();
 }
-function renderCadastro(){
+let _renderCadastroBusy=false;
+function renderCadastro(){if(_renderCadastroBusy)return;_renderCadastroBusy=true;try{_renderCadastro();}finally{_renderCadastroBusy=false;}}
+function _renderCadastro(){
   if(!sapData){document.getElementById('cadBody').innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros SAP primeiro</td></tr>';return;}
   const srch=document.getElementById('cadSrch').value.toLowerCase();
   const catF=document.getElementById('cadCat').value;
@@ -1840,7 +1852,9 @@ function updateOccFilters(){
 }
 
 // ── RENDER OCC VIEW ──
-function renderOccView(){
+let _renderOccViewBusy=false;
+function renderOccView(){if(_renderOccViewBusy)return;_renderOccViewBusy=true;try{_renderOccView();}finally{_renderOccViewBusy=false;}}
+function _renderOccView(){
   if(!uniData){document.getElementById('ovBody').innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros para ver a ocupação</td></tr>';return;}
   const srch=document.getElementById('ovSrch').value.toLowerCase();
   const catF=document.getElementById('ovCat').value;
@@ -2136,8 +2150,8 @@ async function renderHistory(){
 // ── SORT ──
 function doSort(table,col){
   const s=sorts[table];
-  sorts[table]=s&&s.col===col?{col,dir:-s.dir}:{col,dir:1};
-  updateSortHeaders(table);
+  const newDir=(s&&s.col===col)?-s.dir:1;
+  sorts[table]={col,dir:newDir};
   if(table==='recon')renderRecon();
   else if(table==='susp')renderSusp();
   else if(table==='su')renderSoUnilog();
@@ -2150,15 +2164,20 @@ function doSort(table,col){
 }
 function applySort(table,rows){
   const s=sorts[table];if(!s)return;
-  rows.sort((a,b)=>{const va=a[s.col]??'',vb=b[s.col]??'';return s.dir*(typeof va==='number'?va-vb:String(va).localeCompare(String(vb)));});
+  rows.sort((a,b)=>{
+    const va=a[s.col]??'';
+    const vb=b[s.col]??'';
+    if(typeof va==='number'&&typeof vb==='number')return s.dir*(va-vb);
+    return s.dir*String(va).localeCompare(String(vb),'pt',{numeric:true});
+  });
 }
 function updateSortHeaders(table){
+  const s=sorts[table];
   document.querySelectorAll('th[onclick]').forEach(th=>{
     const oc=th.getAttribute('onclick')||'';
-    const m=oc.match(/doSort\(['"](.+?)['"],\s*['"](.+?)['"]\)/);
+    const m=oc.match(/doSort\(['"]([^'"]+)['"],\s*['"]([^'"]+)['"]\)/);
     if(!m||m[1]!==table)return;
     th.classList.remove('asc','desc');
-    const s=sorts[table];
     if(s&&s.col===m[2])th.classList.add(s.dir===1?'asc':'desc');
   });
 }
@@ -3049,7 +3068,9 @@ async function buildTransData(){
 }
 
 // ── RENDER ──
-function renderTrans(tipo){
+let _renderTransBusy={};
+function renderTrans(tipo){if(_renderTransBusy[tipo])return;_renderTransBusy[tipo]=true;try{_renderTrans(tipo);}finally{_renderTransBusy[tipo]=false;}}
+function _renderTrans(tipo){
   const isEc=tipo==='ecommerce';
   const rows=isEc?transData.ecommerce:transData.qbrasil;
   const srch=document.getElementById(isEc?'transEcSrch':'transQbSrch').value.toLowerCase();
