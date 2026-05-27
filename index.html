@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526154001 -->
+<!DOCTYPE html><!-- v20260526155501 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2152,12 +2152,13 @@ function applySort(table,rows){
   rows.sort((a,b)=>{const va=a[s.col]??'',vb=b[s.col]??'';return s.dir*(typeof va==='number'?va-vb:String(va).localeCompare(String(vb)));});
 }
 function updateSortHeaders(table){
-  // Map table key → th onclick pattern to find the right headers
-  document.querySelectorAll(`th[onclick^="doSort('${table}'"]`).forEach(th=>{
+  document.querySelectorAll('th[onclick]').forEach(th=>{
+    const oc=th.getAttribute('onclick')||'';
+    const m=oc.match(/doSort\(['"](.+?)['"],\s*['"](.+?)['"]\)/);
+    if(!m||m[1]!==table)return;
     th.classList.remove('asc','desc');
-    const m=th.getAttribute('onclick').match(/doSort\('.*?','(.*?)'\)/);
-    if(m&&sorts[table]&&sorts[table].col===m[1])
-      th.classList.add(sorts[table].dir===1?'asc':'desc');
+    const s=sorts[table];
+    if(s&&s.col===m[2])th.classList.add(s.dir===1?'asc':'desc');
   });
 }
 
