@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526192001 -->
+<!DOCTYPE html><!-- v20260526193001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1403,42 +1403,66 @@ function buildSummary(){const s={};for(const dk of DKS){const rows=reconData[dk]
 function updateLoadBanner(uploadedAt){
   const banner=document.getElementById('loadBanner');
   if(!banner)return;
-  const sapPairs=new Set((sapData||[]).map(r=>r.EAN_norm+'|'+r.Lote_norm));
-  const uniFiltered=(uniData||[]).filter(r=>!['93','FI','SI'].includes(r.classe));
-  const uniPairs=new Set(uniFiltered.map(r=>r.EAN_norm+'|'+r.Lote_norm));
-  const qtSap=(sapData||[]).reduce((s,r)=>s+r.qt,0);
-  const qtUni=uniFiltered.reduce((s,r)=>s+r.qt,0);
-  const vlrSap=(sapData||[]).reduce((s,r)=>s+(r.qt*(r.preco||0)),0);
-  // WMS value: only EANs that also exist in SAP (comparable)
-  const sapEANs=new Set((sapData||[]).map(r=>r.EAN_norm));
-  const vlrUni=uniFiltered.filter(r=>sapEANs.has(r.EAN_norm)).reduce((s,r)=>s+(r.vlrTotal||r.qt*(r.vlr||0)),0);
+  banner.style.display='block';
+  const dt=uploadedAt?new Date(uploadedAt):new Date();
+  const dtStr=dt.toLocaleDateString('pt-BR')+' '+dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
+  banner.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <span style="font-size:11px;color:var(--muted)">☁️ <strong style="color:var(--text)">${company}</strong> · Processado em ${dtStr}</span>
+      <div class="ms-wrap" id="ms-bannerCat" data-placeholder="Todas as categorias" data-onchange="recalcBanner" style="min-width:220px">
+        <div class="ms-btn" onclick="msTogOpen('bannerCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div>
+        <div class="ms-drop" style="display:none">
+          <div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('bannerCat',this.value)"></div>
+          <div class="ms-actions"><button onclick="msSelAll('bannerCat')">Todas</button><button onclick="msClrAll('bannerCat')">Limpar</button></div>
+          <div class="ms-list"></div>
+        </div>
+      </div>
+    </div>
+    <div id="bannerKpis" style="display:grid;gap:8px"></div>
+  `;
+  msUpdate('bannerCat',allCats,'Todas as categorias','recalcBanner');
+  recalcBanner();
+}
+
+function recalcBanner(){
+  const kpisEl=document.getElementById('bannerKpis');
+  if(!kpisEl||!sapData)return;
+  const selCats=msGet('bannerCat');
+  const catEANs=selCats.size?new Set(occParams.filter(p=>selCats.has(p.cat)).map(p=>p.ean)):null;
+  const sapF=(sapData||[]).filter(r=>!catEANs||catEANs.has(r.EAN_norm));
+  const uniF=(uniData||[]).filter(r=>!['93','FI','SI'].includes(r.classe)&&(!catEANs||catEANs.has(r.EAN_norm)));
+  const sapPairs=new Set(sapF.map(r=>r.EAN_norm+'|'+r.Lote_norm));
+  const uniPairs=new Set(uniF.map(r=>r.EAN_norm+'|'+r.Lote_norm));
+  const qtSap=sapF.reduce((s,r)=>s+r.qt,0);
+  const qtUni=uniF.reduce((s,r)=>s+r.qt,0);
+  const sapEANs=new Set(sapF.map(r=>r.EAN_norm));
+  const vlrSap=sapF.reduce((s,r)=>s+(r.qt*(r.preco||0)),0);
+  const vlrUni=uniF.filter(r=>sapEANs.has(r.EAN_norm)).reduce((s,r)=>s+(r.vlrTotal||r.qt*(r.vlr||0)),0);
   const difPares=sapPairs.size-uniPairs.size;
   const difQt=qtSap-qtUni;
   const difVlr=vlrSap-vlrUni;
-  const dt=uploadedAt?new Date(uploadedAt):new Date();
-  const dtStr=dt.toLocaleDateString('pt-BR')+' '+dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
   const fV=v=>Math.abs(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});
   const fQ=v=>v.toLocaleString('pt-BR');
   const sign=v=>v>0?'+':v<0?'-':'';
   const cls=v=>v!==0?'neg':'pos';
   const temVlr=vlrSap>0||vlrUni>0;
-  banner.style.display='block';
-  banner.innerHTML=`
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">☁️ <strong style="color:var(--text)">${company}</strong> · Processado em ${dtStr}</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr)${temVlr?';gap:8px':';gap:8px'};gap:8px;max-width:100%">
-      <div class="kpi"><div class="kl">EAN+Lote SAP</div><div class="kv">${fQ(sapPairs.size)}</div></div>
-      <div class="kpi"><div class="kl">EAN+Lote WMS</div><div class="kv">${fQ(uniPairs.size)}</div></div>
-      <div class="kpi"><div class="kl">Dif. Pares</div><div class="kv ${cls(difPares)}">${sign(difPares)}${fQ(Math.abs(difPares))}</div></div>
-      <div class="kpi"><div class="kl">Qtd SAP</div><div class="kv">${fQ(qtSap)}</div></div>
-      <div class="kpi"><div class="kl">Qtd WMS</div><div class="kv">${fQ(qtUni)}</div></div>
-      <div class="kpi"><div class="kl">Dif. Qtd</div><div class="kv ${cls(difQt)}">${sign(difQt)}${fQ(Math.abs(difQt))}</div></div>
-      ${temVlr?`
-      <div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fV(vlrSap)}</div></div>
-      <div class="kpi"><div class="kl">Valor WMS <span style="font-size:9px;color:var(--muted)">(EANs comuns)</span></div><div class="kv b">${fV(vlrUni)}</div></div>
-      <div class="kpi"><div class="kl">Dif. Valor</div><div class="kv ${cls(difVlr)}">${sign(difVlr)}${fV(Math.abs(difVlr))}</div></div>`:''}
-    </div>
+  const cols=temVlr?9:6;
+  kpisEl.style.gridTemplateColumns=`repeat(${cols},1fr)`;
+  kpisEl.innerHTML=`
+    <div class="kpi"><div class="kl">EAN+Lote SAP</div><div class="kv">${fQ(sapPairs.size)}</div></div>
+    <div class="kpi"><div class="kl">EAN+Lote WMS</div><div class="kv">${fQ(uniPairs.size)}</div></div>
+    <div class="kpi"><div class="kl">Dif. Pares</div><div class="kv ${cls(difPares)}">${sign(difPares)}${fQ(Math.abs(difPares))}</div></div>
+    <div class="kpi"><div class="kl">Qtd SAP</div><div class="kv">${fQ(qtSap)}</div></div>
+    <div class="kpi"><div class="kl">Qtd WMS</div><div class="kv">${fQ(qtUni)}</div></div>
+    <div class="kpi"><div class="kl">Dif. Qtd</div><div class="kv ${cls(difQt)}">${sign(difQt)}${fQ(Math.abs(difQt))}</div></div>
+    ${temVlr?`
+    <div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fV(vlrSap)}</div></div>
+    <div class="kpi"><div class="kl">Valor WMS</div><div class="kv b">${fV(vlrUni)}</div></div>
+    <div class="kpi"><div class="kl">Dif. Valor</div><div class="kv ${cls(difVlr)}">${sign(difVlr)}${fV(Math.abs(difVlr))}</div></div>`:''}
   `;
 }
+
 
 function switchCompany(){
   company=document.getElementById('coSel').value;
