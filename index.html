@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526163001 -->
+<!DOCTYPE html><!-- v20260526164001-DEBUG -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2152,6 +2152,7 @@ function doSort(table,col){
   const s=sorts[table];
   const newDir=(s&&s.col===col)?-s.dir:1;
   sorts[table]={col,dir:newDir};
+  console.log('[SORT] table='+table+' col='+col+' dir='+newDir+' sorts='+JSON.stringify(sorts[table]));
   if(table==='recon')renderRecon();
   else if(table==='susp')renderSusp();
   else if(table==='su')renderSoUnilog();
@@ -2164,12 +2165,14 @@ function doSort(table,col){
 }
 function applySort(table,rows){
   const s=sorts[table];if(!s)return;
+  console.log('[APPLY] table='+table+' col='+s.col+' dir='+s.dir+' rows='+rows.length+' first_val='+rows[0]?.[s.col]);
   rows.sort((a,b)=>{
     const va=a[s.col]??'';
     const vb=b[s.col]??'';
     if(typeof va==='number'&&typeof vb==='number')return s.dir*(va-vb);
     return s.dir*String(va).localeCompare(String(vb),'pt',{numeric:true});
   });
+  console.log('[AFTER] first='+rows[0]?.[s.col]+' last='+rows[rows.length-1]?.[s.col]);
 }
 function updateSortHeaders(table){
   const s=sorts[table];
