@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526181001 -->
+<!DOCTYPE html><!-- v20260526182001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2042,6 +2042,32 @@ function exportSuspXlsx(){
   });
   const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Lotes Suspeitos');
   XLSX.writeFile(wb,`lotes_suspeitos_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function exportReconXlsx(){
+  if(!reconData[activeDepot]){toast("Sem dados para exportar","error");return;}
+  let rows=[...(reconData[activeDepot]||[])];
+  const srch=document.getElementById("reconSrch").value.toLowerCase();
+  const estadoVals=msGetVals("reconEstado");
+  const validadeVals=msGetVals("reconValidade");
+  const selCats=msGet("reconCat");
+  const selSubs=msGet("reconSub");
+  const minDiffVal=parseFloat(document.getElementById("reconMinDiff").value)||0;
+  rows.forEach(r=>{if(!r.cat){const p=occParams.find(x=>x.ean===r.EAN_norm);r.cat=p?.cat||"";r.subcat=p?.subcat||"";}}); 
+  if(!showAll)rows=rows.filter(r=>r.diff!==0);
+  if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch)||r.Lote_norm.toLowerCase().includes(srch));
+  if(estadoVals.size)rows=rows.filter(r=>(estadoVals.has("diff")&&r.diff!==0)||(estadoVals.has("only_sap")&&r.qt_uni===0&&r.qt_sap>0)||(estadoVals.has("only_uni")&&r.qt_sap===0&&r.qt_uni>0)||(estadoVals.has("diverg")&&r.qt_sap>0&&r.qt_uni>0&&r.diff!==0)||(estadoVals.has("ok")&&r.diff===0));
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
+  if(selSubs.size)rows=rows.filter(r=>selSubs.has(r.subcat));
+  if(minDiffVal>0)rows=rows.filter(r=>Math.abs(r.diff)>=minDiffVal);
+  const depLabel=DEPOT_MAP[activeDepot]?.label||activeDepot;
+  const data=rows.map(r=>{const estado=r.qt_sap===0&&r.qt_uni>0?"Só Unilog":r.qt_uni===0&&r.qt_sap>0?"Só SAP":r.diff===0?"OK":"Divergência";return{Deposito:depLabel,Categoria:r.cat||"",Subcategoria:r.subcat||"",EAN:r.EAN_norm,Descricao:r.desc,Lote:r.Lote_norm,Validade:r.validade||"",SAP:r.qt_sap,Unilog:r.qt_uni,Diferenca:r.diff,Estado:estado,Localizacao_Unilog:(r.uni_enderecos||[]).join(", ")};});
+  if(!data.length){toast("Sem dados","error");return;}
+  const ws=XLSX.utils.json_to_sheet(data);
+  ws["!cols"]=[{wch:20},{wch:16},{wch:14},{wch:14},{wch:32},{wch:14},{wch:12},{wch:8},{wch:8},{wch:10},{wch:14},{wch:30}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Conciliação");
+  XLSX.writeFile(wb,"conciliacao_"+company+"_dep"+activeDepot+"_"+new Date().toISOString().slice(0,10)+".xlsx");
 }
 function exportDupXlsx(){
   const dups=buildDuplicados();if(!dups.length){toast('Sem duplicados','error');return;}
