@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526182001 -->
+<!DOCTYPE html><!-- v20260526183001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -117,7 +117,8 @@ table{width:100%;border-collapse:collapse;font-size:13px;}
 thead tr{border-bottom:1px solid var(--navy3);background:var(--navy3);}
 th{padding:10px 10px;text-align:left;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#e2e8f0;white-space:nowrap;cursor:pointer;user-select:none;}
 th:hover{color:#fff;}
-th.asc::after{content:' ↑';color:#fca5a5;}
+.kpi-sep{width:1px;height:16px;background:var(--border2);margin:0 4px;}
+#loadBanner{display:none;align-items:center;gap:12px;padding:6px 16px;background:var(--navy2);border-bottom:1px solid var(--border);font-size:12px;flex-wrap:wrap;}
 th.desc::after{content:' ↓';color:#fca5a5;}
 th[onclick]{cursor:pointer;user-select:none;}
 th[onclick]:hover{color:var(--red);}
@@ -1361,13 +1362,45 @@ async function processAll(){
   try{
     const payload={id:company,company,uploaded_at:new Date().toISOString(),sap_rows:sapData.length,unilog_rows:uniData.length,sap_data:JSON.stringify(sapData),unilog_data:JSON.stringify(uniData),recon_summary:JSON.stringify(buildSummary())};
     const{error}=await db.from('logistica_stock').upsert(payload,{onConflict:'id'});
-    if(!error){await db.from('logistica_history').insert({company,uploaded_at:payload.uploaded_at,sap_rows:sapData.length,unilog_rows:uniData.length,summary:payload.recon_summary});toast('Guardado ✓','success');}
+    if(!error){await db.from('logistica_history').insert({company,uploaded_at:payload.uploaded_at,sap_rows:sapData.length,unilog_rows:uniData.length,summary:payload.recon_summary});updateLoadBanner(payload.uploaded_at);toast('Guardado ✓','success');}
     else toast('DB: '+error.message,'error');
   }catch(e){toast('Offline — dados em memória','error');}
   document.getElementById('procSpin').style.display='none';document.getElementById('procBtn').disabled=false;
 }
 
 function buildSummary(){const s={};for(const dk of DKS){const rows=reconData[dk]||[];s[dk]={total:rows.length,diffs:rows.filter(r=>r.diff!==0).length};}return s;}
+
+function updateLoadBanner(uploadedAt){
+  const banner=document.getElementById('loadBanner');
+  if(!banner)return;
+  // EAN+lote únicos
+  const sapPairs=new Set((sapData||[]).map(r=>r.EAN_norm+'|'+r.Lote_norm));
+  const uniPairs=new Set((uniData||[]).map(r=>r.EAN_norm+'|'+r.Lote_norm));
+  // Valor stock (qty × preço)
+  const qtSap=(sapData||[]).reduce((s,r)=>s+r.qt,0);
+  const qtUni=(uniData||[]).reduce((s,r)=>s+r.qt,0);
+  const vlrSap=(sapData||[]).reduce((s,r)=>s+(r.qt*(r.preco||0)),0);
+  const vlrUni=(uniData||[]).reduce((s,r)=>s+(r.qt*(r.preco||0)),0);
+  const difPairs=sapPairs.size-uniPairs.size;
+  const difVlr=vlrSap-vlrUni;
+  const dt=uploadedAt?new Date(uploadedAt):new Date();
+  const dtStr=dt.toLocaleDateString('pt-BR')+' '+dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  const fmtVlr=v=>Math.abs(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  banner.style.display='flex';
+  banner.innerHTML=`
+    <span style="color:var(--muted);font-size:11px">☁️ ${company} · ${dtStr}</span>
+    <span class="kpi-sep"></span>
+    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">EAN+Lote SAP</span> <strong>${fmt(sapPairs.size)}</strong></span>
+    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">EAN+Lote WMS</span> <strong>${fmt(uniPairs.size)}</strong></span>
+    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">Dif. pares</span> <strong class="${difPairs!==0?'neg':''}">${difPairs>0?'+':''}${fmt(difPairs)}</strong></span>
+    <span class="kpi-sep"></span>
+    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">Qt SAP</span> <strong>${fmt(qtSap)}</strong></span>
+    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">Qt WMS</span> <strong>${fmt(qtUni)}</strong></span>
+    ${vlrSap>0?`<span class="kpi-sep"></span>
+    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">Valor SAP</span> <strong>${fmtVlr(vlrSap)}</strong></span>
+    <span><span style="color:var(--muted);font-size:10px;text-transform:uppercase">Dif. Valor</span> <strong class="${difVlr!==0?'neg':''}">${difVlr>0?'+':''}${fmtVlr(difVlr)}</strong></span>`:''}
+  `;
+}
 
 function switchCompany(){
   company=document.getElementById('coSel').value;
@@ -1403,9 +1436,7 @@ async function loadFromDB(silent=false){
       if(activePage.id==='page-suspeitos')renderSusp();
       if(activePage.id==='page-cadastro')renderCadastro();
     }
-    const dt=new Date(data.uploaded_at);
-    document.getElementById('loadBanner').style.display='flex';
-    document.getElementById('loadBanner').innerHTML=`☁️ <strong>${data.company}</strong> — Upload: <strong>${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</strong> — SAP: <strong>${data.sap_rows}</strong> — Unilog: <strong>${data.unilog_rows}</strong>`;
+    updateLoadBanner(data.uploaded_at);
     if(!silent)toast('Carregado: '+company,'success');
   }catch(e){if(!silent)toast('Erro: '+e.message,'error');}
 }
