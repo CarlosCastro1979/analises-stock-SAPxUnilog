@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526165001 -->
+<!DOCTYPE html><!-- v20260526170001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -262,6 +262,13 @@ select.cad-inp{cursor:pointer;}
 
 <!-- ══ CONCILIAÇÃO ══ -->
 <div class="page" id="page-recon">
+  <div class="its" id="reconIts">
+    <div class="it active" onclick="reconTab('lote',this)">Por Lote</div>
+    <div class="it" onclick="reconTab('ean',this)">Por EAN <span id="reconEanBadge" style="display:none;background:var(--red);color:#fff;border-radius:10px;padding:0 6px;font-size:10px;margin-left:4px"></span></div>
+  </div>
+
+  <!-- SUB: POR LOTE -->
+  <div id="recon-lote">
   <div class="card">
     <div class="ch">
       <div class="ct">Conciliação SAP vs Unilog</div>
@@ -314,6 +321,48 @@ select.cad-inp{cursor:pointer;}
     </table></div>
     <div id="reconEmpty" class="empty" style="display:none"><div class="empty-i">⚖️</div><div>Carrega os ficheiros para ver a conciliação</div></div>
   </div>
+  </div><!-- /recon-lote -->
+
+  <!-- SUB: POR EAN -->
+  <div id="recon-ean" style="display:none">
+  <div class="card">
+    <div class="ch">
+      <div class="ct">Divergências por EAN — Todos os depósitos</div>
+      <button class="btn bg bs" onclick="exportEanXlsx()">⬇ Excel</button>
+    </div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
+      Soma SAP e Unilog de <strong>todos os depósitos e lotes</strong> por EAN. Ordenado por divergência absoluta total — útil para priorizar contagens.
+    </div>
+    <div class="tb">
+      <input class="inp is" id="eanSrch" placeholder="EAN ou descrição…" oninput="renderEanView()">
+      <select class="inp" id="eanCat" onchange="renderEanView()"><option value="">Todas as categorias</option></select>
+      <select class="inp" id="eanEstado" onchange="renderEanView()">
+        <option value="">Todos</option>
+        <option value="diff">Com diferença</option>
+        <option value="ok">OK</option>
+        <option value="only_sap">Só SAP</option>
+        <option value="only_uni">Só Unilog</option>
+      </select>
+    </div>
+    <div class="kr" id="eanKpis"></div>
+    <div class="tw2"><table>
+      <thead><tr>
+        <th onclick="doSort('ean','cat')">Categoria</th>
+        <th onclick="doSort('ean','subcat')">Subcategoria</th>
+        <th onclick="doSort('ean','EAN_norm')">EAN</th>
+        <th onclick="doSort('ean','desc')">Descrição</th>
+        <th class="num" onclick="doSort('ean','qt_sap')">SAP Total</th>
+        <th class="num" onclick="doSort('ean','qt_uni')">Unilog Total</th>
+        <th class="num" onclick="doSort('ean','diff')">Diferença</th>
+        <th class="num" onclick="doSort('ean','absDiff')">|Dif| ↓</th>
+        <th onclick="doSort('ean','estado')">Estado</th>
+        <th>Depósitos com dif.</th>
+      </tr></thead>
+      <tbody id="eanBody"></tbody>
+    </table></div>
+    <div id="eanEmpty" class="empty" style="display:none"><div class="empty-i">⚖️</div><div>Carrega os ficheiros para ver</div></div>
+  </div>
+  </div><!-- /recon-ean -->
 </div>
 
 <!-- ══ LOTES SUSPEITOS ══ -->
@@ -1386,7 +1435,143 @@ function renderUpKpis(){
   `;
 }
 
-// ── RECON ──
+// ── RECON TAB SWITCH ──
+function reconTab(name,el){
+  el.closest('#reconIts').querySelectorAll('.it').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('recon-lote').style.display=name==='lote'?'':'none';
+  document.getElementById('recon-ean').style.display=name==='ean'?'':'none';
+  if(name==='ean')renderEanView();
+}
+
+// ── RENDER EAN VIEW ──
+let _renderEanViewBusy=false;
+function renderEanView(){
+  if(_renderEanViewBusy)return;_renderEanViewBusy=true;
+  try{_renderEanView();}finally{_renderEanViewBusy=false;}
+}
+function _renderEanView(){
+  const body=document.getElementById('eanBody');
+  const empty=document.getElementById('eanEmpty');
+  if(!Object.keys(reconData).length){body.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+
+  // Aggregate all depots by EAN
+  const byEan={};
+  for(const dk of DKS){
+    for(const r of (reconData[dk]||[])){
+      const ean=r.EAN_norm;
+      if(!byEan[ean]){
+        const p=occParams.find(x=>x.ean===ean);
+        byEan[ean]={EAN_norm:ean,desc:r.desc,cat:p?.cat||'',subcat:p?.subcat||'',qt_sap:0,qt_uni:0,depDiffs:[]};
+      }
+      byEan[ean].qt_sap+=r.qt_sap;
+      byEan[ean].qt_uni+=r.qt_uni;
+      if(r.diff!==0)byEan[ean].depDiffs.push({dep:DEPOT_MAP[dk].label.split('—')[1]?.trim()||dk,diff:r.diff,lote:r.Lote_norm});
+    }
+  }
+
+  let rows=Object.values(byEan).map(r=>({
+    ...r,
+    diff:r.qt_sap-r.qt_uni,
+    absDiff:Math.abs(r.qt_sap-r.qt_uni),
+    estado:r.qt_sap===0&&r.qt_uni>0?'Só Unilog':r.qt_uni===0&&r.qt_sap>0?'Só SAP':r.qt_sap===r.qt_uni?'OK':'Divergência'
+  }));
+
+  // Update cat filter
+  const cats=[...new Set(rows.map(r=>r.cat).filter(Boolean))].sort();
+  const catSel=document.getElementById('eanCat');const catCur=catSel.value;
+  catSel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  catSel.value=cats.includes(catCur)?catCur:'';
+
+  // Filters
+  const srch=document.getElementById('eanSrch').value.toLowerCase();
+  const catF=catSel.value;
+  const estadoF=document.getElementById('eanEstado').value;
+  if(srch)rows=rows.filter(r=>r.EAN_norm.includes(srch)||r.desc.toLowerCase().includes(srch));
+  if(catF)rows=rows.filter(r=>r.cat===catF);
+  if(estadoF==='diff')rows=rows.filter(r=>r.diff!==0);
+  else if(estadoF==='ok')rows=rows.filter(r=>r.diff===0);
+  else if(estadoF==='only_sap')rows=rows.filter(r=>r.qt_uni===0&&r.qt_sap>0);
+  else if(estadoF==='only_uni')rows=rows.filter(r=>r.qt_sap===0&&r.qt_uni>0);
+
+  // Sort — default by absDiff desc
+  if(sorts['ean'])applySort('ean',rows);
+  else rows.sort((a,b)=>b.absDiff-a.absDiff);
+  updateSortHeaders('ean');
+
+  // KPIs
+  const comDiff=rows.filter(r=>r.diff!==0).length;
+  const totalAbsDiff=rows.reduce((s,r)=>s+r.absDiff,0);
+  document.getElementById('eanKpis').innerHTML=`
+    <div class="kpi"><div class="kl">EANs</div><div class="kv">${fmt(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Com divergência</div><div class="kv r">${fmt(comDiff)}</div><div class="ks">${rows.length?Math.round(comDiff/rows.length*100):0}%</div></div>
+    <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmt(rows.length-comDiff)}</div></div>
+    <div class="kpi"><div class="kl">Total |Dif|</div><div class="kv y">${fmt(totalAbsDiff)}</div><div class="ks">unidades</div></div>
+  `;
+
+  body.innerHTML='';
+  if(!rows.length){empty.style.display='block';return;}
+
+  for(const r of rows){
+    const hasDiff=r.diff!==0;
+    let badge='<span class="badge bok">OK</span>';
+    if(r.estado==='Só SAP')badge='<span class="badge bwarn">Só SAP</span>';
+    else if(r.estado==='Só Unilog')badge='<span class="badge berr">Só Unilog</span>';
+    else if(hasDiff)badge='<span class="badge berr">Divergência</span>';
+
+    // Depots with differences
+    const depHtml=r.depDiffs.slice(0,4).map(d=>{
+      const cls=d.diff>0?'pos':'neg';
+      return`<span class="badge binfo" style="margin-right:2px">${d.dep}: <span class="${cls}">${d.diff>0?'+':''}${fmt(d.diff)}</span></span>`;
+    }).join('')+(r.depDiffs.length>4?`<span style="font-size:10px;color:var(--muted)"> +${r.depDiffs.length-4}</span>`:'');
+
+    const tr=document.createElement('tr');
+    if(hasDiff)tr.className='dr';
+    tr.innerHTML=`
+      <td style="font-size:11px">${r.cat||'—'}</td>
+      <td style="font-size:11px">${r.subcat||'—'}</td>
+      <td><span class="badge bneu">${r.EAN_norm}</span></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
+      <td class="num">${fmt(r.qt_sap)}</td>
+      <td class="num">${fmt(r.qt_uni)}</td>
+      <td class="num ${r.diff>0?'pos':r.diff<0?'neg':''}">${r.diff>0?'+':''}${fmt(r.diff)}</td>
+      <td class="num ${r.absDiff>0?'neg':''}">${fmt(r.absDiff)}</td>
+      <td>${badge}</td>
+      <td style="font-size:11px">${depHtml||'—'}</td>
+    `;
+    body.appendChild(tr);
+  }
+  // Update badge on tab
+  const badge=document.getElementById('reconEanBadge');
+  badge.textContent=comDiff;badge.style.display=comDiff>0?'':'none';
+}
+
+function exportEanXlsx(){
+  if(!Object.keys(reconData).length){toast('Sem dados','error');return;}
+  // Force render to ensure data is fresh, then export from DOM logic
+  const byEan={};
+  for(const dk of DKS){
+    for(const r of (reconData[dk]||[])){
+      const ean=r.EAN_norm;
+      if(!byEan[ean]){const p=occParams.find(x=>x.ean===ean);byEan[ean]={EAN_norm:ean,Descricao:r.desc,Categoria:p?.cat||'',Subcategoria:p?.subcat||'',SAP_Total:0,Unilog_Total:0,Depositos_Dif:[]};}
+      byEan[ean].SAP_Total+=r.qt_sap;byEan[ean].Unilog_Total+=r.qt_uni;
+      if(r.diff!==0)byEan[ean].Depositos_Dif.push(`${DEPOT_MAP[dk].label.split('—')[1]?.trim()||dk}(${r.diff>0?'+':''}${r.diff})`);
+    }
+  }
+  const data=Object.values(byEan).map(r=>({
+    Categoria:r.Categoria,Subcategoria:r.Subcategoria,EAN:r.EAN_norm,Descricao:r.Descricao,
+    SAP_Total:r.SAP_Total,Unilog_Total:r.Unilog_Total,
+    Diferenca:r.SAP_Total-r.Unilog_Total,
+    Abs_Diferenca:Math.abs(r.SAP_Total-r.Unilog_Total),
+    Estado:r.SAP_Total===r.Unilog_Total?'OK':r.SAP_Total===0?'Só Unilog':r.Unilog_Total===0?'Só SAP':'Divergência',
+    Depositos_Com_Diferenca:r.Depositos_Dif.join(' | ')
+  })).sort((a,b)=>b.Abs_Diferenca-a.Abs_Diferenca);
+  const ws=XLSX.utils.json_to_sheet(data);
+  ws['!cols']=[{wch:16},{wch:14},{wch:14},{wch:32},{wch:10},{wch:12},{wch:10},{wch:10},{wch:14},{wch:50}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Por EAN');
+  XLSX.writeFile(wb,`conciliacao_por_ean_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
 function renderReconPage(){
   if(!Object.keys(reconData).length){document.getElementById('reconEmpty').style.display='block';return;}
   document.getElementById('reconEmpty').style.display='none';
@@ -2169,6 +2354,7 @@ function doSort(table,col){
   else if(table==='audit')renderAuditoria();
   else if(table==='rec')renderRecLista();
   else if(table==='hist')renderHistory();
+  else if(table==='ean')renderEanView();
 }
 function applySort(table,rows){
   const s=sorts[table];if(!s)return;
