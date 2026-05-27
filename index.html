@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526164001-DEBUG -->
+<!DOCTYPE html><!-- v20260526165001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1457,6 +1457,13 @@ function _renderRecon(){
     });
   }
   // Default sort: desc alphabetical
+  // Enrich rows with cat/subcat from occParams (may not have been available at build time)
+  rows.forEach(r=>{
+    if(!r.cat||!r.subcat){
+      const p=occParams.find(x=>x.ean===r.EAN_norm);
+      r.cat=p?.cat||'';r.subcat=p?.subcat||'';
+    }
+  });
   if(!sorts['recon']){rows.sort((a,b)=>String(a.desc||'').localeCompare(String(b.desc||'')));}
   else applySort('recon',rows);
   updateSortHeaders('recon');
@@ -1539,6 +1546,7 @@ function _renderSusp(){
   if(flt==='no_sim')rows=rows.filter(r=>!r.similar);
   if(catF)rows=rows.filter(r=>{const p=occParams.find(x=>x.ean===r.EAN_norm);return(p?.cat||autoCat(r.desc).cat||'')===catF;});
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
+  rows.forEach(r=>{if(!r.cat){const p=occParams.find(x=>x.ean===r.EAN_norm);r.cat=p?.cat||autoCat(r.desc).cat||'';}});
   applySort('susp',rows);updateSortHeaders('susp');
 
   const withSim=suspData.filter(r=>r.similar).length;
@@ -2152,7 +2160,6 @@ function doSort(table,col){
   const s=sorts[table];
   const newDir=(s&&s.col===col)?-s.dir:1;
   sorts[table]={col,dir:newDir};
-  console.log('[SORT] table='+table+' col='+col+' dir='+newDir+' sorts='+JSON.stringify(sorts[table]));
   if(table==='recon')renderRecon();
   else if(table==='susp')renderSusp();
   else if(table==='su')renderSoUnilog();
@@ -2165,14 +2172,12 @@ function doSort(table,col){
 }
 function applySort(table,rows){
   const s=sorts[table];if(!s)return;
-  console.log('[APPLY] table='+table+' col='+s.col+' dir='+s.dir+' rows='+rows.length+' first_val='+rows[0]?.[s.col]);
   rows.sort((a,b)=>{
     const va=a[s.col]??'';
     const vb=b[s.col]??'';
     if(typeof va==='number'&&typeof vb==='number')return s.dir*(va-vb);
     return s.dir*String(va).localeCompare(String(vb),'pt',{numeric:true});
   });
-  console.log('[AFTER] first='+rows[0]?.[s.col]+' last='+rows[rows.length-1]?.[s.col]);
 }
 function updateSortHeaders(table){
   const s=sorts[table];
