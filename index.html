@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526155501 -->
+<!DOCTYPE html><!-- v20260526161001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1082,7 +1082,7 @@ function buildRecon(){
     for(const r of uniDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,classes:new Set(),enderecos:[]};uA[k].qt+=r.qt;uA[k].classes.add(r.classe);if(r.endereco&&!uA[k].enderecos.includes(r.endereco))uA[k].enderecos.push(r.endereco);}
     const keys=new Set([...Object.keys(sA),...Object.keys(uA)]);
     reconData[dk]=[];
-    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[]});}
+    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[],cat:param?.cat||'',subcat:param?.subcat||''});}
   }
 }
 
@@ -1105,7 +1105,8 @@ function buildSusp(){
     const depots=[...classes].map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));return dk?`Dep ${dk.padStart(4,'0')} / Cl.${cl}`:cl;});
     const sapL=Object.keys(sapLotes[EAN_norm]||{});
     let best=null;for(const sl of sapL){const r=simRatio(Lote_norm,sl);if(r>=0.7&&r<1.0){if(!best||r>best.ratio)best={lote:sl,ratio:r,qt:sapLotes[EAN_norm][sl]};}}
-    suspData.push({EAN_norm,Lote_norm,qt,desc,similar:best,depots});
+    const param=occParams.find(p=>p.ean===EAN_norm);
+    suspData.push({EAN_norm,Lote_norm,qt,desc,similar:best,depots,cat:param?.cat||autoCat(desc).cat||''});
   }
   const badge=document.getElementById('suspBadge');badge.textContent=suspData.length;badge.style.display=suspData.length>0?'':'none';
 }
