@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526210001 -->
+<!DOCTYPE html><!-- v20260526211001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -504,7 +504,8 @@ select.cad-inp{cursor:pointer;}
           <th onclick="cadSort('ean')" id="cadTh_ean">EAN</th>
           <th onclick="cadSort('desc')" id="cadTh_desc">Descrição SAP</th>
           <th>Depósitos</th>
-          <th onclick="cadSort('stockTotal')" id="cadTh_stockTotal" class="num" title="Stock total em todos os depósitos">Stock Total</th>
+          <th onclick="cadSort('stockTotal')" id="cadTh_stockTotal" class="num" title="Stock total SAP em todos os depósitos">Stock SAP</th>
+          <th onclick="cadSort('stockUni')" id="cadTh_stockUni" class="num" title="Stock total Unilog em todas as classes">Stock WMS</th>
           <th onclick="cadSort('qty_per_pos')" id="cadTh_qty_per_pos" style="min-width:80px">Un/Posição</th>
           <th onclick="cadSort('unidades_cx')" id="cadTh_unidades_cx" style="min-width:70px">Un/CX</th>
           <th onclick="cadSort('lote_obrigatorio')" id="cadTh_lote_obrigatorio">Lote Obrig.</th>
@@ -2020,7 +2021,8 @@ function _renderCadastro(){
       descontinuado:edited?.descontinuado!==undefined?edited.descontinuado:(p?.descontinuado===true),
       notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),
       hasParam:!!p,
-      stockTotal:(sapData||[]).filter(r=>r.EAN_norm===e.ean).reduce((s,r)=>s+r.qt,0)};
+      stockTotal:(sapData||[]).filter(r=>r.EAN_norm===e.ean).reduce((s,r)=>s+r.qt,0),
+      stockUni:(uniData||[]).filter(r=>r.EAN_norm===e.ean&&!['93','FI','SI'].includes(r.classe)).reduce((s,r)=>s+r.qt,0)};
   });
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
   msUpdate('cadCat',allCats,'Categorias','renderCadastro');
@@ -2093,6 +2095,7 @@ function _renderCadastro(){
       '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="'+esc(item.desc||'')+'">'+esc(item.desc||'')+unilogBadge+'</td>'+
       '<td style="white-space:nowrap">'+cadDepHtml+'</td>'+
       '<td class="num" style="font-size:12px;font-weight:600;color:'+(item.stockTotal===0?'var(--red)':item.soUnilog?'var(--muted)':'var(--text')+'">'+(item.soUnilog?'—':fmt(item.stockTotal))+'</td>'+
+      '<td class="num" style="font-size:12px;color:'+(item.stockUni===0&&!item.soUnilog?'var(--red)':'var(--muted')+'">'+(item.stockUni>0||item.soUnilog?fmt(item.stockUni):'0')+'</td>'+
       '<td><input class="cad-inp" type="number" min="1" data-field="qty_per_pos" data-ean="'+ean+'" data-int="1" value="'+(item.qty_per_pos||'')+'" placeholder="0" style="width:70px"></td>'+
       '<td><input class="cad-inp" type="number" min="1" data-field="unidades_cx" data-ean="'+ean+'" data-int="1" value="'+(item.unidades_cx||'')+'" placeholder="—" style="width:60px"></td>'+
       '<td class="cad-toggle"><div class="tw" data-toggle="lote" data-ean="'+ean+'"><div class="tg '+lotOn+'"><div class="tk"></div></div><span style="font-size:11px">'+(item.lote_obrigatorio?'Sim':'Não')+'</span></div></td>'+
