@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526220001 -->
+<!DOCTYPE html><!-- v20260526221001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1045,12 +1045,10 @@ select.cad-inp{cursor:pointer;}
   <div class="card">
     <div class="ch">
       <div class="ct">Contrato de Comodato</div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <div id="ctStep" style="font-size:12px;color:var(--muted)">Passo 1 de 4</div>
-      </div>
+      <div id="ctStep" style="font-size:12px;color:var(--muted)">Passo 1 de 4</div>
     </div>
 
-    <!-- Progress bar -->
+    <!-- Progress pills -->
     <div style="display:flex;gap:4px;margin-bottom:20px">
       <div id="ctP1" class="ct-step active" onclick="ctGoto(1)">1 Cliente</div>
       <div id="ctP2" class="ct-step" onclick="ctGoto(2)">2 Condições</div>
@@ -1060,21 +1058,31 @@ select.cad-inp{cursor:pointer;}
 
     <!-- PASSO 1: CLIENTE -->
     <div id="ct-passo1">
-      <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Dados do Comodatário</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Identificação do Cliente</div>
+      <div style="display:grid;grid-template-columns:220px 1fr;gap:12px;align-items:end;margin-bottom:16px">
         <div>
-          <label class="ct-lbl">CNPJ <span class="ct-req">*</span></label>
+          <label class="ct-lbl">Código do Cliente <span class="ct-req">*</span></label>
           <div style="display:flex;gap:6px">
-            <input id="ct_cnpj" class="inp" placeholder="00.000.000/0000-00" style="flex:1" oninput="ctFormatCnpj(this)">
-            <button class="btn bg" onclick="ctBuscarCliente()" title="Buscar na base de clientes">🔍</button>
+            <input id="ct_cod" class="inp" placeholder="Cód. cliente" style="flex:1" onkeydown="if(event.key==='Enter')ctBuscarCliente()">
+            <button class="btn bg" onclick="ctBuscarCliente()" title="Pesquisar">🔍</button>
           </div>
         </div>
+        <div id="ct_cliente_found" style="display:none;padding:8px 12px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;font-size:12px;color:#166534">
+          ✓ <span id="ct_found_txt"></span>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div>
-          <label class="ct-lbl">Empresa <span class="ct-req">*</span></label>
-          <input id="ct_empresa" class="inp" placeholder="Razão social">
+          <label class="ct-lbl">Nome da Empresa <span class="ct-req">*</span></label>
+          <input id="ct_empresa" class="inp" placeholder="Preenchido automaticamente ou manual">
         </div>
         <div>
-          <label class="ct-lbl">Nome do Representante <span class="ct-req">*</span></label>
+          <label class="ct-lbl">CNPJ <span class="ct-req">*</span></label>
+          <input id="ct_cnpj" class="inp" placeholder="00.000.000/0000-00">
+        </div>
+        <div>
+          <label class="ct-lbl">Nome do Representante / Quem Assina <span class="ct-req">*</span></label>
           <input id="ct_rep_nome" class="inp" placeholder="Nome completo">
         </div>
         <div>
@@ -1086,20 +1094,12 @@ select.cad-inp{cursor:pointer;}
           <input id="ct_rep_cpf" class="inp" placeholder="000.000.000-00">
         </div>
         <div>
-          <label class="ct-lbl">Email para envio do contrato <span class="ct-req">*</span></label>
-          <input id="ct_email" class="inp" type="email" placeholder="email@empresa.com">
-        </div>
-        <div>
-          <label class="ct-lbl">Nome de quem assina digitalmente <span class="ct-req">*</span></label>
-          <input id="ct_assina_nome" class="inp" placeholder="Nome para email de envio">
-        </div>
-        <div>
-          <label class="ct-lbl">CC (emails separados por vírgula)</label>
-          <input id="ct_cc" class="inp" placeholder="cc1@email.com, cc2@email.com">
+          <label class="ct-lbl">Email do Cliente (para assinatura) <span class="ct-req">*</span></label>
+          <input id="ct_email" class="inp" type="email" placeholder="email@cliente.com">
         </div>
       </div>
-      <div id="ct_cliente_found" style="display:none;margin-top:10px;padding:8px 12px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;font-size:12px;color:#166534">
-        ✓ Cliente encontrado na base de dados
+      <div style="margin-top:12px;padding:8px 12px;background:var(--bg3);border-radius:6px;font-size:11px;color:var(--muted)">
+        📧 O contrato será enviado para: <strong>daniela.kucinski@deltafoodsbrasil.com.br</strong> com CC a <strong>filipe.neves@deltafoodsbrasil.com.br</strong>
       </div>
     </div>
 
@@ -1143,39 +1143,23 @@ select.cad-inp{cursor:pointer;}
           <input id="ct_dur_ext" class="inp" placeholder="Vinte e Quatro">
         </div>
       </div>
-      <div style="margin-top:12px;padding:10px 14px;background:var(--bg3);border-radius:6px;font-size:12px;color:var(--text2)" id="ct_total_info">
-        Total calculado: —
-      </div>
+      <div style="margin-top:12px;padding:10px 14px;background:var(--bg3);border-radius:6px;font-size:12px;color:var(--text2)" id="ct_total_info">Total calculado: —</div>
     </div>
 
     <!-- PASSO 3: EQUIPAMENTOS -->
     <div id="ct-passo3" style="display:none">
       <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:4px;border-bottom:1px solid var(--border);padding-bottom:8px">Anexo I — Equipamentos Comodato</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Preenche pelo menos 1 linha. Linhas vazias ficam em branco no contrato.</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Preenche pelo menos 1 linha.</div>
       <div id="ct_a1_table"></div>
-
       <div style="font-size:13px;font-weight:600;color:var(--red);margin-top:20px;margin-bottom:4px;border-bottom:1px solid var(--border);padding-bottom:8px">Anexo II — Bens a Título de Investimento</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Preenche se aplicável. Linhas vazias ficam em branco no contrato.</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Preenche se aplicável.</div>
       <div id="ct_a2_table"></div>
-
       <div style="font-size:13px;font-weight:600;color:var(--red);margin-top:20px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Testemunhas</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px">
-        <div>
-          <label class="ct-lbl">Testemunha 1 — Nome <span class="ct-req">*</span></label>
-          <input id="ct_t1_nome" class="inp" placeholder="Nome completo">
-        </div>
-        <div>
-          <label class="ct-lbl">Testemunha 1 — CPF <span class="ct-req">*</span></label>
-          <input id="ct_t1_cpf" class="inp" placeholder="000.000.000-00">
-        </div>
-        <div>
-          <label class="ct-lbl">Testemunha 2 — Nome <span class="ct-req">*</span></label>
-          <input id="ct_t2_nome" class="inp" placeholder="Nome completo">
-        </div>
-        <div>
-          <label class="ct-lbl">Testemunha 2 — CPF <span class="ct-req">*</span></label>
-          <input id="ct_t2_cpf" class="inp" placeholder="000.000.000-00">
-        </div>
+        <div><label class="ct-lbl">Testemunha 1 — Nome <span class="ct-req">*</span></label><input id="ct_t1_nome" class="inp" placeholder="Nome completo"></div>
+        <div><label class="ct-lbl">Testemunha 1 — CPF <span class="ct-req">*</span></label><input id="ct_t1_cpf" class="inp" placeholder="000.000.000-00"></div>
+        <div><label class="ct-lbl">Testemunha 2 — Nome <span class="ct-req">*</span></label><input id="ct_t2_nome" class="inp" placeholder="Nome completo"></div>
+        <div><label class="ct-lbl">Testemunha 2 — CPF <span class="ct-req">*</span></label><input id="ct_t2_cpf" class="inp" placeholder="000.000.000-00"></div>
       </div>
     </div>
 
@@ -1186,7 +1170,7 @@ select.cad-inp{cursor:pointer;}
       <div id="ct_erros" style="display:none;margin-top:12px;padding:12px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;font-size:12px;color:var(--red)"></div>
     </div>
 
-    <!-- Navigation buttons -->
+    <!-- Navigation -->
     <div style="display:flex;justify-content:space-between;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <button id="ct_btn_prev" class="btn" onclick="ctPrev()" style="display:none">← Anterior</button>
       <div style="flex:1"></div>
@@ -1195,6 +1179,7 @@ select.cad-inp{cursor:pointer;}
     </div>
   </div>
 </div>
+
 
 <!-- ══ HISTÓRICO ══ -->
 <div class="page" id="page-history">
@@ -4360,21 +4345,23 @@ function ctFormatCnpj(el){
 }
 
 async function ctBuscarCliente(){
-  const cnpj = document.getElementById('ct_cnpj').value.replace(/\D/g,'');
-  if(!cnpj || cnpj.length < 8){ toast('Introduz o CNPJ primeiro','error'); return; }
+  const cod = document.getElementById('ct_cod').value.trim();
+  if(!cod){ toast('Introduz o código do cliente primeiro','error'); return; }
   try{
-    const {data} = await db.from('registos').select('*').ilike('cnpj', '%'+cnpj+'%').limit(1);
+    const {data} = await db.from('registos').select('*').ilike('cod', '%'+cod+'%').limit(5);
     if(data && data.length){
       const r = data[0];
       document.getElementById('ct_empresa').value = r.nome || '';
-      document.getElementById('ct_email').value = r.email || '';
+      document.getElementById('ct_cnpj').value = r.cnpj || '';
+      document.getElementById('ct_found_txt').textContent = r.nome + (r.vendedor ? ' · Vendedor: '+r.vendedor : '');
       document.getElementById('ct_cliente_found').style.display = 'block';
-      toast('Cliente encontrado: '+r.nome,'success');
+      if(data.length > 1) toast('Encontrados '+data.length+' clientes com este código — mostrado o primeiro','');
+      else toast('Cliente encontrado: '+r.nome,'success');
     } else {
-      toast('Cliente não encontrado na base de dados','error');
+      toast('Cliente não encontrado — podes preencher manualmente','error');
       document.getElementById('ct_cliente_found').style.display = 'none';
     }
-  }catch(e){ toast('Erro ao buscar cliente','error'); }
+  }catch(e){ toast('Erro ao buscar cliente: '+e.message,'error'); }
 }
 
 function ctCalcTotal(){
@@ -4422,8 +4409,7 @@ function ctValidateStep(step){
     if(!document.getElementById('ct_rep_nome').value.trim()) errs.push('Nome do representante obrigatório');
     if(!document.getElementById('ct_rep_rg').value.trim()) errs.push('RG obrigatório');
     if(!document.getElementById('ct_rep_cpf').value.trim()) errs.push('CPF do representante obrigatório');
-    if(!document.getElementById('ct_email').value.trim()) errs.push('Email obrigatório');
-    if(!document.getElementById('ct_assina_nome').value.trim()) errs.push('Nome de quem assina obrigatório');
+    if(!document.getElementById('ct_email').value.trim()) errs.push('Email do cliente obrigatório');
   }
   if(step===2){
     if(!document.getElementById('ct_lote').value.trim()) errs.push('Lote obrigatório');
@@ -4462,9 +4448,8 @@ function ctBuildReview(){
   html += field('Representante', g('ct_rep_nome'));
   html += field('RG', g('ct_rep_rg'));
   html += field('CPF Representante', g('ct_rep_cpf'));
-  html += field('Email envio', g('ct_email'));
-  html += field('Assina (nome)', g('ct_assina_nome'));
-  html += field('CC', g('ct_cc')||'(nenhum)');
+  html += field('Email cliente (assinatura)', g('ct_email'));
+  html += '<div class="ct-review-section"><strong>Envio para</strong><div class="ct-review-val" style="font-size:11px">daniela.kucinski@deltafoodsbrasil.com.br · CC: filipe.neves@deltafoodsbrasil.com.br</div></div>';
   html += field('Lote', g('ct_lote'));
   html += field('Qtd/mês', qtdMes+' '+un);
   html += field('Total contrato', total.toLocaleString('pt-BR')+' '+un);
@@ -4596,19 +4581,19 @@ async function ctGerar(){
 }
 
 function ctAbrirEmail(filename, data){
-  const emailTo = document.getElementById('ct_email').value;
-  const emailCc = document.getElementById('ct_cc').value || '';
-  const subject = encodeURIComponent('Contrato de Comodato Delta Q - Para Assinatura');
-  const linha1 = 'Exmo(a). Sr(a). ' + data.ASSINA_NOME + ',%0A%0A';
-  const linha2 = 'Segue em anexo o Contrato de Comodato Delta Q para a sua empresa ' + data.COMOD_EMPRESA + ', para assinatura digital.%0A%0A';
-  const linha3 = 'Por favor, assine e devolva o documento assinado.%0A%0A';
-  const linha4 = 'Em caso de duvida, nao hesite em contactar-nos.%0A%0A';
+  const to = 'daniela.kucinski@deltafoodsbrasil.com.br';
+  const cc = encodeURIComponent('filipe.neves@deltafoodsbrasil.com.br');
+  const clientEmail = document.getElementById('ct_email').value;
+  const subject = encodeURIComponent('Contrato de Comodato Delta Q - ' + data.COMOD_EMPRESA + ' - Para Assinatura');
+  const linha1 = 'Daniela,%0A%0A';
+  const linha2 = 'Segue em anexo o Contrato de Comodato Delta Q para o cliente ' + data.COMOD_EMPRESA + ' (' + data.COMOD_CNPJ + '),%0A';
+  const linha3 = 'para assinatura digital por ' + data.ASSINA_NOME + ' (' + clientEmail + ').%0A%0A';
+  const linha4 = 'Por favor tratar o envio para assinatura.%0A%0A';
   const linha5 = 'Com os melhores cumprimentos,%0ADelta Foods Brasil';
   const body = linha1 + linha2 + linha3 + linha4 + linha5;
-  const ccPart = emailCc ? ('cc=' + encodeURIComponent(emailCc) + '&') : '';
-  const mailto = 'mailto:' + emailTo + '?' + ccPart + 'subject=' + subject + '&body=' + body;
+  const mailto = 'mailto:' + to + '?cc=' + cc + '&subject=' + subject + '&body=' + body;
   window.open(mailto);
-  toast('Email aberto - anexa o ficheiro ' + filename + ' e envia', '');
+  toast('Email aberto - anexa ' + filename + ' e envia', '');
 }
 
 function loadScript(src){
