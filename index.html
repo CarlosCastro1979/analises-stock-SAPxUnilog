@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526200501 -->
+<!DOCTYPE html><!-- v20260526201001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -996,6 +996,13 @@ select.cad-inp{cursor:pointer;}
         <option value="zero">Stock zero</option>
         <option value="repor">Necessita reposição</option>
       </select>
+      <div class="ms-wrap" id="ms-pecasRotacao" data-placeholder="Sem rotação" data-onchange="renderPecas">
+        <div class="ms-btn" onclick="msTogOpen('pecasRotacao')"><span class="ms-btn-lbl">Sem rotação</span><span class="ms-btn-arr">▼</span></div>
+        <div class="ms-drop" style="display:none">
+          <div class="ms-actions"><button onclick="msSelAll('pecasRotacao')">Todos</button><button onclick="msClrAll('pecasRotacao')">Limpar</button></div>
+          <div class="ms-list"></div>
+        </div>
+      </div>
     </div>
     <div class="kr" id="pecasKpis"></div>
     <div class="tw2"><table>
@@ -1008,6 +1015,7 @@ select.cad-inp{cursor:pointer;}
         <th class="num" onclick="doSort('pecas','consumoMedio')">Consumo Méd./Mês</th>
         <th class="num" onclick="doSort('pecas','cobertura')">Cobertura (meses)</th>
         <th class="num" onclick="doSort('pecas','pedido12m')">Pedido 12M</th>
+        <th onclick="doSort('pecas','semRotacaoMeses')">Sem Rotação</th>
         <th>Último snapshot</th>
       </tr></thead>
       <tbody id="pecasBody"></tbody>
@@ -2729,6 +2737,16 @@ document.addEventListener('click',e=>{
 // PEÇAS AT
 // ══════════════════════════════════════════
 
+function rotacaoBadge(meses){
+  if(meses===null||meses===undefined)return'<span style="color:var(--muted);font-size:10px">—</span>';
+  if(meses===0)return'<span class="badge bok">Movimento recente</span>';
+  if(meses<3)return`<span class="badge bok">${meses}m</span>`;
+  if(meses<6)return`<span class="badge bwarn">⚠ ${meses}m sem mov.</span>`;
+  if(meses<9)return`<span class="badge" style="background:#fed7aa;color:#9a3412">⚠ ${meses}m sem mov.</span>`;
+  if(meses<12)return`<span class="badge berr">🔴 ${meses}m sem mov.</span>`;
+  return`<span class="badge berr" style="background:#7f1d1d">🔴 +12m sem mov.</span>`;
+}
+
 async function processPecas(){
   if(!sapData&&!window._rawSapRows)return;
   // Get dep 33 rows from raw SAP data before normSap filtered them
@@ -2799,7 +2817,18 @@ async function loadPecasData(){
       const cm=consumo[mat]||0;
       const cobertura=cm>0?qt/cm:qt>0?999:0;
       const pedido12m=Math.max(0,Math.ceil(cm*12)-qt);
-      return{material:mat,desc,qt,preco,valorTotal:qt*preco,consumoMedio:Math.round(cm*10)/10,cobertura:Math.round(cobertura*10)/10,pedido12m,ultimoSnap:hist.length>0?hist[hist.length-1].at.toLocaleDateString('pt-BR'):'—',nSnapshots:hist.length};
+      // Sem rotação: find last snapshot where stock decreased (= consumption event)
+      let ultimoMovimento=null;
+      for(let i=1;i<hist.length;i++){
+        if(hist[i-1].qt>hist[i].qt){ultimoMovimento=hist[i].at;break;} // found a decrease
+      }
+      // If never decreased, use first snapshot date as "last movement" unknown
+      // semRotacaoMeses = months since last movement (null if only 1 snapshot)
+      const semRotacaoMeses=ultimoMovimento&&hist.length>1?
+        Math.floor((new Date()-ultimoMovimento)/(1000*60*60*24*30)):
+        (hist.length>1?Math.floor((new Date()-hist[0].at)/(1000*60*60*24*30)):null);
+
+      return{material:mat,desc,qt,preco,valorTotal:qt*preco,consumoMedio:Math.round(cm*10)/10,cobertura:Math.round(cobertura*10)/10,pedido12m,ultimoSnap:hist.length>0?hist[hist.length-1].at.toLocaleDateString('pt-BR'):'—',nSnapshots:hist.length,semRotacaoMeses};
     });
 
     // Upsert catalogue with latest values
@@ -2819,11 +2848,25 @@ function renderPecas(){
   const srch=document.getElementById('pecasSrch').value.toLowerCase();
   const estadoF=document.getElementById('pecasEstado').value;
 
+  // Init sem rotação multiselect
+  msUpdate('pecasRotacao',['3+ meses','6+ meses','9+ meses','12+ meses'],'Sem rotação','renderPecas');
+  const rotacaoVals=msGet('pecasRotacao');
+
   let rows=[...pecasData];
   if(srch)rows=rows.filter(r=>r.material.toLowerCase().includes(srch)||r.desc.toLowerCase().includes(srch));
   if(estadoF==='stock')rows=rows.filter(r=>r.qt>0);
   else if(estadoF==='zero')rows=rows.filter(r=>r.qt===0);
   else if(estadoF==='repor')rows=rows.filter(r=>r.pedido12m>0);
+  if(rotacaoVals.size){
+    rows=rows.filter(r=>{
+      const m=r.semRotacaoMeses;
+      if(m===null)return false;
+      return(rotacaoVals.has('3+ meses')&&m>=3)||
+             (rotacaoVals.has('6+ meses')&&m>=6)||
+             (rotacaoVals.has('9+ meses')&&m>=9)||
+             (rotacaoVals.has('12+ meses')&&m>=12);
+    });
+  }
 
   if(sorts['pecas'])applySort('pecas',rows);
   else rows.sort((a,b)=>b.pedido12m-a.pedido12m||b.qt-a.qt);
@@ -2854,6 +2897,7 @@ function renderPecas(){
       <td class="num">${r.consumoMedio>0?r.consumoMedio.toLocaleString('pt-BR',{minimumFractionDigits:1}):'<span style="color:var(--muted)">sem dados</span>'}</td>
       <td class="num ${r.cobertura<3&&r.consumoMedio>0?'neg':r.cobertura<6&&r.consumoMedio>0?'y':''}">${r.consumoMedio>0?(r.cobertura>=999?'∞':r.cobertura.toLocaleString('pt-BR',{minimumFractionDigits:1})):'—'}</td>
       <td class="num ${r.pedido12m>0?'neg':''}">${r.pedido12m>0?fmt(r.pedido12m):'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${r.nSnapshots>1?rotacaoBadge(r.semRotacaoMeses):'<span style="color:var(--muted);font-size:10px">aguardar histórico</span>'}</td>
       <td style="font-size:11px;color:var(--muted)">${r.ultimoSnap}${r.nSnapshots>1?' ('+r.nSnapshots+' snaps)':''}</td>
     `;
     body.appendChild(tr);
