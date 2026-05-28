@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526202001 -->
+<!DOCTYPE html><!-- v20260526210001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -504,6 +504,7 @@ select.cad-inp{cursor:pointer;}
           <th onclick="cadSort('ean')" id="cadTh_ean">EAN</th>
           <th onclick="cadSort('desc')" id="cadTh_desc">Descrição SAP</th>
           <th>Depósitos</th>
+          <th onclick="cadSort('stockTotal')" id="cadTh_stockTotal" class="num" title="Stock total em todos os depósitos">Stock Total</th>
           <th onclick="cadSort('qty_per_pos')" id="cadTh_qty_per_pos" style="min-width:80px">Un/Posição</th>
           <th onclick="cadSort('unidades_cx')" id="cadTh_unidades_cx" style="min-width:70px">Un/CX</th>
           <th onclick="cadSort('lote_obrigatorio')" id="cadTh_lote_obrigatorio">Lote Obrig.</th>
@@ -1158,8 +1159,11 @@ function normSapPecas(rows){
 function normSap(rows){
   return rows
     .filter(r=>r['Centro']&&r['Depósito']!==undefined&&r['Depósito']!=='')
-    .map(r=>({deposito:String(Math.round(nQty(r['Depósito']))),EAN_norm:nEAN(r['EAN11']),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(r['Lote.']),qt:nQty(r['Quantidade']),validade:String(r['Validade Lote']||'').trim(),preco:nQty(r['Preço']||r['Preco']||r['Preço Unit.']||r['Preço Unitário']||r['Price']||r['Valor']||0)}))
-    .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito));
+    .map(r=>{
+      const ean=nEAN(r['EAN11']);
+      return {deposito:String(Math.round(nQty(r['Depósito']))),EAN_norm:ean||String(r['Material']||'').trim(),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(r['Lote.']),qt:nQty(r['Quantidade']),validade:String(r['Validade Lote']||'').trim(),preco:nQty(r['Preço']||r['Preco']||r['Preço Unit.']||r['Preço Unitário']||r['Price']||r['Valor']||0)};
+    })
+    .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito)&&r.EAN_norm);
 }
 function normUni(rows){
   return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()}));
@@ -2015,7 +2019,8 @@ function _renderCadastro(){
       b2c:edited?.b2c!==undefined?edited.b2c:(p?.b2c!==undefined?p.b2c:true),
       descontinuado:edited?.descontinuado!==undefined?edited.descontinuado:(p?.descontinuado===true),
       notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),
-      hasParam:!!p};
+      hasParam:!!p,
+      stockTotal:(sapData||[]).filter(r=>r.EAN_norm===e.ean).reduce((s,r)=>s+r.qt,0)};
   });
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
   msUpdate('cadCat',allCats,'Categorias','renderCadastro');
@@ -2087,6 +2092,7 @@ function _renderCadastro(){
       '<td><span class="badge bneu">'+ean+'</span></td>'+
       '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="'+esc(item.desc||'')+'">'+esc(item.desc||'')+unilogBadge+'</td>'+
       '<td style="white-space:nowrap">'+cadDepHtml+'</td>'+
+      '<td class="num" style="font-size:12px;font-weight:600;color:'+(item.stockTotal===0?'var(--red)':item.soUnilog?'var(--muted)':'var(--text')+'">'+(item.soUnilog?'—':fmt(item.stockTotal))+'</td>'+
       '<td><input class="cad-inp" type="number" min="1" data-field="qty_per_pos" data-ean="'+ean+'" data-int="1" value="'+(item.qty_per_pos||'')+'" placeholder="0" style="width:70px"></td>'+
       '<td><input class="cad-inp" type="number" min="1" data-field="unidades_cx" data-ean="'+ean+'" data-int="1" value="'+(item.unidades_cx||'')+'" placeholder="—" style="width:60px"></td>'+
       '<td class="cad-toggle"><div class="tw" data-toggle="lote" data-ean="'+ean+'"><div class="tg '+lotOn+'"><div class="tk"></div></div><span style="font-size:11px">'+(item.lote_obrigatorio?'Sim':'Não')+'</span></div></td>'+
@@ -2901,6 +2907,7 @@ function renderPecas(){
     `;
     body.appendChild(tr);
   }
+  applyResizable();
 }
 
 function exportPecasXlsx(){
