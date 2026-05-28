@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260526201001 -->
+<!DOCTYPE html><!-- v20260526202001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1014,7 +1014,7 @@ select.cad-inp{cursor:pointer;}
         <th class="num" onclick="doSort('pecas','valorTotal')">Valor Total</th>
         <th class="num" onclick="doSort('pecas','consumoMedio')">Consumo Méd./Mês</th>
         <th class="num" onclick="doSort('pecas','cobertura')">Cobertura (meses)</th>
-        <th class="num" onclick="doSort('pecas','pedido12m')">Pedido 12M</th>
+        <th class="num" onclick="doSort('pecas','pedido12m')" title="Pedido de 12 meses quando cobertura &lt; 6 meses">Pedido 12M ⚡</th>
         <th onclick="doSort('pecas','semRotacaoMeses')">Sem Rotação</th>
         <th>Último snapshot</th>
       </tr></thead>
@@ -1097,7 +1097,10 @@ async function init(){
       if(t.dataset.page==='cadastro')renderCadastro();
       if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
       if(t.dataset.page==='reclamacoes'){loadReclamacoes();}
-      if(t.dataset.page==='pecas'){renderPecas();}
+      if(t.dataset.page==='pecas'){
+        if(!pecasData.length)loadPecasData().then(()=>renderPecas());
+        else renderPecas();
+      }
       if(t.dataset.page==='transferencias'){
         // Show/hide tabs based on company
         const itEc=document.getElementById('transItEc');
@@ -1130,7 +1133,7 @@ async function init(){
   try{
     const{error}=await db.from('logistica_stock').select('id').limit(1);
     setDB(!error);
-    if(!error){await loadFromDB(true);await loadOccParams();await loadReconNotas();}
+    if(!error){await loadFromDB(true);await loadOccParams();await loadReconNotas();await loadPecasData();}
   }catch(e){setDB(false);}
 }
 function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok':'');document.getElementById('dbLbl').textContent=ok?'Supabase OK':'offline';}
@@ -1550,7 +1553,7 @@ async function loadFromDB(silent=false){
     uniData=JSON.parse(data.unilog_data);
     // Load occParams first so MUIM category filtering works in buildRecon
     await loadOccParams();
-    buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();await processPecas();renderUpKpis();updateChip();
+    buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();await processPecas();await loadPecasData();renderUpKpis();updateChip();
     // Re-render active page if it needs data
     const activePage=document.querySelector('.page.active');
     if(activePage){
@@ -2748,21 +2751,14 @@ function rotacaoBadge(meses){
 }
 
 async function processPecas(){
-  if(!sapData&&!window._rawSapRows)return;
-  // Get dep 33 rows from raw SAP data before normSap filtered them
-  // We need to re-read from the raw rows stored during load
-  const raw33=window._rawSapRows?normSapPecas(window._rawSapRows):[];
+  if(!window._rawSapRows)return;
+  const raw33=normSapPecas(window._rawSapRows);
   if(!raw33.length)return;
-
-  const now=new Date().toISOString();
-
-  // 1. Upsert snapshot
-  const snapshot={company,snapshot_at:now,rows:JSON.stringify(raw33)};
+  // Save snapshot
   try{
-    await db.from('pecas_at_snapshots').insert(snapshot);
+    await db.from('pecas_at_snapshots').insert({company,snapshot_at:new Date().toISOString(),rows:JSON.stringify(raw33)});
   }catch(e){}
-
-  // 2. Load all catalogue entries (never delete)
+  // Always reload from full history after saving snapshot
   await loadPecasData();
 }
 
@@ -2816,7 +2812,8 @@ async function loadPecasData(){
       const desc=latest?.desc||cat?.descricao||'';
       const cm=consumo[mat]||0;
       const cobertura=cm>0?qt/cm:qt>0?999:0;
-      const pedido12m=Math.max(0,Math.ceil(cm*12)-qt);
+      // Trigger order when coverage < 6 months: order full 12M supply (don't subtract current stock)
+      const pedido12m=cm>0&&cobertura<6?Math.ceil(cm*12):0;
       // Sem rotação: find last snapshot where stock decreased (= consumption event)
       let ultimoMovimento=null;
       for(let i=1;i<hist.length;i++){
@@ -2895,8 +2892,10 @@ function renderPecas(){
       <td class="num" style="color:var(--muted);font-size:11px">${r.preco>0?r.preco.toLocaleString('pt-BR',{minimumFractionDigits:2}):'—'}</td>
       <td class="num">${r.valorTotal>0?r.valorTotal.toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0}):'—'}</td>
       <td class="num">${r.consumoMedio>0?r.consumoMedio.toLocaleString('pt-BR',{minimumFractionDigits:1}):'<span style="color:var(--muted)">sem dados</span>'}</td>
-      <td class="num ${r.cobertura<3&&r.consumoMedio>0?'neg':r.cobertura<6&&r.consumoMedio>0?'y':''}">${r.consumoMedio>0?(r.cobertura>=999?'∞':r.cobertura.toLocaleString('pt-BR',{minimumFractionDigits:1})):'—'}</td>
-      <td class="num ${r.pedido12m>0?'neg':''}">${r.pedido12m>0?fmt(r.pedido12m):'—'}</td>
+      <td class="num ${r.consumoMedio>0&&r.cobertura<6?'neg':r.consumoMedio>0&&r.cobertura<12?'y':''}">${r.consumoMedio>0?(r.cobertura>=999?'∞':r.cobertura.toLocaleString('pt-BR',{minimumFractionDigits:1})):'—'}</td>
+      <td class="num ${r.pedido12m>0?'neg':''}" title="${r.pedido12m>0?'Cobertura actual: '+r.cobertura+'m < 6m — pedir 12M':''}">
+        ${r.pedido12m>0?'⚡ '+fmt(r.pedido12m):'—'}
+      </td>
       <td style="font-size:11px;color:var(--muted)">${r.nSnapshots>1?rotacaoBadge(r.semRotacaoMeses):'<span style="color:var(--muted);font-size:10px">aguardar histórico</span>'}</td>
       <td style="font-size:11px;color:var(--muted)">${r.ultimoSnap}${r.nSnapshots>1?' ('+r.nSnapshots+' snaps)':''}</td>
     `;
@@ -2924,9 +2923,13 @@ function gerarPedidoPecas(){
   if(!rows.length){toast('Nenhuma peça necessita reposição','error');return;}
   const data=rows.map(r=>({
     Codigo_SAP:r.material,Descricao:r.desc,Stock_Actual:r.qt,
-    Consumo_Medio_Mes:r.consumoMedio,Cobertura_Actual_Meses:r.cobertura,
-    Qtd_Pedido_12M:r.pedido12m,Preco_Un:r.preco,
-    Valor_Pedido:r.pedido12m*r.preco
+    Consumo_Medio_Mes:r.consumoMedio,
+    Cobertura_Actual_Meses:r.cobertura>=999?'Sem consumo':r.cobertura,
+    Cobertura_Trigger:'< 6 meses',
+    Qtd_Pedido_12M:r.pedido12m,
+    Preco_Un:r.preco,
+    Valor_Pedido:r.pedido12m*r.preco,
+    Nota:'Pedido = 12M consumo (stock físico actual não deduzido — lead time longo)'
   }));
   const totalValor=data.reduce((s,r)=>s+r.Valor_Pedido,0);
   data.push({Codigo_SAP:'TOTAL',Descricao:'',Stock_Actual:'',Consumo_Medio_Mes:'',Cobertura_Actual_Meses:'',Qtd_Pedido_12M:'',Preco_Un:'',Valor_Pedido:totalValor});
