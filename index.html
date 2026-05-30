@@ -2350,7 +2350,7 @@ function _renderOccView(){
         }
         if(subutil)totalSubutil++;
       }
-      loteDetail.push({lote:l.lote,qt:l.qt,posMinima,posReais:l.nEnderecos,posExcesso,pct,faltam,subutil,consolidacao,qtDC:l.qtDC||0});
+      loteDetail.push({lote:l.lote,qt:l.qt,posMinima,posReais:l.nEnderecos,posExcesso,pct,faltam,subutil,consolidacao,qtDC:l.qtDC||0,enderecos:l.enderecos||[]});
     });
     const poupanca=totalConsolidavel;const posOtimizadas=posReal-poupanca;
     return{ean,desc:v.desc,qt:v.qt,param,posReal,posOtimizadas,poupanca,underutil:totalSubutil>0||totalConsolidavel>0,loteDetail,totalSubutil,totalConsolidavel,nLotes:v.lotes.length,cat:param?.cat||'',subcat:param?.subcat||''};
