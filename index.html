@@ -2527,7 +2527,7 @@ function exportOccXlsx(){
       rec='Produto sem lote — solicitar à Unilog unificar posições';
     } else if(poupanca>0){
       const consolLines=loteDetail.filter(l=>l.posExcesso>0).map(l=>{
-        const isPK=e=>e&&e.includes('PK');
+        const isPK=e=>e&&e.end&&e.end.includes('PK');
         const es=[...l.enderecos].sort((a,b)=>a.qt-b.qt);
         const pairs=[];const used=new Set();
         for(let i=0;i<es.length;i++){if(used.has(i))continue;const d=es[i];for(let j=es.length-1;j>i;j--){if(used.has(j))continue;const r=es[j];if(d.qt+r.qt<=qpp&&!(isPK(d)&&!isPK(r))){pairs.push(`Mover ${d.qt}un de ${d.end} → ${r.end}`);used.add(i);used.add(j);break;}}}
