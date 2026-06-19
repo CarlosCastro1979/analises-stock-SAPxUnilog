@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619234500 -->
+<!DOCTYPE html><!-- v20260619210000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -174,8 +174,8 @@ select.cad-inp{cursor:pointer;}
 /* RESIZABLE COLUMNS */
 .tw2 table{table-layout:fixed;}
 .tw2 th{position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.tw2 th .resizer{position:absolute;right:0;top:0;width:5px;height:100%;cursor:col-resize;user-select:none;background:transparent;}
-.tw2 th .resizer:hover,.tw2 th .resizer.dragging{background:var(--red);}
+.tw2 th .resizer{position:absolute;right:-3px;top:0;width:7px;height:100%;cursor:col-resize;user-select:none;background:transparent;z-index:2;touch-action:none;}
+.tw2 th .resizer:hover,.tw2 th .resizer.dragging{background:var(--red);opacity:.55;}
 .tw2 td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 /* INNER TABS */
@@ -375,7 +375,7 @@ select.cad-inp{cursor:pointer;}
       </div>
     </div>
     <div class="kr" id="eanKpis"></div>
-    <div class="tw2"><table>
+    <div class="tw2"><table id="eanTable">
       <thead><tr>
         <th onclick="doSort('ean','cat')">Categoria</th>
         <th onclick="doSort('ean','subcat')">Subcategoria</th>
@@ -422,7 +422,7 @@ select.cad-inp{cursor:pointer;}
       <input class="inp" type="number" id="suspMinQt" placeholder="Qt mínima" style="width:100px" min="1" oninput="renderSusp()">
     </div>
     <div class="kr" id="suspKpis"></div>
-    <div class="tw2"><table>
+    <div class="tw2"><table id="suspTable">
       <thead><tr>
         <th onclick="doSort('susp','cat')">Categoria</th>
         <th onclick="doSort('susp','sapCode')">Cód. SAP</th>
@@ -454,7 +454,7 @@ select.cad-inp{cursor:pointer;}
       <select class="inp" id="suClasse" onchange="renderSoUnilog()"><option value="">Todas as classes</option></select>
     </div>
     <div class="kr" id="suKpis"></div>
-    <div class="tw2"><table>
+    <div class="tw2"><table id="suTable">
       <thead><tr>
         <th onclick="doSort('su','classe')">Classe / Depósito</th>
         <th onclick="doSort('su','sapCode')">Cód. SAP</th>
@@ -484,7 +484,7 @@ select.cad-inp{cursor:pointer;}
       <input class="inp is" id="posSrch" placeholder="Endereço, EAN, código SAP ou descrição…" oninput="renderPosClasse()">
     </div>
     <div class="kr" id="posKpis"></div>
-    <div class="tw2"><table>
+    <div class="tw2"><table id="posTable">
       <thead><tr>
         <th onclick="doSort('poscl','depLabel')">Depósito</th>
         <th onclick="doSort('poscl','endereco')">Endereço</th>
@@ -511,10 +511,10 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bg bs" onclick="exportVencForaDepXlsx()">⬇ Excel</button>
     </div>
     <p id="vencDescWms" style="font-size:12px;color:var(--text2);margin-bottom:6px;">
-      <strong>Unilog (WMS):</strong> produtos com EAN, lote, quantidade e posição, <strong>validade expirada</strong>, fora da classe 104 (dep. vencidos). Equipamento profissional excluído.
+      <strong>Unilog (WMS):</strong> produtos com EAN, lote, quantidade e posição, <strong>validade expirada</strong>, fora da classe 104 (dep. vencidos). Equipamento profissional e máquinas domésticas excluídos.
     </p>
     <p id="vencDescSap" style="font-size:12px;color:var(--text2);margin-bottom:6px;display:none">
-      <strong>SAP:</strong> produtos com validade expirada fora do dep. vencidos (<span id="vencSapDepLbl">0009</span>). Equipamento profissional excluído.
+      <strong>SAP:</strong> produtos com validade expirada fora do dep. vencidos (<span id="vencSapDepLbl">0009</span>). Equipamento profissional e máquinas domésticas excluídos.
     </p>
     <p id="vencForaDepStats" style="font-size:11px;color:var(--muted);margin-bottom:14px;display:none"></p>
     <div class="dp" id="vencDepPills"></div>
@@ -523,7 +523,7 @@ select.cad-inp{cursor:pointer;}
       <div class="ms-wrap" id="ms-vencCat" data-placeholder="Categorias" data-onchange="renderVencidoForaDep"><div class="ms-btn" onclick="msTogOpen('vencCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('vencCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('vencCat')">Todas</button><button onclick="msClrAll('vencCat')">Limpar</button></div><div class="ms-list"></div></div></div>
     </div>
     <div class="kr" id="vencKpis"></div>
-    <div class="tw2"><table>
+    <div class="tw2"><table id="vencTable">
       <thead><tr>
         <th onclick="vencDoSort('sapCode')">Cód. SAP</th>
         <th onclick="vencDoSort('EAN_norm')">EAN</th>
@@ -3140,7 +3140,7 @@ function exportReconXlsx(){
   const depLabel=DEPOT_MAP[activeDepot]?.label||activeDepot;
   const classSuffix=activeReconClass?`_cl${activeReconClass}`:'';
   const precoMap=buildSapPrecoMap();
-  const data=rows.map(r=>{const estado=r.qt_sap===0&&r.qt_uni>0?"Só Unilog":r.qt_uni===0&&r.qt_sap>0?"Só SAP":r.diff===0?"OK":"Divergência";return{Deposito:depLabel,Classe:activeReconClass||(r.uni_classes||[]).join(", ")||"",Categoria:r.cat||"",Subcategoria:r.subcat||"",Cod_SAP:getSapCode(r.EAN_norm),EAN:r.EAN_norm,Descricao:r.desc,Lote:r.Lote_norm,Validade:r.validade||"",SAP:r.qt_sap,Unilog:r.qt_uni,Diferenca:r.diff,Preco_SAP:precoMap[r.EAN_norm]||0,Valor_Dif_Liquido:r.diff*(precoMap[r.EAN_norm]||0),Estado:estado,Localizacao_Unilog:(r.uni_enderecos||[]).join(", ")};});
+  const data=rows.map(r=>{const estado=r.qt_sap===0&&r.qt_uni>0?"Só Unilog":r.qt_uni===0&&r.qt_sap>0?"Só SAP":r.diff===0?"OK":"Divergência";const exclValor=isEquipProfissional(r.EAN_norm,activeDepot);const preco=exclValor?0:(precoMap[r.EAN_norm]||0);return{Deposito:depLabel,Classe:activeReconClass||(r.uni_classes||[]).join(", ")||"",Categoria:r.cat||"",Subcategoria:r.subcat||"",Cod_SAP:getSapCode(r.EAN_norm),EAN:r.EAN_norm,Descricao:r.desc,Lote:r.Lote_norm,Validade:r.validade||"",SAP:r.qt_sap,Unilog:r.qt_uni,Diferenca:r.diff,Preco_SAP:exclValor?'':preco,Valor_Dif_Liquido:exclValor?'':r.diff*preco,Estado:estado,Localizacao_Unilog:(r.uni_enderecos||[]).join(", ")};});
   if(!data.length){toast("Sem dados","error");return;}
   const ws=XLSX.utils.json_to_sheet(data);
   ws["!cols"]=[{wch:20},{wch:16},{wch:14},{wch:14},{wch:32},{wch:14},{wch:12},{wch:8},{wch:8},{wch:10},{wch:14},{wch:30}];
