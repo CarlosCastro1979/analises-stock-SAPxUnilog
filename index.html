@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619450000 -->
+<!DOCTYPE html><!-- v20260619160000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1264,7 +1264,7 @@ function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok'
 
 // ── FILES ──
 function loadSap(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
-function loadUni(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{uniData=normUni(rows);document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
+function loadUni(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{uniData=normUni(rows);logUniClasseCounts('loadUni');document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
 function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast('Erro: '+err.message,'error');}};r.readAsArrayBuffer(file);}
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
 
@@ -1288,7 +1288,39 @@ function normSap(rows){
     })
     .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito)&&r.EAN_norm);
 }
+const UNI_CLASSE_COLS=['Classe','Class','CLASSE','Classe ','Class '];
 const UNI_VALIDADE_COLS=['Validade Lote','Validade Lote.','Validade Lote ','Data Validade','Validade'];
+function pickUniClasseField(r){
+  for(const c of UNI_CLASSE_COLS){
+    const v=r[c];
+    if(v===null||v===undefined)continue;
+    const s=String(v).trim();
+    if(s&&s!=='—')return s;
+  }
+  return '';
+}
+function normUniClasse(raw){
+  const s=String(raw??'').trim();
+  if(!s||EXCL.includes(s))return null;
+  return s.toUpperCase();
+}
+function refreshUniClasseNorm(){
+  if(!uniData?.length)return;
+  uniData=uniData.map(r=>{const classe=normUniClasse(r.classe);return classe?{...r,classe}:null;}).filter(Boolean);
+}
+function logUniClasseCounts(label){
+  if(!uniData?.length){console.log(`[${label}] sem dados Unilog`);return;}
+  const counts={};
+  uniData.forEach(r=>{counts[r.classe]=(counts[r.classe]||0)+1;});
+  console.log(`[${label}] Unilog linhas por classe:`,counts,'total:',uniData.length,'FI:',counts.FI||0);
+  for(const dk of DKS){
+    const classes=DEPOT_MAP[dk]?.classes||[];
+    if(!classes.includes('FI'))continue;
+    const n=uniData.filter(r=>classes.includes(r.classe)).length;
+    console.log(`[${label}] depot ${dk} (${DEPOT_MAP[dk].label}):`,n,'linhas WMS');
+  }
+  if(!(counts.FI>0))console.warn(`[${label}] AVISO: 0 linhas classe FI — re-carregar ficheiro Unilog e Processar (cache antigo pode ter sido gerado com FI em EXCL)`);
+}
 function normValidadeField(v){
   if(v===null||v===undefined||v==='')return'';
   if(v instanceof Date&&!isNaN(v.getTime())){
@@ -1320,7 +1352,16 @@ function pickUniValidadeField(r){
   return candidates[0]||'';
 }
 function normUni(rows){
-  return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:pickUniValidadeField(r),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()}));
+  const counts={};
+  const out=[];
+  for(const r of rows){
+    const classe=normUniClasse(pickUniClasseField(r));
+    if(!classe)continue;
+    out.push({classe,EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:pickUniValidadeField(r),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()});
+    counts[classe]=(counts[classe]||0)+1;
+  }
+  console.log('[normUni] linhas por classe:',counts,'total:',out.length,'FI:',counts.FI||0);
+  return out;
 }
 function getVencidosDepotKey(){return company==='QB'?'99':'9';}
 function getMuimCat(){const muimConf=Object.values(DEPOT_MAP).find(d=>d.catOnly);return muimConf?.catOnly||null;}
@@ -2485,7 +2526,10 @@ async function processAll(){
   company=document.getElementById('coSel').value;
   document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
   await loadOccParams();
+  logUniClasseCounts('processAll (antes build)');
   buildRecon();buildSusp();buildSoUnilog();buildPosClasse();buildVencidoForaDep();checkDuplicadosAlert();await autoSeedOcc();await processPecas();renderUpKpis();updateChip();
+  logUniClasseCounts('processAll (após build)');
+  console.log('[processAll] recon depot 44:',(reconData['44']||[]).length,'linhas · com stock WMS:',(reconData['44']||[]).filter(r=>r.qt_uni>0).length,'· FI em uni_classes:',(reconData['44']||[]).filter(r=>(r.uni_classes||[]).includes('FI')).length);
   const procAt=new Date().toISOString();
   try{
     const payload={id:company,company,uploaded_at:procAt,sap_rows:sapData.length,unilog_rows:uniData.length,sap_data:JSON.stringify(sapData),unilog_data:JSON.stringify(uniData),recon_summary:JSON.stringify(buildSummary())};
@@ -2706,10 +2750,12 @@ async function loadFromDB(silent=false){
     company=data.company;DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;DKS=Object.keys(DEPOT_MAP);
     sapData=JSON.parse(data.sap_data).filter(r=>DKS.includes(r.deposito)||r.deposito==='11');
     uniData=JSON.parse(data.unilog_data);
+    refreshUniClasseNorm();
     invalidateSapMaps();
     // Load occParams first so MUIM category filtering works in buildRecon
     await loadOccParams();
     buildRecon();buildSusp();buildSoUnilog();buildPosClasse();buildVencidoForaDep();checkDuplicadosAlert();await processPecas();await loadPecasData();renderUpKpis();updateChip();
+    logUniClasseCounts('loadFromDB');
     // Re-render active page if it needs data
     const activePage=document.querySelector('.page.active');
     if(activePage){
