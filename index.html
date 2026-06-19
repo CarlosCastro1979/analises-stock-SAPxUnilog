@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619240000 -->
+<!DOCTYPE html><!-- v20260619260000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -548,11 +548,11 @@ select.cad-inp{cursor:pointer;}
   <div id="alert-semvalidade" style="display:none">
   <div class="card">
     <div class="ch">
-      <div class="ct">Produtos sem validade (validade 00.0000)</div>
+      <div class="ct">Produtos sem validade (café)</div>
       <button class="btn bg bs" onclick="exportSemValidadeXlsx()">⬇ Excel</button>
     </div>
     <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
-      Cafés (grão, moído, cápsulas) no Unilog com validade sentinel explícita <strong>00.0000</strong> (ou equivalente: 0, 00/00/0000). Posições com validade vazia ou data real noutra linha do mesmo EAN+lote são excluídas.
+      Cafés (grão, moído, cápsulas) no Unilog cujo combo EAN+lote não tem validade real — validade <strong>vazia</strong> ou sentinel (<strong>00.0000</strong>, <strong>00.00.0000</strong>, 0, 00/00/0000). Excluídos se qualquer linha do combo tiver data real (Validade Lote ou Validade).
     </p>
     <div class="tb">
       <input class="inp is" id="semValSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderSemValidade()">
@@ -1424,8 +1424,9 @@ function isExplicitValidadeSentinel(v){
   if(typeof v==='number')return v===0;
   const s=String(v).trim();
   if(!s||s==='—'||s==='0000-00-00')return false;
-  const sl=s.toLowerCase();
-  return sl==='0'||sl==='00.0000'||sl==='00.00.0000'||sl==='00/00/0000'||sl==='00/00/00'||sl==='00-00-0000'||sl==='00-00-00';
+  const sl=s.toLowerCase().replace(/\s/g,'');
+  if(sl==='0'||sl==='00.0000'||sl==='00.00.0000'||sl==='00/00/0000'||sl==='00/00/00'||sl==='00-00-0000'||sl==='00-00-00')return true;
+  return/^(0+\.){2}0+$/.test(sl)||/^0+\/0+\/0+$/.test(sl)||/^0+-0+-0+$/.test(sl);
 }
 function isValidadeSentinel(v){
   if(v===null||v===undefined)return true;
@@ -1448,6 +1449,31 @@ function uniRowExplicitSentinel(r){
     if(isExplicitValidadeSentinel(v))return displayExplicitSentinel(v);
   }
   return null;
+}
+function uniRowAllValidadeEmpty(r){
+  for(const f of['validadeLote','validadeHeader','validade']){
+    const v=r[f];
+    if(v!==null&&v!==undefined&&String(v).trim()!=='')return false;
+  }
+  return true;
+}
+function semValRowHasRealValidade(r){
+  for(const f of['validadeLote','validadeHeader']){
+    const v=r[f];
+    if(v===null||v===undefined||String(v).trim()==='')continue;
+    if(isExplicitValidadeSentinel(v))continue;
+    if(parseValidadeDate(v))return true;
+  }
+  return false;
+}
+function semValRowLoteSentinel(r){
+  const v=r.validadeLote;
+  if(v===null||v===undefined||String(v).trim()==='')return null;
+  return isExplicitValidadeSentinel(v)?displayExplicitSentinel(v):null;
+}
+function semValRowLoteEmpty(r){
+  const v=r.validadeLote;
+  return v===null||v===undefined||String(v).trim()==='';
 }
 function isValidadeIgnorada(validadeStr,ean,desc,cat){
   if(isMaquinaDomestica(ean,desc))return true;
@@ -1488,12 +1514,15 @@ function parseValidadeDate(v){
     }
   }
   const p=s.split('/');
-  if(p.length>=3){const yr=parseInt(String(p[2]).trim(),10);const d=new Date(yr,parseInt(p[1],10)-1,parseInt(p[0],10));if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}}
+  if(p.length>=3){const yr=parseInt(String(p[2]).trim(),10),mo=parseInt(p[1],10),dd=parseInt(p[0],10);if(yr>=1990&&yr<=2100&&mo>=1&&mo<=12&&dd>=1&&dd<=31){const d=new Date(yr,mo-1,dd);if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}}}
   const m=s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)||s.match(/^(\d{2})-(\d{2})-(\d{4})$/)||s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if(m){
     try{
-      const d=m[1].length===4?new Date(parseInt(m[1],10),parseInt(m[2],10)-1,parseInt(m[3],10)):new Date(parseInt(m[3],10),parseInt(m[2],10)-1,parseInt(m[1],10));
-      if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}
+      const yr=m[1].length===4?parseInt(m[1],10):parseInt(m[3],10),mo=parseInt(m[2],10),dd=m[1].length===4?parseInt(m[3],10):parseInt(m[1],10);
+      if(yr>=1990&&yr<=2100&&mo>=1&&mo<=12&&dd>=1&&dd<=31){
+        const d=m[1].length===4?new Date(yr,mo-1,dd):new Date(yr,mo-1,dd);
+        if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}
+      }
     }catch{}
   }
   if(typeof XLSX!=='undefined'&&XLSX.SSF){
@@ -1778,8 +1807,12 @@ function calcValorGapByEan({catFilter=null}={}){
 // ── AUTO CATEGORY ──
 function autoCat(desc){
   if(!desc)return{cat:'',subcat:''};const d=desc.toUpperCase();
-  if(d.includes('CAP')){const s=d.includes('100CAP')||d.includes('100 CAP')?'Caps 100':d.includes('40CAP')||d.includes('40 CAP')||d.includes('XL40')?'Caps 40':'Caps 10';return{cat:'Café em Cápsulas',subcat:s};}
-  if(/\bGR\b/.test(d)){return{cat:'Café em Grão',subcat:(d.includes('KG')||d.includes(' KG'))?'1 Kg':'500g'};}
+  if(/\bDELTA\s*Q\b/.test(d)||/\bDELTAQ\b/.test(d)){const s=d.includes('100CAP')||d.includes('100 CAP')?'Caps 100':d.includes('40CAP')||d.includes('40 CAP')||d.includes('XL40')?'Caps 40':'Caps 10';return{cat:'Café em Cápsulas',subcat:s};}
+  if(/\d+\s*CAP\b|\bCAP\s*\d+|COFFEE\s+\d+\s*CAP|\bCAPSULAS\b|\bCÁPSULAS\b|\bCAPS\b/.test(d)){const s=d.includes('100CAP')||d.includes('100 CAP')?'Caps 100':d.includes('40CAP')||d.includes('40 CAP')||d.includes('XL40')?'Caps 40':'Caps 10';return{cat:'Café em Cápsulas',subcat:s};}
+  if(/\bBELLISSIMO\b/.test(d))return{cat:'Café em Grão',subcat:(d.includes('KG')||d.includes(' KG'))?'1 Kg':'500g'};
+  if(/\bGR\s+KG\b|\bCOFFEE\s+GR\b|\bGR\b.*\bCOFFEE\b|\bCOFFEE\b.*\bGR\b/.test(d))return{cat:'Café em Grão',subcat:(d.includes('KG')||d.includes(' KG'))?'1 Kg':'500g'};
+  if(/\bGRAO\b|\bGRÃO\b/.test(d))return{cat:'Café em Grão',subcat:(d.includes('KG')||d.includes(' KG'))?'1 Kg':'500g'};
+  if(/\bMOIDO\b/.test(d)||/\bMOÍDO\b/.test(d))return{cat:'Café Moído',subcat:''};
   if(d.startsWith('VRA')||d.includes('CATRAIO'))return{cat:'Vinho',subcat:''};
   if(d.includes('MINI MILKQOOL'))return{cat:'Máquinas Domésticas',subcat:'Mini Milkqool'};
   if(d.includes('MILKQOOL')&&d.includes('EVOLUTION'))return{cat:'Máquinas Domésticas',subcat:'Milkqool Evolution'};
@@ -2578,7 +2611,8 @@ function exportVencForaDepXlsx(){
   XLSX.writeFile(wb,`vencidos_fora_dep_${isSap?'sap':'wms'}_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
-// ── PRODUTOS SEM VALIDADE (CAFÉ 00.0000) ──
+// ── PRODUTOS SEM VALIDADE (CAFÉ — Validade Lote sentinel ou vazio) ──
+const SEM_VAL_REF_LOTES=[['7803174','6280216'],['7805110','6281142'],['7801547','628262'],['7803428','6285408'],['7805020','6283729']];
 function buildSemValidade(){
   semValidadeData=[];
   semValidadeStats=null;
@@ -2586,9 +2620,11 @@ function buildSemValidade(){
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
   const groups=new Map();
-  let explicitSentinelRows=0;
+  let cafeRows=0;
+  let loteSentinelRows=0;
+  let loteEmptyRows=0;
   let excludedByReal=0;
-  let excludedNoExplicit=0;
+  let excludedByLote=0;
   uniData.forEach(r=>{
     if(!r.EAN_norm||r.qt<=0)return;
     const desc=r.produto||dm[r.EAN_norm]||'';
@@ -2596,37 +2632,45 @@ function buildSemValidade(){
     const cat=param?.cat||autoCat(desc).cat||'';
     const subcat=param?.subcat||autoCat(desc).subcat||'';
     if(!isCafeProduct(r.EAN_norm,desc,cat,subcat))return;
+    cafeRows++;
     const key=`${r.EAN_norm}\0${r.Lote_norm||''}`;
     let g=groups.get(key);
     if(!g){
-      g={EAN_norm:r.EAN_norm,produto:desc,Lote_norm:r.Lote_norm||'',qt:0,cat,subcat,sapCode:getSapCode(r.EAN_norm),hasExplicitSentinel:false,hasReal:false,sentinelValidade:''};
+      g={EAN_norm:r.EAN_norm,produto:desc,Lote_norm:r.Lote_norm||'',qt:0,cat,subcat,sapCode:getSapCode(r.EAN_norm),hasReal:false,hasLoteSentinel:false,allLoteEmpty:true,loteValidade:''};
       groups.set(key,g);
     }
     g.qt+=r.qt;
-    if(uniRowHasRealValidade(r))g.hasReal=true;
-    const sent=uniRowExplicitSentinel(r);
-    if(sent){
-      g.hasExplicitSentinel=true;
-      explicitSentinelRows++;
-      if(!g.sentinelValidade)g.sentinelValidade=sent;
+    if(semValRowHasRealValidade(r))g.hasReal=true;
+    if(!semValRowLoteEmpty(r))g.allLoteEmpty=false;
+    const loteSent=semValRowLoteSentinel(r);
+    if(loteSent){
+      g.hasLoteSentinel=true;
+      loteSentinelRows++;
+      if(!g.loteValidade)g.loteValidade=loteSent;
     }
+    if(semValRowLoteEmpty(r))loteEmptyRows++;
   });
   semValidadeData=[...groups.values()].filter(g=>{
-    if(g.hasReal){if(g.hasExplicitSentinel)excludedByReal++;return false;}
-    if(!g.hasExplicitSentinel){excludedNoExplicit++;return false;}
+    if(g.hasReal){excludedByReal++;return false;}
+    if(!g.hasLoteSentinel&&!g.allLoteEmpty){excludedByLote++;return false;}
     return true;
   }).map(g=>({
     EAN_norm:g.EAN_norm,
     produto:g.produto,
     Lote_norm:g.Lote_norm,
     qt:g.qt,
-    validade:g.sentinelValidade,
+    validade:g.loteValidade||(g.allLoteEmpty?'vazio':''),
     cat:g.cat,
     subcat:g.subcat,
     sapCode:g.sapCode
   }));
-  semValidadeStats={combos:semValidadeData.length,explicitSentinelRows,excludedByReal,excludedNoExplicit};
+  semValidadeStats={combos:semValidadeData.length,cafeRows,cafeGroups:groups.size,loteSentinelRows,loteEmptyRows,excludedByReal,excludedByLote};
   semValidadeData.sort((a,b)=>String(a.produto||'').localeCompare(String(b.produto||''))||a.EAN_norm.localeCompare(b.EAN_norm)||String(a.Lote_norm||'').localeCompare(String(b.Lote_norm||'')));
+  const refCheck=SEM_VAL_REF_LOTES.map(([ean,lote])=>{
+    const hit=semValidadeData.find(r=>r.EAN_norm===ean&&String(r.Lote_norm)===String(lote));
+    return{ean,lote,found:!!hit,validade:hit?.validade||null};
+  });
+  console.log('[buildSemValidade]',{combos:semValidadeData.length,cafeRows,cafeGroups:groups.size,excludedByReal,excludedByLote,refCheck,first10:semValidadeData.slice(0,10).map(r=>({ean:r.EAN_norm,lote:r.Lote_norm,validade:r.validade,produto:r.produto}))});
   const badge=document.getElementById('semValidadeBadge');
   if(badge){badge.textContent=semValidadeData.length;badge.style.display=semValidadeData.length>0?'':'none';}
   updateAlertBadge();
@@ -2655,13 +2699,13 @@ function _renderSemValidade(){
   const totalQt=rows.reduce((s,r)=>s+r.qt,0);
   const totalEans=new Set(rows.map(r=>r.EAN_norm)).size;
   const st=semValidadeStats||{};
-  const exclReal=st.excludedByReal?` · ${fmt(st.excludedByReal)} excl. (validade real)`:'';
-  const exclEmpty=st.excludedNoExplicit?` · ${fmt(st.excludedNoExplicit)} excl. (sem 00.0000)`:'';
+  const exclReal=st.excludedByReal?` · ${fmt(st.excludedByReal)} excl. (validade real noutra linha)`:'';
+  const exclLote=st.excludedByLote?` · ${fmt(st.excludedByLote)} excl. (Validade Lote inválida)`:'';
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows);
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows);
   document.getElementById('semValKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.combos??rows.length)} combos listados${exclReal}${exclEmpty}</div></div>
-    <div class="kpi"><div class="kl">Linhas 00.0000</div><div class="kv b">${fmtKvNum(st.explicitSentinelRows||0)}</div><div class="ks">posições WMS com sentinel explícito</div></div>
+    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.combos??rows.length)} combos sem validade (vazio ou 00.0000)${exclReal}${exclLote}</div></div>
+    <div class="kpi"><div class="kl">Validade Lote sentinel</div><div class="kv b">${fmtKvNum(st.loteSentinelRows||0)}</div><div class="ks">${fmt(st.loteEmptyRows||0)} linhas Validade Lote vazia</div></div>
     <div class="kpi"><div class="kl">EANs únicos</div><div class="kv b">${fmtKvNum(totalEans)}</div></div>
     <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmtKvNum(totalQt)}</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
