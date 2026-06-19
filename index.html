@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619320000 -->
+<!DOCTYPE html><!-- v20260619450000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1203,7 +1203,7 @@ let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','SI','Total',''];
 
-let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={};
+let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={};
 let showAll=false,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
@@ -1288,16 +1288,39 @@ function normSap(rows){
     })
     .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito)&&r.EAN_norm);
 }
+const UNI_VALIDADE_COLS=['Validade Lote','Validade Lote.','Validade Lote ','Data Validade','Validade'];
 function normValidadeField(v){
   if(v===null||v===undefined||v==='')return'';
   if(v instanceof Date&&!isNaN(v.getTime())){
-    return String(v.getDate()).padStart(2,'0')+'/'+String(v.getMonth()+1).padStart(2,'0')+'/'+v.getFullYear();
+    return String(v.getDate()).padStart(2,'0')+'.'+String(v.getMonth()+1).padStart(2,'0')+'.'+v.getFullYear();
+  }
+  if(typeof v==='number'&&!isNaN(v)){
+    if(v===0)return'';
+    if(typeof XLSX!=='undefined'&&XLSX.SSF&&v>=1&&v<1000000){
+      const dc=XLSX.SSF.parse_date_code(v);
+      if(dc&&dc.y>=1990&&dc.y<=2100){
+        return String(dc.d).padStart(2,'0')+'.'+String(dc.m).padStart(2,'0')+'.'+dc.y;
+      }
+    }
+    return String(v);
   }
   const s=String(v).trim();
   return(s==='—'||s==='0000-00-00')?'':s;
 }
+function pickUniValidadeField(r){
+  const candidates=[];
+  for(const c of UNI_VALIDADE_COLS){
+    const raw=r[c];
+    if(raw===null||raw===undefined||raw==='')continue;
+    candidates.push(normValidadeField(raw));
+  }
+  for(const n of candidates){
+    if(n&&parseValidadeDate(n))return n;
+  }
+  return candidates[0]||'';
+}
 function normUni(rows){
-  return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:normValidadeField(r['Validade']||r['Validade Lote']||r['Validade Lote.']||r['Validade Lote ']||r['Data Validade']||''),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()}));
+  return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:pickUniValidadeField(r),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()}));
 }
 function getVencidosDepotKey(){return company==='QB'?'99':'9';}
 function getMuimCat(){const muimConf=Object.values(DEPOT_MAP).find(d=>d.catOnly);return muimConf?.catOnly||null;}
@@ -1325,11 +1348,11 @@ function isVinhoProduct(ean,desc,cat){
 }
 function isValidadeSentinel(v){
   if(v===null||v===undefined)return true;
+  if(typeof v==='number')return v===0;
   const s=String(v).trim();
   if(!s||s==='—'||s==='0000-00-00')return true;
-  if(s==='0'||s==='00.0000'||s==='00.00.0000'||s==='00/00/0000'||s==='00/00/00')return true;
-  const digits=s.replace(/[^\d]/g,'');
-  if(!digits||/^0+$/.test(digits))return true;
+  const sl=s.toLowerCase();
+  if(sl==='0'||sl==='00.0000'||sl==='00.00.0000'||sl==='00/00/0000'||sl==='00/00/00'||sl==='00-00-0000'||sl==='00-00-00')return true;
   return false;
 }
 function isValidadeIgnorada(validadeStr,ean,desc,cat){
@@ -1352,14 +1375,34 @@ function isCafeProduct(ean,desc,cat,subcat){
   return /cafe|moido|grao|capsula/.test(t);
 }
 function parseValidadeDate(v){
-  if(isValidadeSentinel(v))return null;
   if(v===null||v===undefined||v===''||v==='—'||v==='0000-00-00')return null;
   if(v instanceof Date&&!isNaN(v.getTime())){const d=new Date(v.getFullYear(),v.getMonth(),v.getDate());d.setHours(0,0,0,0);return d;}
+  if(typeof v==='number'&&!isNaN(v)){
+    if(v===0||isValidadeSentinel(v))return null;
+    if(typeof XLSX!=='undefined'&&XLSX.SSF&&v>=1&&v<1000000){
+      const dc=XLSX.SSF.parse_date_code(v);
+      if(dc&&dc.y>=1990&&dc.y<=2100){const d=new Date(dc.y,dc.m-1,dc.d);d.setHours(0,0,0,0);return d;}
+    }
+    return null;
+  }
+  if(isValidadeSentinel(v))return null;
   const s=String(v).trim();
+  const dotParts=s.split('.');
+  if(dotParts.length===3){
+    const dd=parseInt(dotParts[0],10),mo=parseInt(dotParts[1],10),yr=parseInt(dotParts[2],10);
+    if(yr>=1990&&yr<=2100&&mo>=1&&mo<=12&&dd>=1&&dd<=31){
+      const d=new Date(yr,mo-1,dd);if(!isNaN(d.getTime())&&d.getFullYear()===yr&&d.getMonth()===mo-1&&d.getDate()===dd){d.setHours(0,0,0,0);return d;}
+    }
+  }
   const p=s.split('/');
   if(p.length>=3){const yr=parseInt(String(p[2]).trim(),10);const d=new Date(yr,parseInt(p[1],10)-1,parseInt(p[0],10));if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}}
-  const m=s.match(/(\d{2})\.(\d{2})\.(\d{4})/)||s.match(/(\d{2})-(\d{2})-(\d{4})/)||s.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if(m){try{const d=s.includes('.')||s.includes('-')&&m[1].length===2?new Date(parseInt(m[3],10),parseInt(m[2],10)-1,parseInt(m[1],10)):new Date(parseInt(m[1],10),parseInt(m[2],10)-1,parseInt(m[3],10));if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}}catch{}}
+  const m=s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)||s.match(/^(\d{2})-(\d{2})-(\d{4})$/)||s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(m){
+    try{
+      const d=m[1].length===4?new Date(parseInt(m[1],10),parseInt(m[2],10)-1,parseInt(m[3],10)):new Date(parseInt(m[3],10),parseInt(m[2],10)-1,parseInt(m[1],10));
+      if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}
+    }catch{}
+  }
   if(typeof XLSX!=='undefined'&&XLSX.SSF){
     const serial=parseFloat(s.replace(',','.'));
     if(!isNaN(serial)&&serial>=1&&serial<1000000){
@@ -2312,35 +2355,48 @@ function exportVencForaDepXlsx(){
 // ── PRODUTOS SEM VALIDADE (CAFÉ 00.0000) ──
 function buildSemValidade(){
   semValidadeData=[];
+  semValidadeStats=null;
   if(!uniData)return;
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
-  const agg=new Map();
+  const groups=new Map();
+  let sentinelRows=0;
   uniData.forEach(r=>{
     if(!r.EAN_norm||r.qt<=0)return;
-    if(!isValidadeSentinel(r.validade))return;
     const desc=r.produto||dm[r.EAN_norm]||'';
     const param=occParams.find(p=>p.ean===r.EAN_norm);
     const cat=param?.cat||autoCat(desc).cat||'';
     const subcat=param?.subcat||autoCat(desc).subcat||'';
     if(!isCafeProduct(r.EAN_norm,desc,cat,subcat))return;
     const key=`${r.EAN_norm}\0${r.Lote_norm||''}`;
-    const ex=agg.get(key);
-    if(ex){ex.qt+=r.qt;}
-    else{
-      agg.set(key,{
-        EAN_norm:r.EAN_norm,
-        produto:desc,
-        Lote_norm:r.Lote_norm||'',
-        qt:r.qt,
-        validade:r.validade||'00.0000',
-        cat,
-        subcat,
-        sapCode:getSapCode(r.EAN_norm)
-      });
+    let g=groups.get(key);
+    if(!g){
+      g={EAN_norm:r.EAN_norm,produto:desc,Lote_norm:r.Lote_norm||'',qt:0,cat,subcat,sapCode:getSapCode(r.EAN_norm),hasSentinel:false,hasReal:false,sentinelValidade:''};
+      groups.set(key,g);
+    }
+    g.qt+=r.qt;
+    if(parseValidadeDate(r.validade))g.hasReal=true;
+    else if(isValidadeSentinel(r.validade)){
+      g.hasSentinel=true;
+      sentinelRows++;
+      if(!g.sentinelValidade)g.sentinelValidade=r.validade||'00.0000';
     }
   });
-  semValidadeData=[...agg.values()];
+  let excludedByReal=0;
+  semValidadeData=[...groups.values()].filter(g=>{
+    if(g.hasSentinel&&g.hasReal){excludedByReal++;return false;}
+    return g.hasSentinel&&!g.hasReal;
+  }).map(g=>({
+    EAN_norm:g.EAN_norm,
+    produto:g.produto,
+    Lote_norm:g.Lote_norm,
+    qt:g.qt,
+    validade:g.sentinelValidade||'00.0000',
+    cat:g.cat,
+    subcat:g.subcat,
+    sapCode:g.sapCode
+  }));
+  semValidadeStats={combos:semValidadeData.length,sentinelRows,excludedByReal};
   semValidadeData.sort((a,b)=>String(a.produto||'').localeCompare(String(b.produto||''))||a.EAN_norm.localeCompare(b.EAN_norm)||String(a.Lote_norm||'').localeCompare(String(b.Lote_norm||'')));
   const badge=document.getElementById('semValidadeBadge');
   if(badge){badge.textContent=semValidadeData.length;badge.style.display=semValidadeData.length>0?'':'none';}
@@ -2369,8 +2425,11 @@ function _renderSemValidade(){
   applySort('semval',rows);updateSortHeaders('semval');
   const totalQt=rows.reduce((s,r)=>s+r.qt,0);
   const totalEans=new Set(rows.map(r=>r.EAN_norm)).size;
+  const st=semValidadeStats||{};
+  const exclNote=st.excludedByReal?` · ${fmt(st.excludedByReal)} excl. (validade real noutra posição)`:'';
   document.getElementById('semValKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Linhas (EAN+lote)</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">validade 00.0000</div></div>
+    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">${fmt(st.combos??rows.length)} combos com validade 00.0000 detectada${exclNote}</div></div>
+    <div class="kpi"><div class="kl">Linhas sentinel</div><div class="kv b">${fmt(st.sentinelRows||0)}</div><div class="ks">posições WMS com validade vazia/00.0000</div></div>
     <div class="kpi"><div class="kl">EANs únicos</div><div class="kv b">${fmt(totalEans)}</div></div>
     <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
   `;
@@ -2621,7 +2680,7 @@ function switchCompany(){
   DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
   DKS=Object.keys(DEPOT_MAP);
   // Reset all data
-  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];vencForaDepStats=null;vencForaDepSapStats=null;
+  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;vencForaDepStats=null;vencForaDepSapStats=null;
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
   renderUpKpis();
