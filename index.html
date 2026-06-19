@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619230000 -->
+<!DOCTYPE html><!-- v20260619234500 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1332,7 +1332,7 @@ function kvLiqCls(v){if(!Number.isFinite(v))return '';return v>0?'y':v<0?'r':'';
 function fmtBrlLiq(v){if(v==null||!Number.isFinite(v))return '—';const s=Math.abs(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});return v>0?'+'+s:v<0?'-'+s:s;}
 function fmtValorDifCell(diff,preco){const p=Number(preco)||0;if(p<=0)return '—';return fmtBrlLiq(diff*p);}
 function fmtBrl(v){if(v==null||!Number.isFinite(v))return '—';return Math.abs(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:2,maximumFractionDigits:2});}
-function reconRowValor(r,precoMap){const p=(precoMap||buildSapPrecoMap())[r.EAN_norm]||0;return r.diff*p;}
+function reconRowValor(r,precoMap,dk){if(isEquipProfissional(r.EAN_norm,dk))return 0;const p=(precoMap||buildSapPrecoMap())[r.EAN_norm]||0;return r.diff*p;}
 function wmsLineValor(r){const qt=Number(r.qt)||0;if(qt<=0)return 0;const vlr=Number(r.vlr)||0;if(vlr>0)return qt*vlr;const vt=Number(r.vlrTotal)||0;return vt>0?vt:0;}
 function uniRowsForDepot(dk){
   const depConf=DEPOT_MAP[dk];
@@ -1363,12 +1363,13 @@ function calcReconTotals({catFilter=null,subcatFilter=null,depotFilter=null,diff
       if(catFilter?.size&&!catFilter.has(param?.cat||''))continue;
       if(subcatFilter?.size&&!subcatFilter.has(param?.subcat||''))continue;
       if(diffOnly&&r.diff===0)continue;
+      const exclValor=isEquipProfissional(r.EAN_norm,dk);
       const preco=precoMap[r.EAN_norm]||0;
       totalNetDiff+=r.diff;
-      totalValorLiq+=r.diff*preco;
+      if(!exclValor)totalValorLiq+=r.diff*preco;
       qtSap+=r.qt_sap;
       qtUni+=r.qt_uni;
-      valorSap+=r.qt_sap*preco;
+      if(!exclValor)valorSap+=r.qt_sap*preco;
       if(r.qt_sap>0)sapPairs.add(r.EAN_norm+'|'+r.Lote_norm);
       if(r.qt_uni>0){
         uniPairs.add(r.EAN_norm+'|'+r.Lote_norm);
@@ -1384,6 +1385,7 @@ function calcReconTotals({catFilter=null,subcatFilter=null,depotFilter=null,diff
         if(catFilter?.size&&!catFilter.has(param?.cat||''))continue;
         if(subcatFilter?.size&&!subcatFilter.has(param?.subcat||''))continue;
         if(wmsKeys&&!wmsKeys.has(ur.EAN_norm+'|'+ur.Lote_norm))continue;
+        if(isEquipProfissional(ur.EAN_norm,dk))continue;
         const lv=wmsLineValor(ur);
         if(lv!==0)temPrecoWms=true;
         valorUni+=lv;
@@ -1417,27 +1419,30 @@ function calcValorGapByEan({catFilter=null}={}){
         const param=occParams.find(p=>p.ean===ur.EAN_norm);
         if(catFilter?.size&&!catFilter.has(param?.cat||''))continue;
         const ean=ur.EAN_norm;
-        const lv=wmsLineValor(ur);
         const qt=Number(ur.qt)||0;
         if(!byEan[ean]){
           byEan[ean]={EAN_norm:ean,desc:ur.produto||dm[ean]||'',cat:param?.cat||'',subcat:param?.subcat||'',qtSap:0,qtUni:0,difQt:0};
         }
-        wmsValorByEan[ean]=(wmsValorByEan[ean]||0)+lv;
+        if(!isEquipProfissional(ur.EAN_norm,dk)){
+          const lv=wmsLineValor(ur);
+          wmsValorByEan[ean]=(wmsValorByEan[ean]||0)+lv;
+        }
         wmsQtByEan[ean]=(wmsQtByEan[ean]||0)+qt;
       }
     }
   }
   const rows=Object.values(byEan).map(r=>{
-    const precoSap=precoMap[r.EAN_norm]||0;
-    const valorSap=r.qtSap*precoSap;
-    const valorWms=wmsValorByEan[r.EAN_norm]||0;
-    const precoWms=r.qtUni>0&&valorWms>0?valorWms/r.qtUni:0;
-    const difValor=valorWms-valorSap;
-    const difValorRecon=r.difQt*precoSap;
-    return{...r,precoSap,precoWms,valorSap,valorWms,difValor,difValorRecon,sapCode:getSapCode(r.EAN_norm)};
+    const semValor=isEquipProfissional(r.EAN_norm,null);
+    const precoSap=semValor?0:(precoMap[r.EAN_norm]||0);
+    const valorSap=semValor?0:r.qtSap*precoSap;
+    const valorWms=semValor?0:(wmsValorByEan[r.EAN_norm]||0);
+    const precoWms=semValor?0:(r.qtUni>0&&valorWms>0?valorWms/r.qtUni:0);
+    const difValor=semValor?0:valorWms-valorSap;
+    const difValorRecon=semValor?0:r.difQt*precoSap;
+    return{...r,semValor,precoSap,precoWms,valorSap,valorWms,difValor,difValorRecon,sapCode:getSapCode(r.EAN_norm)};
   }).filter(r=>r.valorSap!==0||r.valorWms!==0||r.qtSap!==0||r.qtUni!==0);
   rows.sort((a,b)=>Math.abs(b.difValor)-Math.abs(a.difValor));
-  const gapTotal=rows.reduce((s,r)=>s+r.difValor,0);
+  const gapTotal=rows.reduce((s,r)=>s+(r.semValor?0:r.difValor),0);
   return{rows,gapTotal,precoMap};
 }
 
@@ -1742,7 +1747,7 @@ function renderAlertPage(){
 function updateAlertBadge(){
   const badge=document.getElementById('alertBadge');
   if(!badge)return;
-  const n=(suspData?.length||0)+(posClasseData?.length||0)+(vencidoForaDepData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
+  const n=(suspData?.length||0)+(posClasseData?.length||0)+(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
   badge.textContent=n;
   badge.style.display=n>0?'':'none';
 }
@@ -1903,7 +1908,33 @@ function exportPosClasseXlsx(){
 }
 
 // ── VENCIDOS FORA DEPÓSITO ──
+function vencSubTab(tab,el){
+  activeVencSubTab=tab;
+  document.querySelectorAll('#vencSubIts .it').forEach(t=>t.classList.remove('active'));
+  if(el)el.classList.add('active');
+  const descWms=document.getElementById('vencDescWms');
+  const descSap=document.getElementById('vencDescSap');
+  if(descWms)descWms.style.display=tab==='wms'?'':'none';
+  if(descSap)descSap.style.display=tab==='sap'?'':'none';
+  const depLbl=document.getElementById('vencSapDepLbl');
+  if(depLbl)depLbl.textContent=company==='QB'?'0099':'0009';
+  renderVencidoForaDep();
+}
+function vencSortKey(){return activeVencSubTab==='sap'?'vencforadepSap':'vencforadep';}
+function vencDoSort(col){doSort(vencSortKey(),col);}
 function buildVencidoForaDep(){
+  buildVencidoForaDepWms();
+  buildVencidoForaDepSap();
+  const total=(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0);
+  const badge=document.getElementById('vencForaDepBadge');
+  if(badge){badge.textContent=total;badge.style.display=total>0?'':'none';}
+  const wmsB=document.getElementById('vencWmsBadge');
+  if(wmsB){wmsB.textContent=vencidoForaDepData.length;wmsB.style.display=vencidoForaDepData.length>0?'':'none';}
+  const sapB=document.getElementById('vencSapBadge');
+  if(sapB){sapB.textContent=vencidoForaDepSapData.length;sapB.style.display=vencidoForaDepSapData.length>0?'':'none';}
+  updateAlertBadge();
+}
+function buildVencidoForaDepWms(){
   vencidoForaDepData=[];
   vencForaDepStats=null;
   if(!uniData)return;
@@ -1923,6 +1954,7 @@ function buildVencidoForaDep(){
     if(!end){stats.semEndereco++;return;}
     if(isDC(end)){stats.dc++;return;}
     if(!validadeDate||validadeDate>=today)return;
+    if(r.classe==='104'){stats.jaNoDepVencidos++;return;}
     const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
     if(!dk){stats.classeDesconhecida++;return;}
     if(dk===vencidosDk){stats.jaNoDepVencidos++;return;}
@@ -1930,6 +1962,7 @@ function buildVencidoForaDep(){
     const desc=r.produto||dm[r.EAN_norm]||'';
     if(isEquipProfissional(r.EAN_norm,dk)){stats.equipProf++;return;}
     stats.foraDepVencidos++;
+    const depLabel=DEPOT_MAP[dk]?.label.split('—')[1]?.trim()||dk;
     vencidoForaDepData.push({
       EAN_norm:r.EAN_norm,
       produto:desc,
@@ -1939,19 +1972,63 @@ function buildVencidoForaDep(){
       validadeDate,
       diasVencido:Math.floor((today-validadeDate)/(1000*86400)),
       dk,
-      depLabel:DEPOT_MAP[dk]?.label.split('—')[1]?.trim()||dk,
+      depLabel,
       classe:r.classe,
       endereco:end,
+      depClasseActual:`${depLabel} / Cl.${r.classe}`,
       cat:param?.cat||autoCat(desc).cat||'',
       sapCode:getSapCode(r.EAN_norm)
     });
   });
   vencForaDepStats=stats;
-  console.log('[vencForaDep]',stats,'alertas:',vencidoForaDepData.length);
+  console.log('[vencForaDep WMS]',stats,'alertas:',vencidoForaDepData.length);
   vencidoForaDepData.sort((a,b)=>b.diasVencido-a.diasVencido||a.EAN_norm.localeCompare(b.EAN_norm));
-  const badge=document.getElementById('vencForaDepBadge');
-  if(badge){badge.textContent=vencidoForaDepData.length;badge.style.display=vencidoForaDepData.length>0?'':'none';}
-  updateAlertBadge();
+}
+function buildVencidoForaDepSap(){
+  vencidoForaDepSapData=[];
+  vencForaDepSapStats=null;
+  if(!sapData)return;
+  const vencidosDk=getVencidosDepotKey();
+  const today=new Date();today.setHours(0,0,0,0);
+  const stats={analizadas:sapData.length,comValidade:0,vencidas:0,validadeNaoParseada:0,foraDepVencidos:0,jaNoDepVencidos:0,equipProf:0,semLote:0,semEan:0,qtZero:0,depDesconhecido:0};
+  sapData.forEach(r=>{
+    const validadeDate=parseValidadeDate(r.validade);
+    if(validadeDate)stats.comValidade++;
+    else if((r.validade||'').trim())stats.validadeNaoParseada++;
+    if(validadeDate&&validadeDate<today)stats.vencidas++;
+    if(!r.EAN_norm){stats.semEan++;return;}
+    if(!r.Lote_norm){stats.semLote++;return;}
+    if(r.qt<=0){stats.qtZero++;return;}
+    if(!validadeDate||validadeDate>=today)return;
+    const dk=String(r.deposito||'').trim();
+    if(!Object.keys(DEPOT_MAP).includes(dk)){stats.depDesconhecido++;return;}
+    if(dk===vencidosDk){stats.jaNoDepVencidos++;return;}
+    if(isEquipProfissional(r.EAN_norm,dk)){stats.equipProf++;return;}
+    const param=occParams.find(p=>p.ean===r.EAN_norm);
+    const desc=r.desc||'';
+    stats.foraDepVencidos++;
+    const depFull=DEPOT_MAP[dk]?.label||dk;
+    const depLabel=depFull.split('—')[1]?.trim()||dk;
+    vencidoForaDepSapData.push({
+      EAN_norm:r.EAN_norm,
+      produto:desc,
+      Lote_norm:r.Lote_norm,
+      qt:r.qt,
+      validade:r.validade||'',
+      validadeDate,
+      diasVencido:Math.floor((today-validadeDate)/(1000*86400)),
+      deposito:dk,
+      dk,
+      depLabel,
+      depClasseActual:depFull,
+      preco:r.preco||0,
+      cat:param?.cat||autoCat(desc).cat||'',
+      sapCode:r.material||getSapCode(r.EAN_norm)
+    });
+  });
+  vencForaDepSapStats=stats;
+  console.log('[vencForaDep SAP]',stats,'alertas:',vencidoForaDepSapData.length);
+  vencidoForaDepSapData.sort((a,b)=>b.diasVencido-a.diasVencido||a.EAN_norm.localeCompare(b.EAN_norm));
 }
 function renderVencDepPills(){
   const c=document.getElementById('vencDepPills');if(!c)return;
@@ -1969,6 +2046,10 @@ function renderVencDepPills(){
 let _renderVencForaDepBusy=false;
 function renderVencidoForaDep(){if(_renderVencForaDepBusy)return;_renderVencForaDepBusy=true;try{_renderVencidoForaDep();}finally{_renderVencForaDepBusy=false;}}
 function _renderVencidoForaDep(){
+  if(activeVencSubTab==='sap')_renderVencidoForaDepSap();
+  else _renderVencidoForaDepWms();
+}
+function _renderVencidoForaDepWms(){
   const body=document.getElementById('vencBody');
   const empty=document.getElementById('vencEmpty');
   const ok=document.getElementById('vencOk');
@@ -1984,7 +2065,7 @@ function _renderVencidoForaDep(){
   if(statsEl&&vencForaDepStats){
     const s=vencForaDepStats;
     let extra='';
-    if(s.jaNoDepVencidos)extra+=` · ${fmt(s.jaNoDepVencidos)} já no dep. vencidos (cl. 104)`;
+    if(s.jaNoDepVencidos)extra+=` · ${fmt(s.jaNoDepVencidos)} já na classe/dep. vencidos (cl. 104)`;
     if(s.equipProf)extra+=` · ${fmt(s.equipProf)} equip. profissional`;
     if(s.validadeNaoParseada)extra+=` · ${fmt(s.validadeNaoParseada)} validade não parseada`;
     statsEl.textContent=`Analisadas ${fmt(s.analizadas)} linhas Unilog · ${fmt(s.comValidade)} com validade parseada · ${fmt(s.vencidas)} vencidas · ${fmt(s.foraDepVencidos)} fora do dep. vencidos${extra}`;
@@ -2006,7 +2087,7 @@ function _renderVencidoForaDep(){
   const depKs=Object.keys(byDep).sort();
   const depHtml=depKs.slice(0,4).map(d=>`<span class="badge bwarn" style="margin-right:4px">${d}: ${byDep[d]}</span>`).join('')+(depKs.length>4?`<span style="font-size:10px;color:var(--muted)">+${depKs.length-4} dep.</span>`:'');
   document.getElementById('vencKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmt(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">Unilog (WMS)</div></div>
     <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmt(totalEans)}</div></div>
     <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
     <div class="kpi"><div class="kl">Por depósito actual</div><div class="ks" style="margin-top:6px;line-height:1.6">${depHtml||'—'}</div></div>
@@ -2022,24 +2103,88 @@ function _renderVencidoForaDep(){
       <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm}</span></td>
       <td class="num">${fmt(r.qt)}</td>
       <td><span class="badge berr">${r.validade||'—'}</span></td>
-      <td><span class="badge binfo">${r.depLabel}</span></td>
-      <td><span class="badge bgray">Cl.${r.classe}</span></td>
-      <td style="font-family:var(--mono);font-size:11px">${r.endereco}</td>
+      <td title="${esc(r.endereco)}"><span class="badge binfo">${r.depClasseActual}</span></td>
       <td class="num neg">${fmt(r.diasVencido)}</td>
     `;
     body.appendChild(tr);
   }
   if(!rows.length&&uniData)document.getElementById('vencOk').style.display='block';
 }
+function _renderVencidoForaDepSap(){
+  const body=document.getElementById('vencBody');
+  const empty=document.getElementById('vencEmpty');
+  const ok=document.getElementById('vencOk');
+  if(!sapData){
+    if(body)body.innerHTML='';
+    if(empty)empty.style.display='block';
+    if(ok)ok.style.display='none';
+    return;
+  }
+  if(empty)empty.style.display='none';
+  renderVencDepPills();
+  const statsEl=document.getElementById('vencForaDepStats');
+  const vencDepLbl=company==='QB'?'0099':'0009';
+  if(statsEl&&vencForaDepSapStats){
+    const s=vencForaDepSapStats;
+    let extra='';
+    if(s.jaNoDepVencidos)extra+=` · ${fmt(s.jaNoDepVencidos)} já no dep. vencidos (${vencDepLbl})`;
+    if(s.equipProf)extra+=` · ${fmt(s.equipProf)} equip. profissional`;
+    if(s.validadeNaoParseada)extra+=` · ${fmt(s.validadeNaoParseada)} validade não parseada`;
+    statsEl.textContent=`Analisadas ${fmt(s.analizadas)} linhas SAP · ${fmt(s.comValidade)} com validade parseada · ${fmt(s.vencidas)} vencidas · ${fmt(s.foraDepVencidos)} fora do dep. vencidos${extra}`;
+    statsEl.style.display='block';
+  }else if(statsEl)statsEl.style.display='none';
+  let rows=[...vencidoForaDepSapData];
+  const srch=document.getElementById('vencSrch')?.value.toLowerCase()||'';
+  const cats=[...new Set(vencidoForaDepSapData.map(r=>r.cat).filter(Boolean))].sort();
+  msUpdate('vencCat',cats,'Categorias','renderVencidoForaDep');
+  const selCats=msGet('vencCat');
+  if(activeVencDepot)rows=rows.filter(r=>r.dk===activeVencDepot);
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm));
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
+  applySort('vencforadepSap',rows);updateSortHeaders('vencforadepSap');
+  const totalQt=rows.reduce((s,r)=>s+r.qt,0);
+  const totalEans=new Set(rows.map(r=>r.EAN_norm)).size;
+  const byDep={};
+  rows.forEach(r=>{byDep[r.depLabel]=(byDep[r.depLabel]||0)+1;});
+  const depKs=Object.keys(byDep).sort();
+  const depHtml=depKs.slice(0,4).map(d=>`<span class="badge bwarn" style="margin-right:4px">${d}: ${byDep[d]}</span>`).join('')+(depKs.length>4?`<span style="font-size:10px;color:var(--muted)">+${depKs.length-4} dep.</span>`:'');
+  document.getElementById('vencKpis').innerHTML=`
+    <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">SAP</div></div>
+    <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmt(totalEans)}</div></div>
+    <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
+    <div class="kpi"><div class="kl">Por depósito SAP</div><div class="ks" style="margin-top:6px;line-height:1.6">${depHtml||'—'}</div></div>
+  `;
+  body.innerHTML='';
+  document.getElementById('vencOk').style.display=rows.length===0?'block':'none';
+  for(const r of rows){
+    const tr=document.createElement('tr');tr.className='dr';
+    const sapCode=r.sapCode?`<span class="badge bgray" style="font-family:var(--mono);font-size:11px">${r.sapCode}</span>`:'<span style="color:var(--muted)">—</span>';
+    tr.innerHTML=`
+      <td>${sapCode}</td>
+      <td><span class="badge bneu">${r.EAN_norm}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.produto)}">${r.produto||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm}</span></td>
+      <td class="num">${fmt(r.qt)}</td>
+      <td><span class="badge berr">${r.validade||'—'}</span></td>
+      <td><span class="badge binfo">${r.depClasseActual}</span></td>
+      <td class="num neg">${fmt(r.diasVencido)}</td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!rows.length&&sapData)document.getElementById('vencOk').style.display='block';
+}
 function exportVencForaDepXlsx(){
-  if(!vencidoForaDepData.length){toast('Sem dados','error');return;}
-  let rows=[...vencidoForaDepData];
+  const isSap=activeVencSubTab==='sap';
+  const src=isSap?vencidoForaDepSapData:vencidoForaDepData;
+  if(!src.length){toast('Sem dados','error');return;}
+  let rows=[...src];
   const srch=document.getElementById('vencSrch')?.value.toLowerCase()||'';
   const selCats=msGet('vencCat');
   if(activeVencDepot)rows=rows.filter(r=>r.dk===activeVencDepot);
   if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm));
   if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
   const data=rows.map(r=>({
+    Fonte:isSap?'SAP':'Unilog',
     Categoria:r.cat||'',
     Cod_SAP:r.sapCode||getSapCode(r.EAN_norm),
     EAN:r.EAN_norm,
@@ -2047,15 +2192,13 @@ function exportVencForaDepXlsx(){
     Lote:r.Lote_norm,
     Qtd:r.qt,
     Validade:r.validade,
-    Deposito_Actual:r.depLabel,
-    Classe:r.classe,
-    Endereco:r.endereco,
+    Deposito_Classe_Actual:r.depClasseActual,
     Dias_Vencido:r.diasVencido
   }));
   if(!data.length){toast('Sem dados','error');return;}
   const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Vencidos Fora Dep');
-  XLSX.writeFile(wb,`vencidos_fora_dep_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.utils.book_append_sheet(wb,ws,isSap?'Vencidos SAP':'Vencidos WMS');
+  XLSX.writeFile(wb,`vencidos_fora_dep_${isSap?'sap':'wms'}_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 
@@ -2158,19 +2301,20 @@ function renderValorGapPanel(){
   const bannerGap=(recon.valorUni||0)-(recon.valorSap||0);
   summary.innerHTML=`Gap total banner (WMS − SAP): <strong>${fmtBrl(bannerGap)}</strong> · Soma dif. valor por EAN: <strong>${fmtBrlLiq(gapTotal)}</strong> · Mostrando top ${top.length} de ${rows.length} EANs`;
   body.innerHTML=top.map(r=>{
-    const dvCls=r.difValor>0?'pos':r.difValor<0?'neg':'';
+    const sv=r.semValor;
+    const dvCls=!sv&&r.difValor>0?'pos':!sv&&r.difValor<0?'neg':'';
     const dqCls=r.difQt>0?'pos':r.difQt<0?'neg':'';
-    return`<tr${Math.abs(r.difValor)>1000?' class="dr"':''}>
+    return`<tr${!sv&&Math.abs(r.difValor)>1000?' class="dr"':''}>
       <td>${sapCodeHtml(r.EAN_norm)}</td>
       <td><span class="badge bneu">${r.EAN_norm}</span></td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
       <td class="num">${fQ(r.qtSap)}</td>
       <td class="num">${fQ(r.qtUni)}</td>
-      <td class="num">${fP(r.precoSap)}</td>
-      <td class="num">${fP(r.precoWms)}</td>
-      <td class="num">${fmtBrl(r.valorSap)}</td>
-      <td class="num">${fmtBrl(r.valorWms)}</td>
-      <td class="num ${dvCls}">${fmtBrlLiq(r.difValor)}</td>
+      <td class="num">${sv?'—':fP(r.precoSap)}</td>
+      <td class="num">${sv?'—':fP(r.precoWms)}</td>
+      <td class="num">${sv?'—':fmtBrl(r.valorSap)}</td>
+      <td class="num">${sv?'—':fmtBrl(r.valorWms)}</td>
+      <td class="num ${dvCls}">${sv?'—':fmtBrlLiq(r.difValor)}</td>
       <td class="num ${dqCls}">${r.difQt>0?'+':''}${fQ(r.difQt)}</td>
     </tr>`;
   }).join('');
@@ -2180,9 +2324,9 @@ function exportValorGapXlsx(){
   if(!_valorGapRows.length){toast('Sem dados','error');return;}
   const data=_valorGapRows.map(r=>({
     Cod_SAP:r.sapCode,EAN:r.EAN_norm,Descricao:r.desc,Categoria:r.cat,Subcategoria:r.subcat,
-    Qtd_SAP:r.qtSap,Qtd_WMS:r.qtUni,Preco_SAP:r.precoSap,Preco_WMS:r.precoWms,
-    Valor_SAP:r.valorSap,Valor_WMS:r.valorWms,Dif_Valor:r.difValor,Dif_Qtd:r.difQt,
-    Dif_Valor_Recon_SAP:r.difValorRecon
+    Qtd_SAP:r.qtSap,Qtd_WMS:r.qtUni,Preco_SAP:r.semValor?'':r.precoSap,Preco_WMS:r.semValor?'':r.precoWms,
+    Valor_SAP:r.semValor?'':r.valorSap,Valor_WMS:r.semValor?'':r.valorWms,Dif_Valor:r.semValor?'':r.difValor,Dif_Qtd:r.difQt,
+    Dif_Valor_Recon_SAP:r.semValor?'':r.difValorRecon
   }));
   const ws=XLSX.utils.json_to_sheet(data);
   ws['!cols']=[{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12},{wch:12},{wch:14},{wch:14},{wch:14},{wch:10},{wch:16}];
@@ -2217,9 +2361,9 @@ function recalcBanner(){
     <div class="kpi"><div class="kl">Qtd WMS</div><div class="kv">${fQ(qtUni)}</div></div>
     <div class="kpi"><div class="kl">Dif. Qtd</div><div class="kv ${cls(difQt)}">${sign(difQt)}${fQ(Math.abs(difQt))}</div></div>
     ${temVlr?`
-    <div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fmtBrl(recon.valorSap)}</div><div class="ks">preço SAP × qtd</div></div>
-    <div class="kpi"><div class="kl">Valor WMS</div><div class="kv b">${fmtBrl(recon.valorUni)}</div><div class="ks">preço WMS × qtd</div></div>
-    <div class="kpi"><div class="kl">Dif. Valor</div><div class="kv ${kvLiqCls(difVlr)}">${fmtBrlLiq(difVlr)}</div><div class="ks">preço SAP × dif qtd</div></div>`:''}
+    <div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fmtBrl(recon.valorSap)}</div><div class="ks">preço SAP × qtd · excl. equip. prof.</div></div>
+    <div class="kpi"><div class="kl">Valor WMS</div><div class="kv b">${fmtBrl(recon.valorUni)}</div><div class="ks">preço WMS × qtd · excl. equip. prof.</div></div>
+    <div class="kpi"><div class="kl">Dif. Valor</div><div class="kv ${kvLiqCls(difVlr)}">${fmtBrlLiq(difVlr)}</div><div class="ks">preço SAP × dif qtd · excl. equip. prof.</div></div>`:''}
   `;
   if(temVlr)renderValorGapPanel();
 }
@@ -2231,7 +2375,7 @@ function switchCompany(){
   DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
   DKS=Object.keys(DEPOT_MAP);
   // Reset all data
-  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencForaDepStats=null;
+  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];vencForaDepStats=null;vencForaDepSapStats=null;
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
   renderUpKpis();
@@ -2366,12 +2510,14 @@ function _renderEanView(){
 
   let rows=Object.values(byEan).map(r=>{
     const diff=r.qt_sap-r.qt_uni;
-    const preco=precoMap[r.EAN_norm]||0;
+    const semValor=isEquipProfissional(r.EAN_norm,null);
+    const preco=semValor?0:(precoMap[r.EAN_norm]||0);
     return{
       ...r,
       diff,
       preco,
-      valorDifLiq:diff*preco,
+      semValor,
+      valorDifLiq:semValor?0:diff*preco,
       estado:r.qt_sap===0&&r.qt_uni>0?'Só Unilog':r.qt_uni===0&&r.qt_sap>0?'Só SAP':r.qt_sap===r.qt_uni?'OK':'Divergência'
     };
   });
@@ -2401,14 +2547,14 @@ function _renderEanView(){
   const comDiff=rows.filter(r=>r.diff!==0).length;
   const precoMapKpi=buildSapPrecoMap();
   const totalNetDiff=rows.reduce((s,r)=>s+r.diff,0);
-  const totalValorLiq=rows.reduce((s,r)=>s+reconRowValor({EAN_norm:r.EAN_norm,diff:r.diff},precoMapKpi),0);
-  const temPreco=rows.some(r=>r.preco>0)||Object.values(precoMapKpi).some(p=>p>0);
+  const totalValorLiq=rows.reduce((s,r)=>s+(r.semValor?0:reconRowValor({EAN_norm:r.EAN_norm,diff:r.diff},precoMapKpi)),0);
+  const temPreco=rows.some(r=>!r.semValor&&r.preco>0);
   document.getElementById('eanKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs</div><div class="kv">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com divergência</div><div class="kv r">${fmt(comDiff)}</div><div class="ks">${rows.length?Math.round(comDiff/rows.length*100):0}%</div></div>
     <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmt(rows.length-comDiff)}</div></div>
     <div class="kpi"><div class="kl">Dif. qtd (líquido)</div><div class="kv ${kvLiqCls(totalNetDiff)}">${totalNetDiff>0?'+':''}${fmt(totalNetDiff)}</div><div class="ks">unidades</div></div>
-    ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif</div></div>`:''}
+    ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · excl. equip. prof.</div></div>`:''}
   `;
 
   body.innerHTML='';
@@ -2438,8 +2584,8 @@ function _renderEanView(){
       <td class="num">${fmt(r.qt_sap)}</td>
       <td class="num">${fmt(r.qt_uni)}</td>
       <td class="num ${r.diff>0?'pos':r.diff<0?'neg':''}">${r.diff>0?'+':''}${fmt(r.diff)}</td>
-      <td class="num" style="color:var(--muted);font-size:11px">${r.preco>0?r.preco.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
-      <td class="num ${r.valorDifLiq>0?'pos':r.valorDifLiq<0?'neg':''}">${fmtValorDifCell(r.diff,r.preco)}</td>
+      <td class="num" style="color:var(--muted);font-size:11px">${r.semValor?'—':(r.preco>0?r.preco.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—')}</td>
+      <td class="num ${!r.semValor&&r.valorDifLiq>0?'pos':!r.semValor&&r.valorDifLiq<0?'neg':''}">${r.semValor?'—':fmtValorDifCell(r.diff,r.preco)}</td>
       <td>${badge}</td>
       <td style="font-size:11px">${depHtml||'—'}</td>
     `;
@@ -2465,13 +2611,14 @@ function exportEanXlsx(){
   const precoMap2=buildSapPrecoMap();
   const data=Object.values(byEan).map(r=>{
     const diff=r.SAP_Total-r.Unilog_Total;
-    const preco=precoMap2[r.EAN_norm]||0;
+    const semValor=isEquipProfissional(r.EAN_norm,null);
+    const preco=semValor?0:(precoMap2[r.EAN_norm]||0);
     return{
       Categoria:r.Categoria,Subcategoria:r.Subcategoria,Cod_SAP:getSapCode(r.EAN_norm),EAN:r.EAN_norm,Descricao:r.Descricao,
       SAP_Total:r.SAP_Total,Unilog_Total:r.Unilog_Total,
       Diferenca:diff,
-      Preco_SAP:preco,
-      Valor_Dif_Liquido:diff*preco,
+      Preco_SAP:semValor?'':preco,
+      Valor_Dif_Liquido:semValor?'':diff*preco,
       Estado:r.SAP_Total===r.Unilog_Total?'OK':r.SAP_Total===0?'Só Unilog':r.Unilog_Total===0?'Só SAP':'Divergência',
       Depositos_Com_Diferenca:r.Depositos_Dif.join(' | ')
     };
@@ -2583,8 +2730,9 @@ function _renderRecon(){
   const okCount=rows.length-comDiff;
   const pct=rows.length>0?Math.round(okCount/rows.length*100):0;
   const totalNetDiff=rows.reduce((s,r)=>s+r.diff,0);
-  const totalValorLiq=rows.reduce((s,r)=>s+reconRowValor(r,precoMap),0);
-  const temPreco=rows.some(r=>(precoMap[r.EAN_norm]||0)>0);
+  const totalValorLiq=rows.reduce((s,r)=>s+reconRowValor(r,precoMap,activeDepot),0);
+  const isMuimDepot=!!DEPOT_MAP[activeDepot]?.catOnly;
+  const temPreco=!isMuimDepot&&rows.some(r=>!isEquipProfissional(r.EAN_norm,activeDepot)&&(precoMap[r.EAN_norm]||0)>0);
   const depLbl=DEPOT_MAP[activeDepot]?.label.split('—')[1]?.trim()||activeDepot;
   const classLbl=activeReconClass?` · Cl. ${activeReconClass}`:'';
   document.getElementById('reconKpis').innerHTML=`
@@ -2594,7 +2742,7 @@ function _renderRecon(){
     <div class="kpi"><div class="kl">Qt SAP</div><div class="kv">${fmt(rows.reduce((s,r)=>s+r.qt_sap,0))}</div></div>
     <div class="kpi"><div class="kl">Qt Unilog</div><div class="kv">${fmt(rows.reduce((s,r)=>s+r.qt_uni,0))}</div></div>
     <div class="kpi"><div class="kl">Dif. qtd (líquido)</div><div class="kv ${kvLiqCls(totalNetDiff)}">${totalNetDiff>0?'+':''}${fmt(totalNetDiff)}</div><div class="ks">unidades</div></div>
-    ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif</div></div>`:''}
+    ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · excl. equip. prof.</div></div>`:''}
   `;
 
   const body=document.getElementById('reconBody');body.innerHTML='';
@@ -3703,7 +3851,7 @@ function doSort(table,col){
   else if(table==='susp')renderSusp();
   else if(table==='su')renderSoUnilog();
   else if(table==='poscl')renderPosClasse();
-  else if(table==='vencforadep')renderVencidoForaDep();
+  else if(table==='vencforadep'||table==='vencforadepSap')renderVencidoForaDep();
   else if(table==='occ')renderOccView();
   else if(table==='transEc')renderTrans('ecommerce');
   else if(table==='transQb')renderTrans('qbrasil');
