@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619260000 -->
+<!DOCTYPE html><!-- v20260619280000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -552,7 +552,7 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bg bs" onclick="exportSemValidadeXlsx()">⬇ Excel</button>
     </div>
     <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
-      Cafés (grão, moído, cápsulas) no Unilog cujo combo EAN+lote não tem validade real — validade <strong>vazia</strong> ou sentinel (<strong>00.0000</strong>, <strong>00.00.0000</strong>, 0, 00/00/0000). Excluídos se qualquer linha do combo tiver data real (Validade Lote ou Validade).
+      Produtos SAP com validade 00.0000 ou vazia (cafés) — grão, moído e cápsulas cujo combo EAN+lote não tem validade real. Sentinel: <strong>00.0000</strong>, <strong>00.00.0000</strong>, 0, 00/00/0000 ou vazio. Excluídos se qualquer linha SAP do combo tiver data real em Validade Lote.
     </p>
     <div class="tb">
       <input class="inp is" id="semValSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderSemValidade()">
@@ -568,11 +568,12 @@ select.cad-inp{cursor:pointer;}
         <th onclick="doSort('semval','qt')" class="num">Qtd Total</th>
         <th onclick="doSort('semval','validade')">Validade</th>
         <th onclick="doSort('semval','cat')">Categoria</th>
+        <th onclick="doSort('semval','deposito')">Depósito SAP</th>
       </tr></thead>
       <tbody id="semValBody"></tbody>
     </table></div>
-    <div id="semValEmpty" class="empty" style="display:none"><div class="empty-i">📅</div><div>Carrega os ficheiros Unilog para analisar validades</div></div>
-    <div id="semValOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum café com validade 00.0000</div></div>
+    <div id="semValEmpty" class="empty" style="display:none"><div class="empty-i">📅</div><div>Carrega o ficheiro SAP para analisar validades</div></div>
+    <div id="semValOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum café SAP com validade 00.0000 ou vazia</div></div>
   </div>
   </div><!-- /alert-semvalidade -->
 </div>
@@ -1474,6 +1475,24 @@ function semValRowLoteSentinel(r){
 function semValRowLoteEmpty(r){
   const v=r.validadeLote;
   return v===null||v===undefined||String(v).trim()==='';
+}
+function sapSemValRowHasRealValidade(r){
+  const v=r.validade;
+  if(v===null||v===undefined||String(v).trim()==='')return false;
+  if(isExplicitValidadeSentinel(v))return false;
+  return !!parseValidadeDate(v);
+}
+function sapSemValRowLoteSentinel(r){
+  const v=r.validade;
+  if(v===null||v===undefined||String(v).trim()==='')return null;
+  return isExplicitValidadeSentinel(v)?displayExplicitSentinel(v):null;
+}
+function sapSemValRowLoteEmpty(r){
+  const v=r.validade;
+  return v===null||v===undefined||String(v).trim()==='';
+}
+function sapDepLabels(depositos){
+  return[...depositos].sort((a,b)=>a.localeCompare(b)).map(dk=>DEPOT_MAP[dk]?.label?.split('—')[1]?.trim()||dk).join(', ');
 }
 function isValidadeIgnorada(validadeStr,ean,desc,cat){
   if(isMaquinaDomestica(ean,desc))return true;
@@ -2616,18 +2635,16 @@ const SEM_VAL_REF_LOTES=[['7803174','6280216'],['7805110','6281142'],['7801547',
 function buildSemValidade(){
   semValidadeData=[];
   semValidadeStats=null;
-  if(!uniData)return;
-  const dm={};
-  if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
+  if(!sapData)return;
   const groups=new Map();
   let cafeRows=0;
   let loteSentinelRows=0;
   let loteEmptyRows=0;
   let excludedByReal=0;
   let excludedByLote=0;
-  uniData.forEach(r=>{
+  sapData.forEach(r=>{
     if(!r.EAN_norm||r.qt<=0)return;
-    const desc=r.produto||dm[r.EAN_norm]||'';
+    const desc=r.desc||'';
     const param=occParams.find(p=>p.ean===r.EAN_norm);
     const cat=param?.cat||autoCat(desc).cat||'';
     const subcat=param?.subcat||autoCat(desc).subcat||'';
@@ -2636,19 +2653,20 @@ function buildSemValidade(){
     const key=`${r.EAN_norm}\0${r.Lote_norm||''}`;
     let g=groups.get(key);
     if(!g){
-      g={EAN_norm:r.EAN_norm,produto:desc,Lote_norm:r.Lote_norm||'',qt:0,cat,subcat,sapCode:getSapCode(r.EAN_norm),hasReal:false,hasLoteSentinel:false,allLoteEmpty:true,loteValidade:''};
+      g={EAN_norm:r.EAN_norm,produto:desc,Lote_norm:r.Lote_norm||'',qt:0,cat,subcat,sapCode:r.material||getSapCode(r.EAN_norm),depositos:new Set(),hasReal:false,hasLoteSentinel:false,allLoteEmpty:true,loteValidade:''};
       groups.set(key,g);
     }
     g.qt+=r.qt;
-    if(semValRowHasRealValidade(r))g.hasReal=true;
-    if(!semValRowLoteEmpty(r))g.allLoteEmpty=false;
-    const loteSent=semValRowLoteSentinel(r);
+    if(r.deposito)g.depositos.add(r.deposito);
+    if(sapSemValRowHasRealValidade(r))g.hasReal=true;
+    if(!sapSemValRowLoteEmpty(r))g.allLoteEmpty=false;
+    const loteSent=sapSemValRowLoteSentinel(r);
     if(loteSent){
       g.hasLoteSentinel=true;
       loteSentinelRows++;
       if(!g.loteValidade)g.loteValidade=loteSent;
     }
-    if(semValRowLoteEmpty(r))loteEmptyRows++;
+    if(sapSemValRowLoteEmpty(r))loteEmptyRows++;
   });
   semValidadeData=[...groups.values()].filter(g=>{
     if(g.hasReal){excludedByReal++;return false;}
@@ -2662,7 +2680,8 @@ function buildSemValidade(){
     validade:g.loteValidade||(g.allLoteEmpty?'vazio':''),
     cat:g.cat,
     subcat:g.subcat,
-    sapCode:g.sapCode
+    sapCode:g.sapCode,
+    deposito:sapDepLabels(g.depositos)
   }));
   semValidadeStats={combos:semValidadeData.length,cafeRows,cafeGroups:groups.size,loteSentinelRows,loteEmptyRows,excludedByReal,excludedByLote};
   semValidadeData.sort((a,b)=>String(a.produto||'').localeCompare(String(b.produto||''))||a.EAN_norm.localeCompare(b.EAN_norm)||String(a.Lote_norm||'').localeCompare(String(b.Lote_norm||'')));
@@ -2681,7 +2700,7 @@ function _renderSemValidade(){
   const body=document.getElementById('semValBody');
   const empty=document.getElementById('semValEmpty');
   const ok=document.getElementById('semValOk');
-  if(!uniData){
+  if(!sapData){
     if(body)body.innerHTML='';
     if(empty)empty.style.display='block';
     if(ok)ok.style.display='none';
@@ -2699,13 +2718,13 @@ function _renderSemValidade(){
   const totalQt=rows.reduce((s,r)=>s+r.qt,0);
   const totalEans=new Set(rows.map(r=>r.EAN_norm)).size;
   const st=semValidadeStats||{};
-  const exclReal=st.excludedByReal?` · ${fmt(st.excludedByReal)} excl. (validade real noutra linha)`:'';
-  const exclLote=st.excludedByLote?` · ${fmt(st.excludedByLote)} excl. (Validade Lote inválida)`:'';
+  const exclReal=st.excludedByReal?` · ${fmt(st.excludedByReal)} excl. (validade real noutra linha SAP)`:'';
+  const exclLote=st.excludedByLote?` · ${fmt(st.excludedByLote)} excl. (validade não vazia/sentinel)`:'';
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows);
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows);
   document.getElementById('semValKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.combos??rows.length)} combos sem validade (vazio ou 00.0000)${exclReal}${exclLote}</div></div>
-    <div class="kpi"><div class="kl">Validade Lote sentinel</div><div class="kv b">${fmtKvNum(st.loteSentinelRows||0)}</div><div class="ks">${fmt(st.loteEmptyRows||0)} linhas Validade Lote vazia</div></div>
+    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.combos??rows.length)} combos SAP sem validade (vazio ou 00.0000)${exclReal}${exclLote}</div></div>
+    <div class="kpi"><div class="kl">Validade sentinel</div><div class="kv b">${fmtKvNum(st.loteSentinelRows||0)}</div><div class="ks">${fmt(st.loteEmptyRows||0)} linhas SAP com validade vazia</div></div>
     <div class="kpi"><div class="kl">EANs únicos</div><div class="kv b">${fmtKvNum(totalEans)}</div></div>
     <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmtKvNum(totalQt)}</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
@@ -2723,10 +2742,11 @@ function _renderSemValidade(){
       <td class="num">${fmt(r.qt)}</td>
       <td><span class="badge bwarn">${r.validade||'—'}</span></td>
       <td><span class="badge binfo">${catLbl||'—'}</span></td>
+      <td><span class="badge bneu">${r.deposito||'—'}</span></td>
     `;
     body.appendChild(tr);
   }
-  if(!rows.length&&uniData)document.getElementById('semValOk').style.display='block';
+  if(!rows.length&&sapData)document.getElementById('semValOk').style.display='block';
   setTimeout(applyResizable,0);
 }
 function exportSemValidadeXlsx(){
@@ -2745,7 +2765,7 @@ function exportSemValidadeXlsx(){
     Qtd_Total:r.qt,
     Validade:r.validade||'',
     Categoria:r.cat||'',
-    Subcategoria:r.subcat||''
+    Deposito_SAP:r.deposito||''
   }));
   if(!data.length){toast('Sem dados','error');return;}
   const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();
