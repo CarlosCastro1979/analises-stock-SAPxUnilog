@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619160000 -->
+<!DOCTYPE html><!-- v20260619180000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1493,6 +1493,87 @@ function fmtValorDifCell(diff,preco){const p=Number(preco)||0;if(p<=0)return '�
 function fmtBrl(v){if(v==null||!Number.isFinite(v))return '—';return Math.abs(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:2,maximumFractionDigits:2});}
 function reconRowValor(r,precoMap,dk){if(isEquipProfissional(r.EAN_norm,dk))return 0;const p=(precoMap||buildSapPrecoMap())[r.EAN_norm]||0;return r.diff*p;}
 function wmsLineValor(r){const qt=Number(r.qt)||0;if(qt<=0)return 0;const vlr=Number(r.vlr)||0;if(vlr>0)return qt*vlr;const vt=Number(r.vlrTotal)||0;return vt>0?vt:0;}
+function calcValorTotSapFromRows(rows,{eanKey='EAN_norm',qtKey='qt',dk=null,getDk=null,precoKey=null}={}){
+  const pm=buildSapPrecoMap();
+  let total=0,temPreco=false;
+  for(const r of rows){
+    const ean=r[eanKey];
+    const depot=getDk?getDk(r):dk;
+    if(isEquipProfissional(ean,depot))continue;
+    const qt=Number(r[qtKey])||0;
+    if(qt<=0)continue;
+    let p=pm[ean]||0;
+    if(precoKey){const rp=Number(r[precoKey])||0;if(rp>0)p=Math.max(p,rp);}
+    if(p>0)temPreco=true;
+    total+=qt*p;
+  }
+  return{total,temPreco:temPreco||total>0};
+}
+function calcValorTotWmsFromUniMatch(rows,{eanKey='EAN_norm',loteKey='Lote_norm',classeKey=null,getDk=null,itemsKey=null}={}){
+  let total=0,temPreco=false;
+  for(const r of rows){
+    if(itemsKey&&Array.isArray(r[itemsKey])){
+      for(const ur of r[itemsKey]){
+        const urDk=DKS.find(k=>DEPOT_MAP[k].classes.includes(ur.classe));
+        if(isEquipProfissional(ur.EAN_norm,urDk))continue;
+        const lv=wmsLineValor(ur);
+        if(lv!==0)temPreco=true;
+        total+=lv;
+      }
+      continue;
+    }
+    if(!uniData)continue;
+    const ean=r[eanKey];
+    const lote=loteKey in r?(r[loteKey]||''):null;
+    const classe=classeKey?r[classeKey]:null;
+    const depot=getDk?getDk(r):null;
+    uniData.forEach(ur=>{
+      if(ur.EAN_norm!==ean)return;
+      if(lote!==null&&(ur.Lote_norm||'')!==lote)return;
+      if(classe&&ur.classe!==classe)return;
+      const urDk=DKS.find(k=>DEPOT_MAP[k].classes.includes(ur.classe));
+      if(depot&&urDk!==depot)return;
+      if(isEquipProfissional(ean,urDk))continue;
+      const lv=wmsLineValor(ur);
+      if(lv!==0)temPreco=true;
+      total+=lv;
+    });
+  }
+  return{total,temPreco};
+}
+function calcReconDepotWmsValor(filteredRows,dk){
+  if(!uniData||!filteredRows.length)return{total:0,temPreco:false};
+  const keys=new Set(filteredRows.map(r=>r.EAN_norm+'|'+(r.Lote_norm||'')));
+  let total=0,temPreco=false;
+  for(const ur of uniRowsForDepot(dk)){
+    if(!keys.has(ur.EAN_norm+'|'+(ur.Lote_norm||'')))continue;
+    if(isEquipProfissional(ur.EAN_norm,dk))continue;
+    const lv=wmsLineValor(ur);
+    if(lv!==0)temPreco=true;
+    total+=lv;
+  }
+  return{total,temPreco};
+}
+function calcEanViewWmsValor(filteredRows){
+  if(!uniData||!filteredRows.length)return{total:0,temPreco:false};
+  const eans=new Set(filteredRows.map(r=>r.EAN_norm));
+  let total=0,temPreco=false;
+  for(const dk of DKS){
+    for(const ur of uniRowsForDepot(dk)){
+      if(!eans.has(ur.EAN_norm))continue;
+      if(isEquipProfissional(ur.EAN_norm,dk))continue;
+      const lv=wmsLineValor(ur);
+      if(lv!==0)temPreco=true;
+      total+=lv;
+    }
+  }
+  return{total,temPreco};
+}
+function kpiValorTotCards(valorSap,valorWms,temPreco){
+  if(!temPreco)return '';
+  return `<div class="kpi"><div class="kl">Valor Total SAP</div><div class="kv b">${fmtBrl(valorSap)}</div><div class="ks">preço SAP × qtd</div></div>
+    <div class="kpi"><div class="kl">Valor Total WMS</div><div class="kv b">${fmtBrl(valorWms)}</div><div class="ks">preço WMS × qtd</div></div>`;
+}
 function uniRowsForDepot(dk){
   const depConf=DEPOT_MAP[dk];
   const classes=depConf.classes;
@@ -1555,12 +1636,7 @@ function calcReconTotals({catFilter=null,subcatFilter=null,depotFilter=null,diff
 }
 
 function calcValorGapByEan({catFilter=null}={}){
-  // Exclui equipamento profissional / MUIM (sem valorização no banner).
-  // Verificação DELTA PLATINUM (exemplo reclamação):
-  //   dif_qtd=-66, preço SAP=27,68 → difValorQtd = -66×27,68 ≈ -R$ 1.826,88
-  //   valor SAP = 14489×27,68 ≈ R$ 401.055 · valor WMS = 14555×39,59 ≈ R$ 576.232
-  //   difValor (total) = WMS−SAP ≈ +R$ 175.176 (mistura qtd E preço unitário diferente)
-  //   difValorPreco = total − qtd ≈ +R$ 177.003 (= qtd WMS × (preço WMS − preço SAP))
+  // Exclui equipamento profissional / MUIM. Dif. valor = dif. qtd × preço SAP (igual banner / Por EAN).
   const precoMap=buildSapPrecoMap();
   const byEan={};
   const wmsValorByEan={};
@@ -1601,10 +1677,8 @@ function calcValorGapByEan({catFilter=null}={}){
     const valorSap=r.qtSap*precoSap;
     const valorWms=wmsValorByEan[r.EAN_norm]||0;
     const precoWms=r.qtUni>0&&valorWms>0?valorWms/r.qtUni:0;
-    const difValor=valorWms-valorSap;
-    const difValorQtd=r.difQt*precoSap;
-    const difValorPreco=difValor-difValorQtd;
-    return{...r,precoSap,precoWms,valorSap,valorWms,difValor,difValorQtd,difValorPreco,sapCode:getSapCode(r.EAN_norm)};
+    const difValor=r.difQt*precoSap;
+    return{...r,precoSap,precoWms,valorSap,valorWms,difValor,sapCode:getSapCode(r.EAN_norm)};
   }).filter(r=>!isEquipProfissional(r.EAN_norm,null)&&(r.valorSap!==0||r.valorWms!==0||r.qtSap!==0||r.qtUni!==0));
   return{rows,gapTotal:rows.reduce((s,r)=>s+r.difValor,0),precoMap};
 }
@@ -1849,10 +1923,13 @@ function _renderSoUnilog(){
 
   const uniqueEANs=new Set(rows.map(r=>r.EAN_norm)).size;
   const totalQt=rows.reduce((s,r)=>s+r.qt,0);
+  const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{getDk:r=>DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe))});
+  const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows,{classeKey:'classe'});
   document.getElementById('suKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs desconhecidos</div><div class="kv r">${fmt(uniqueEANs)}</div></div>
     <div class="kpi"><div class="kl">Linhas Unilog</div><div class="kv">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Stock total</div><div class="kv y">${fmt(totalQt)}</div></div>
+    ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
   `;
 
   const body=document.getElementById('suBody');body.innerHTML='';
@@ -2004,11 +2081,14 @@ function _renderPosClasse(){
   const mixClasses=rows.reduce((s,r)=>s+r.nClasses,0);
   const totalQt=rows.reduce((s,r)=>s+r.totalQt,0);
   const totalEans=new Set(rows.flatMap(r=>r.eans)).size;
+  const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows.flatMap(r=>r.items.map(ur=>({EAN_norm:ur.EAN_norm,qt:ur.qt,classe:ur.classe}))),{getDk:ur=>DKS.find(k=>DEPOT_MAP[k].classes.includes(ur.classe))});
+  const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows,{itemsKey:'items'});
   document.getElementById('posKpis').innerHTML=`
     <div class="kpi"><div class="kl">Posições com problema</div><div class="kv r">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Classes misturadas</div><div class="kv y">${fmt(mixClasses)}</div><div class="ks">soma por posição</div></div>
     <div class="kpi"><div class="kl">EANs afectados</div><div class="kv b">${fmt(totalEans)}</div></div>
     <div class="kpi"><div class="kl">Qtd total</div><div class="kv">${fmt(totalQt)}</div></div>
+    ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
   `;
   body.innerHTML='';
   document.getElementById('posOk').style.display=rows.length===0?'block':'none';
@@ -2275,10 +2355,13 @@ function _renderVencidoForaDepWms(){
   rows.forEach(r=>{byDep[r.depLabel]=(byDep[r.depLabel]||0)+1;});
   const depKs=Object.keys(byDep).sort();
   const depHtml=depKs.slice(0,4).map(d=>`<span class="badge bwarn" style="margin-right:4px">${d}: ${byDep[d]}</span>`).join('')+(depKs.length>4?`<span style="font-size:10px;color:var(--muted)">+${depKs.length-4} dep.</span>`:'');
+  const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{getDk:r=>r.dk});
+  const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows,{getDk:r=>r.dk});
   document.getElementById('vencKpis').innerHTML=`
     <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">Unilog (WMS)</div></div>
     <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmt(totalEans)}</div></div>
     <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
+    ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
     <div class="kpi"><div class="kl">Por depósito actual</div><div class="ks" style="margin-top:6px;line-height:1.6">${depHtml||'—'}</div></div>
   `;
   body.innerHTML='';
@@ -2340,10 +2423,13 @@ function _renderVencidoForaDepSap(){
   rows.forEach(r=>{byDep[r.depLabel]=(byDep[r.depLabel]||0)+1;});
   const depKs=Object.keys(byDep).sort();
   const depHtml=depKs.slice(0,4).map(d=>`<span class="badge bwarn" style="margin-right:4px">${d}: ${byDep[d]}</span>`).join('')+(depKs.length>4?`<span style="font-size:10px;color:var(--muted)">+${depKs.length-4} dep.</span>`:'');
+  const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{getDk:r=>r.dk,precoKey:'preco'});
+  const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows,{getDk:r=>r.dk});
   document.getElementById('vencKpis').innerHTML=`
     <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">SAP</div></div>
     <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmt(totalEans)}</div></div>
     <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
+    ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
     <div class="kpi"><div class="kl">Por depósito SAP</div><div class="ks" style="margin-top:6px;line-height:1.6">${depHtml||'—'}</div></div>
   `;
   body.innerHTML='';
@@ -2468,11 +2554,14 @@ function _renderSemValidade(){
   const totalEans=new Set(rows.map(r=>r.EAN_norm)).size;
   const st=semValidadeStats||{};
   const exclNote=st.excludedByReal?` · ${fmt(st.excludedByReal)} excl. (validade real noutra posição)`:'';
+  const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows);
+  const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows);
   document.getElementById('semValKpis').innerHTML=`
     <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">${fmt(st.combos??rows.length)} combos com validade 00.0000 detectada${exclNote}</div></div>
     <div class="kpi"><div class="kl">Linhas sentinel</div><div class="kv b">${fmt(st.sentinelRows||0)}</div><div class="ks">posições WMS com validade vazia/00.0000</div></div>
     <div class="kpi"><div class="kl">EANs únicos</div><div class="kv b">${fmt(totalEans)}</div></div>
     <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
+    ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
   `;
   body.innerHTML='';
   document.getElementById('semValOk').style.display=rows.length===0?'block':'none';
@@ -2570,28 +2659,21 @@ function updateLoadBanner(uploadedAt){
           <div>
             <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text)">Maior dif. valor SAP vs WMS</div>
             <div style="font-size:11px;color:var(--muted);margin-top:4px;max-width:720px;line-height:1.45">
-              Por EAN — excl. equipamento profissional / MUIM.
-              <strong>Dif. valor (total)</strong> = valor WMS − valor SAP (cada sistema com o seu preço unitário).
-              <strong>Dif. valor qtd</strong> = dif. qtd × preço SAP (igual à conciliação).
-              <strong>Dif. valor preço</strong> = residual por preço unitário diferente entre SAP e WMS.
+              Por EAN — excl. equipamento profissional / MUIM. <strong>Dif. valor</strong> = dif. qtd × preço SAP (igual banner e conciliação Por EAN).
             </div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button type="button" class="btn bg bs" id="bannerValorGapSortBtn" onclick="toggleValorGapSort()">Ordenar: |total|</button>
             <button type="button" class="btn bg bs" onclick="exportValorGapXlsx()">⬇ Excel</button>
           </div>
         </div>
         <div id="bannerValorGapSummary" style="font-size:11px;color:var(--text2);margin-bottom:10px"></div>
-        <p style="font-size:10px;color:var(--muted);margin-bottom:8px"><strong>Dif. valor total</strong> = WMS − SAP por EAN · <strong>Dif. valor qtd</strong> = dif. qtd × preço SAP · <strong>Dif. valor preço</strong> = impacto do preço unitário diferente (total − qtd). Excl. equip. profissional / MUIM.</p>
         <div class="tw2"><table id="bannerValorGapTable">
           <thead><tr>
             <th>Cód. SAP</th><th>EAN</th><th>Descrição</th>
             <th class="num">Qtd SAP</th><th class="num">Qtd WMS</th>
             <th class="num">Preço SAP</th><th class="num">Preço WMS</th>
             <th class="num">Valor SAP</th><th class="num">Valor WMS</th>
-            <th class="num" title="Valor WMS − valor SAP">Dif. valor (total)</th>
-            <th class="num" title="Dif. qtd × preço SAP">Dif. valor qtd</th>
-            <th class="num" title="Impacto do preço unitário diferente">Dif. valor preço</th>
+            <th class="num" title="Dif. qtd × preço SAP">Dif. valor</th>
             <th class="num">Dif. Qtd</th>
           </tr></thead>
           <tbody id="bannerValorGapBody"></tbody>
@@ -2603,7 +2685,7 @@ function updateLoadBanner(uploadedAt){
   recalcBanner();
 }
 
-let _valorGapOpen=false,_valorGapRows=[],_valorGapSort='total';
+let _valorGapOpen=false,_valorGapRows=[];
 function toggleValorGapPanel(){
   _valorGapOpen=!_valorGapOpen;
   const panel=document.getElementById('bannerValorGapPanel');
@@ -2612,41 +2694,25 @@ function toggleValorGapPanel(){
   if(btn)btn.textContent=(_valorGapOpen?'▾ ':'▸ ')+'Ver artigos com maior dif. de valor SAP vs WMS';
   if(_valorGapOpen)renderValorGapPanel();
 }
-function toggleValorGapSort(){
-  _valorGapSort=_valorGapSort==='total'?'qtd':'total';
-  const btn=document.getElementById('bannerValorGapSortBtn');
-  if(btn)btn.textContent='Ordenar: |'+(_valorGapSort==='total'?'total':'valor qtd')+'|';
-  renderValorGapPanel();
-}
-function sortValorGapRows(rows){
-  const key=_valorGapSort==='qtd'?'difValorQtd':'difValor';
-  return[...rows].sort((a,b)=>Math.abs(b[key])-Math.abs(a[key]));
-}
 
 function renderValorGapPanel(){
   const wrap=document.getElementById('bannerValorGapWrap');
   const body=document.getElementById('bannerValorGapBody');
   const summary=document.getElementById('bannerValorGapSummary');
-  const sortBtn=document.getElementById('bannerValorGapSortBtn');
   if(!wrap||!body)return;
   const selCats=msGet('bannerCat');
   const catFilter=selCats.size?selCats:null;
   const{rows,gapTotal}=calcValorGapByEan({catFilter});
-  const sorted=sortValorGapRows(rows);
+  const sorted=[...rows].sort((a,b)=>Math.abs(b.difValor)-Math.abs(a.difValor));
   _valorGapRows=sorted;
   const temVlr=rows.some(r=>r.valorSap>0||r.valorWms>0);
   wrap.style.display=temVlr?'block':'none';
-  if(sortBtn)sortBtn.textContent='Ordenar: |'+(_valorGapSort==='total'?'total':'valor qtd')+'|';
   if(!temVlr){body.innerHTML='';return;}
   const top=sorted.slice(0,15);
   const fQ=v=>v.toLocaleString('pt-BR');
   const fP=v=>v>0?v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
   const recon=calcReconTotals({catFilter});
-  const bannerGap=(recon.valorUni||0)-(recon.valorSap||0);
-  const gapQtd=rows.reduce((s,r)=>s+r.difValorQtd,0);
-  const gapPreco=rows.reduce((s,r)=>s+r.difValorPreco,0);
-  const sortLbl=_valorGapSort==='total'?'|dif. valor total|':'|dif. valor qtd|';
-  summary.innerHTML=`Gap total banner (WMS − SAP): <strong>${fmtBrl(bannerGap)}</strong> · Soma dif. valor por EAN: <strong>${fmtBrlLiq(gapTotal)}</strong> (qtd: <strong>${fmtBrlLiq(gapQtd)}</strong> · preço: <strong>${fmtBrlLiq(gapPreco)}</strong>) · Top ${top.length} de ${rows.length} EANs · ordenado por ${sortLbl}`;
+  summary.innerHTML=`Soma dif. valor (dif. qtd × preço SAP): <strong>${fmtBrlLiq(gapTotal)}</strong> · Banner Dif. Valor: <strong>${fmtBrlLiq(recon.difVlr)}</strong> · Top ${top.length} de ${rows.length} EANs · ordenado por |dif. valor|`;
   const liqCls=v=>v>0?'pos':v<0?'neg':'';
   body.innerHTML=top.map(r=>{
     const dqCls=r.difQt>0?'pos':r.difQt<0?'neg':'';
@@ -2661,8 +2727,6 @@ function renderValorGapPanel(){
       <td class="num">${fmtBrl(r.valorSap)}</td>
       <td class="num">${fmtBrl(r.valorWms)}</td>
       <td class="num ${liqCls(r.difValor)}">${fmtBrlLiq(r.difValor)}</td>
-      <td class="num ${liqCls(r.difValorQtd)}">${fmtBrlLiq(r.difValorQtd)}</td>
-      <td class="num ${liqCls(r.difValorPreco)}">${fmtBrlLiq(r.difValorPreco)}</td>
       <td class="num ${dqCls}">${r.difQt>0?'+':''}${fQ(r.difQt)}</td>
     </tr>`;
   }).join('');
@@ -2675,10 +2739,10 @@ function exportValorGapXlsx(){
     Cod_SAP:r.sapCode,EAN:r.EAN_norm,Descricao:r.desc,Categoria:r.cat,Subcategoria:r.subcat,
     Qtd_SAP:r.qtSap,Qtd_WMS:r.qtUni,Preco_SAP:r.precoSap,Preco_WMS:r.precoWms,
     Valor_SAP:r.valorSap,Valor_WMS:r.valorWms,
-    Dif_Valor_Total:r.difValor,Dif_Valor_Qtd:r.difValorQtd,Dif_Valor_Preco:r.difValorPreco,Dif_Qtd:r.difQt
+    Dif_Valor:r.difValor,Dif_Qtd:r.difQt
   }));
   const ws=XLSX.utils.json_to_sheet(data);
-  ws['!cols']=[{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12},{wch:12},{wch:14},{wch:14},{wch:16},{wch:16},{wch:16},{wch:10}];
+  ws['!cols']=[{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12},{wch:12},{wch:14},{wch:14},{wch:14},{wch:10}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Dif Valor SAP WMS');
   XLSX.writeFile(wb,`dif_valor_sap_wms_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
@@ -2901,12 +2965,15 @@ function _renderEanView(){
   const precoMapKpi=buildSapPrecoMap();
   const totalNetDiff=rows.reduce((s,r)=>s+r.diff,0);
   const totalValorLiq=rows.reduce((s,r)=>s+(r.semValor?0:reconRowValor({EAN_norm:r.EAN_norm,diff:r.diff},precoMapKpi)),0);
-  const temPreco=rows.some(r=>!r.semValor&&r.preco>0);
+  const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{qtKey:'qt_sap',getDk:()=>null,eanKey:'EAN_norm'});
+  const {total:valorWms,temPreco:temPrecoWms}=calcEanViewWmsValor(rows);
+  const temPreco=temPrecoSap||temPrecoWms||rows.some(r=>!r.semValor&&r.preco>0);
   document.getElementById('eanKpis').innerHTML=`
     <div class="kpi"><div class="kl">EANs</div><div class="kv">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com divergência</div><div class="kv r">${fmt(comDiff)}</div><div class="ks">${rows.length?Math.round(comDiff/rows.length*100):0}%</div></div>
     <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmt(rows.length-comDiff)}</div></div>
     <div class="kpi"><div class="kl">Dif. qtd (líquido)</div><div class="kv ${kvLiqCls(totalNetDiff)}">${totalNetDiff>0?'+':''}${fmt(totalNetDiff)}</div><div class="ks">unidades</div></div>
+    ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
     ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · excl. equip. prof.</div></div>`:''}
   `;
 
@@ -3086,7 +3153,9 @@ function _renderRecon(){
   const totalNetDiff=rows.reduce((s,r)=>s+r.diff,0);
   const totalValorLiq=rows.reduce((s,r)=>s+reconRowValor(r,precoMap,activeDepot),0);
   const isMuimDepot=!!DEPOT_MAP[activeDepot]?.catOnly;
-  const temPreco=!isMuimDepot&&rows.some(r=>!isEquipProfissional(r.EAN_norm,activeDepot)&&(precoMap[r.EAN_norm]||0)>0);
+  const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{qtKey:'qt_sap',dk:activeDepot});
+  const {total:valorWms,temPreco:temPrecoWms}=calcReconDepotWmsValor(rows,activeDepot);
+  const temPreco=!isMuimDepot&&(temPrecoSap||temPrecoWms||rows.some(r=>!isEquipProfissional(r.EAN_norm,activeDepot)&&(precoMap[r.EAN_norm]||0)>0));
   const depLbl=DEPOT_MAP[activeDepot]?.label.split('—')[1]?.trim()||activeDepot;
   const classLbl=activeReconClass?` · Cl. ${activeReconClass}`:'';
   document.getElementById('reconKpis').innerHTML=`
@@ -3096,6 +3165,7 @@ function _renderRecon(){
     <div class="kpi"><div class="kl">Qt SAP</div><div class="kv">${fmt(rows.reduce((s,r)=>s+r.qt_sap,0))}</div></div>
     <div class="kpi"><div class="kl">Qt Unilog</div><div class="kv">${fmt(rows.reduce((s,r)=>s+r.qt_uni,0))}</div></div>
     <div class="kpi"><div class="kl">Dif. qtd (líquido)</div><div class="kv ${kvLiqCls(totalNetDiff)}">${totalNetDiff>0?'+':''}${fmt(totalNetDiff)}</div><div class="ks">unidades</div></div>
+    ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
     ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · excl. equip. prof.</div></div>`:''}
   `;
 
@@ -3170,10 +3240,13 @@ function _renderSusp(){
   applySort('susp',rows);updateSortHeaders('susp');
 
   const withSim=rows.filter(r=>r.similar).length;
+  const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows);
+  const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows);
   document.getElementById('suspKpis').innerHTML=`
     <div class="kpi"><div class="kl">Lotes suspeitos</div><div class="kv r">${fmt(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com similar SAP</div><div class="kv y">${fmt(withSim)}</div><div class="ks">provável erro digitação</div></div>
     <div class="kpi"><div class="kl">Sem correspondência</div><div class="kv">${fmt(rows.length-withSim)}</div></div>
+    ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
   `;
 
   const body=document.getElementById('suspBody');body.innerHTML='';
