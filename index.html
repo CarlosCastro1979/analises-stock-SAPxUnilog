@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619223000 -->
+<!DOCTYPE html><!-- v20260619240000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -301,6 +301,7 @@ select.cad-inp{cursor:pointer;}
     </div>
     <div class="dp" id="depotPills"></div>
     <div class="dp" id="reconClassPills" style="display:none"></div>
+    <div class="kr" id="reconResumoKpis" style="display:none;margin-bottom:0"></div>
     <div class="tb">
       <input class="inp is" id="reconSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderRecon()">
       <select class="inp" id="reconEstado" onchange="renderRecon()">
@@ -1291,6 +1292,12 @@ function normSap(rows){
     .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito)&&r.EAN_norm);
 }
 const UNI_CLASSE_COLS=['Classe','Class','CLASSE','Classe ','Class '];
+const UNI_CLASSE_ALIASES={
+  'FALTA DE INVENTARIO':'FI','FALTA DE INVENTÁRIO':'FI','FALTA INVENTARIO':'FI','FALTA INVENTÁRIO':'FI',
+  'SOBRA DE INVENTARIO':'SI','SOBRA DE INVENTÁRIO':'SI','SOBRA INVENTARIO':'SI','SOBRA INVENTÁRIO':'SI'
+};
+const INV_CLASS_LABELS={FI:'Falta de inventário',SI:'Sobra de inventário'};
+const INV_CLASSES=['FI','SI'];
 const UNI_VALIDADE_COLS=['Validade Lote','Validade Lote.','Validade Lote ','Data Validade','Validade'];
 function pickUniClasseField(r){
   for(const c of UNI_CLASSE_COLS){
@@ -1304,7 +1311,8 @@ function pickUniClasseField(r){
 function normUniClasse(raw){
   const s=String(raw??'').trim();
   if(!s||EXCL.includes(s))return null;
-  return s.toUpperCase();
+  const up=s.toUpperCase();
+  return UNI_CLASSE_ALIASES[up]||up;
 }
 function refreshUniClasseNorm(){
   if(!uniData?.length)return;
@@ -1544,6 +1552,38 @@ function fmtKvBrlLiq(v){return fmtKv(fmtBrlLiq(v));}
 function fmtValorDifCell(diff,preco){const p=Number(preco)||0;if(p<=0)return '—';return fmtBrlLiq(diff*p);}
 function reconRowValor(r,precoMap,dk){if(isEquipProfissional(r.EAN_norm,dk))return 0;const p=(precoMap||buildSapPrecoMap())[r.EAN_norm]||0;return r.diff*p;}
 function wmsLineValor(r){const qt=Number(r.qt)||0;if(qt<=0)return 0;const vlr=Number(r.vlr)||0;if(vlr>0)return qt*vlr;const vt=Number(r.vlrTotal)||0;return vt>0?vt:0;}
+function wmsResumoValor(r){const vt=Number(r.vlrTotal)||0;if(vt>0)return vt;const qt=Number(r.qt)||0;const vlr=Number(r.vlr)||0;if(qt>0&&vlr>0)return qt*vlr;return 0;}
+function calcUniInventarioResumo(classes){
+  if(!uniData?.length)return{sku:0,qtd:0,vlr:0};
+  const cls=classes?.length?classes:INV_CLASSES;
+  const rows=uniData.filter(r=>cls.includes(r.classe)&&r.qt>0);
+  const sku=new Set(rows.map(r=>r.EAN_norm).filter(Boolean)).size;
+  let qtd=0,vlr=0;
+  for(const r of rows){qtd+=r.qt;vlr+=wmsResumoValor(r);}
+  return{sku,qtd,vlr};
+}
+function kpiResumoInventarioHtml(dk,activeCl){
+  if(dk!=='44'||!uniData?.length)return'';
+  const show=activeCl?INV_CLASSES.includes(activeCl)?[activeCl]:[]:INV_CLASSES;
+  if(!show.length)return'';
+  const cards=show.map(cl=>{
+    const s=calcUniInventarioResumo([cl]);
+    const lbl=INV_CLASS_LABELS[cl]||('Cl. '+cl);
+    return `<div class="kpi"><div class="kl">${lbl} (Cl. ${cl})</div><div class="kv b">${fmtKvNum(s.sku)}</div><div class="ks">${fmtKvNum(s.qtd)} un · ${fmtBrl(s.vlr)} · resumo Unilog</div></div>`;
+  }).join('');
+  if(!activeCl){
+    const tot=calcUniInventarioResumo(INV_CLASSES);
+    return cards+`<div class="kpi"><div class="kl">Inventário FI+SI</div><div class="kv">${fmtKvNum(tot.sku)}</div><div class="ks">${fmtKvNum(tot.qtd)} un · ${fmtBrl(tot.vlr)} · total resumo Unilog</div></div>`;
+  }
+  return cards;
+}
+function applyReconClassFilter(rows,cl){
+  if(!cl)return rows;
+  return rows.filter(r=>reconRowMatchesClass(r,cl)).map(r=>{
+    const qt_uni=(r.qt_uni_by_class&&r.qt_uni_by_class[cl])||0;
+    return{...r,qt_uni,diff:r.qt_sap-qt_uni};
+  });
+}
 function calcValorTotSapFromRows(rows,{eanKey='EAN_norm',qtKey='qt',dk=null,getDk=null,precoKey=null}={}){
   const pm=buildSapPrecoMap();
   let total=0,temPreco=false;
@@ -1592,11 +1632,12 @@ function calcValorTotWmsFromUniMatch(rows,{eanKey='EAN_norm',loteKey='Lote_norm'
   }
   return{total,temPreco};
 }
-function calcReconDepotWmsValor(filteredRows,dk){
+function calcReconDepotWmsValor(filteredRows,dk,cl=null){
   if(!uniData||!filteredRows.length)return{total:0,temPreco:false};
   const keys=new Set(filteredRows.map(r=>r.EAN_norm+'|'+(r.Lote_norm||'')));
   let total=0,temPreco=false;
   for(const ur of uniRowsForDepot(dk)){
+    if(cl&&ur.classe!==cl)continue;
     if(!keys.has(ur.EAN_norm+'|'+(ur.Lote_norm||'')))continue;
     if(isEquipProfissional(ur.EAN_norm,dk))continue;
     const lv=wmsLineValor(ur);
@@ -1815,10 +1856,17 @@ function buildRecon(){
     const sA={};
     for(const r of sapDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!sA[k])sA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,desc:r.desc,validade:r.validade};sA[k].qt+=r.qt;}
     const uA={};
-    for(const r of uniDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,classes:new Set(),enderecos:[]};uA[k].qt+=r.qt;uA[k].classes.add(r.classe);if(r.endereco&&!uA[k].enderecos.includes(r.endereco))uA[k].enderecos.push(r.endereco);}
+    for(const r of uniDep){
+      const k=r.EAN_norm+'|'+r.Lote_norm;
+      if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,qtByClass:{},classes:new Set(),enderecos:[]};
+      uA[k].qt+=r.qt;
+      uA[k].qtByClass[r.classe]=(uA[k].qtByClass[r.classe]||0)+r.qt;
+      uA[k].classes.add(r.classe);
+      if(r.endereco&&!uA[k].enderecos.includes(r.endereco))uA[k].enderecos.push(r.endereco);
+    }
     const keys=new Set([...Object.keys(sA),...Object.keys(uA)]);
     reconData[dk]=[];
-    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[],cat:param?.cat||'',subcat:param?.subcat||''});}
+    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,qt_uni_by_class:u?{...u.qtByClass}:{},diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[],cat:param?.cat||'',subcat:param?.subcat||''});}
   }
 }
 
@@ -3134,7 +3182,11 @@ function renderReconClassPills(){
     el.onclick=()=>{activeReconClass=cl;renderReconClassPills();renderRecon();};c.appendChild(el);
   };
   mkPill('Todas','');
-  classes.forEach(cl=>mkPill('Cl. '+cl,cl));
+  classes.forEach(cl=>{
+    const extra=INV_CLASSES.includes(cl)?calcUniInventarioResumo([cl]):null;
+    const lbl=extra?`Cl. ${cl} (${extra.sku} SKU)`:`Cl. ${cl}`;
+    mkPill(lbl,cl);
+  });
 }
 
 function toggleShowAll(){showAll=!showAll;document.getElementById('showAllTg').classList.toggle('on',showAll);document.getElementById('tgLbl').textContent=showAll?'Mostrar tudo':'Só diferenças';renderRecon();}
@@ -3148,8 +3200,10 @@ function renderRecon(){
 function _renderRecon(){
   if(!reconData[activeDepot])return;
   renderReconClassPills();
-  let rows=[...(reconData[activeDepot]||[])];
-  if(activeReconClass)rows=rows.filter(r=>reconRowMatchesClass(r,activeReconClass));
+  const resumoEl=document.getElementById('reconResumoKpis');
+  const resumoHtml=kpiResumoInventarioHtml(activeDepot,activeReconClass);
+  if(resumoEl){resumoEl.style.display=resumoHtml?'grid':'none';resumoEl.innerHTML=resumoHtml;}
+  let rows=applyReconClassFilter([...(reconData[activeDepot]||[])],activeReconClass);
   const srch=document.getElementById('reconSrch').value.toLowerCase();
   const estadoVals=msGetVals('reconEstado');
   const validadeVals=msGetVals('reconValidade');
@@ -3206,16 +3260,18 @@ function _renderRecon(){
   const totalValorLiq=rows.reduce((s,r)=>s+reconRowValor(r,precoMap,activeDepot),0);
   const isMuimDepot=!!DEPOT_MAP[activeDepot]?.catOnly;
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{qtKey:'qt_sap',dk:activeDepot});
-  const {total:valorWms,temPreco:temPrecoWms}=calcReconDepotWmsValor(rows,activeDepot);
+  const {total:valorWms,temPreco:temPrecoWms}=calcReconDepotWmsValor(rows,activeDepot,activeReconClass||null);
   const temPreco=!isMuimDepot&&(temPrecoSap||temPrecoWms||rows.some(r=>!isEquipProfissional(r.EAN_norm,activeDepot)&&(precoMap[r.EAN_norm]||0)>0));
   const depLbl=DEPOT_MAP[activeDepot]?.label.split('—')[1]?.trim()||activeDepot;
   const classLbl=activeReconClass?` · Cl. ${activeReconClass}`:'';
+  const invResumo=activeReconClass&&INV_CLASSES.includes(activeReconClass)?calcUniInventarioResumo([activeReconClass]):null;
+  const comboLbl=activeReconClass&&INV_CLASSES.includes(activeReconClass)?'Combos EAN+lote':'Combos';
   document.getElementById('reconKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Combos</div><div class="kv">${fmtKvNum(rows.length)}</div><div class="ks">dep. ${depLbl}${classLbl}</div></div>
+    <div class="kpi"><div class="kl">${comboLbl}</div><div class="kv">${fmtKvNum(rows.length)}</div><div class="ks">dep. ${depLbl}${classLbl}${invResumo?` · Unilog resumo: ${invResumo.sku.toLocaleString('pt-BR')} SKU`:''}</div></div>
     <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmtKvNum(okCount)}</div><div class="ks">${pct}%</div></div>
     <div class="kpi"><div class="kl">Com diferença</div><div class="kv r">${fmtKvNum(comDiff)}</div></div>
     <div class="kpi"><div class="kl">Qt SAP</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_sap,0))}</div></div>
-    <div class="kpi"><div class="kl">Qt Unilog</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_uni,0))}</div></div>
+    <div class="kpi"><div class="kl">Qt Unilog</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_uni,0))}</div>${invResumo?`<div class="ks">resumo Unilog: ${invResumo.qtd.toLocaleString('pt-BR')} un</div>`:''}</div>
     <div class="kpi"><div class="kl">Dif. qtd (líquido)</div><div class="kv ${kvLiqCls(totalNetDiff)}">${fmtKvSigned(totalNetDiff)}</div><div class="ks">unidades</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
     ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtKvBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · excl. equip. prof.</div></div>`:''}
@@ -3604,8 +3660,7 @@ function exportSuspXlsx(){
 
 function exportReconXlsx(){
   if(!reconData[activeDepot]){toast("Sem dados para exportar","error");return;}
-  let rows=[...(reconData[activeDepot]||[])];
-  if(activeReconClass)rows=rows.filter(r=>reconRowMatchesClass(r,activeReconClass));
+  let rows=applyReconClassFilter([...(reconData[activeDepot]||[])],activeReconClass);
   const srch=document.getElementById("reconSrch").value.toLowerCase();
   const estadoVals=msGetVals("reconEstado");
   const validadeVals=msGetVals("reconValidade");
