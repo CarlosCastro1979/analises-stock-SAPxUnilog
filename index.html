@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619153001 -->
+<!DOCTYPE html><!-- v20260619170001 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -235,8 +235,7 @@ select.cad-inp{cursor:pointer;}
 <div class="nav">
   <div class="nt active" data-page="upload">📁 Dados</div>
   <div class="nt" data-page="recon">⚖️ Conciliação</div>
-  <div class="nt" data-page="suspeitos">🔍 Lotes Suspeitos<span id="suspBadge" class="bc" style="display:none"></span></div>
-  <div class="nt" data-page="somunilog">⚠️ Só Unilog<span id="suBadge" class="bc" style="display:none"></span></div>
+  <div class="nt" data-page="alertas">🚨 Alertas Ação urgente<span id="alertBadge" class="bc" style="display:none"></span></div>
   <div class="nt" data-page="cadastro">🗂️ Cadastro</div>
   <div class="nt" data-page="occupation">📦 Ocupação</div>
   <div class="nt" data-page="reclamacoes">🚨 Reclamações<span id="recBadge" class="bc" style="display:none;background:#f59e0b;color:#fff"></span></div>
@@ -397,8 +396,15 @@ select.cad-inp{cursor:pointer;}
   </div><!-- /recon-ean -->
 </div>
 
-<!-- ══ LOTES SUSPEITOS ══ -->
-<div class="page" id="page-suspeitos">
+<!-- ══ ALERTAS AÇÃO URGENTE ══ -->
+<div class="page" id="page-alertas">
+  <div class="its" id="alertIts">
+    <div class="it active" data-tab="suspeitos" onclick="alertTab('suspeitos',this)">Lotes Suspeitos<span id="suspBadge" class="bc" style="display:none"></span></div>
+    <div class="it" data-tab="somunilog" onclick="alertTab('somunilog',this)">Só Unilog<span id="suBadge" class="bc" style="display:none"></span></div>
+    <div class="it" data-tab="posclasse" onclick="alertTab('posclasse',this)">Posições + 1 Depósito<span id="posClasseBadge" class="bc" style="display:none"></span></div>
+  </div>
+
+  <div id="alert-suspeitos">
   <div class="card">
     <div class="ch"><div class="ct">Lotes só no Unilog — Potencialmente Errados</div><button class="btn bg bs" onclick="exportSuspXlsx()">⬇ Excel</button></div>
     <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">EAN+Lote presentes no Unilog mas <strong>ausentes no SAP</strong>. Observações identificam lotes SAP similares (provável erro de digitação).</p>
@@ -430,10 +436,9 @@ select.cad-inp{cursor:pointer;}
     </table></div>
     <div id="suspEmpty" class="empty" style="display:none"><div class="empty-i">🔍</div><div>Nenhum lote suspeito</div></div>
   </div>
-</div>
+  </div><!-- /alert-suspeitos -->
 
-<!-- ══ SÓ UNILOG ══ -->
-<div class="page" id="page-somunilog">
+  <div id="alert-somunilog" style="display:none">
   <div class="card">
     <div class="ch">
       <div class="ct">Produtos só no Unilog — EAN não encontrado no SAP</div>
@@ -461,6 +466,37 @@ select.cad-inp{cursor:pointer;}
     </table></div>
     <div id="suEmpty" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum produto exclusivo do Unilog</div></div>
   </div>
+  </div><!-- /alert-somunilog -->
+
+  <div id="alert-posclasse" style="display:none">
+  <div class="card">
+    <div class="ch">
+      <div class="ct">Posições com classes misturadas no mesmo endereço</div>
+      <button class="btn bg bs" onclick="exportPosClasseXlsx()">⬇ Excel</button>
+    </div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
+      No mesmo depósito, cada endereço (posição) deve ter stock de <strong>uma única classe</strong>. Alerta quando o mesmo endereço tem itens de 2+ classes diferentes.
+    </p>
+    <div class="dp" id="posDepPills"></div>
+    <div class="tb">
+      <input class="inp is" id="posSrch" placeholder="Endereço, EAN, código SAP ou descrição…" oninput="renderPosClasse()">
+    </div>
+    <div class="kr" id="posKpis"></div>
+    <div class="tw2"><table>
+      <thead><tr>
+        <th onclick="doSort('poscl','depLabel')">Depósito</th>
+        <th onclick="doSort('poscl','endereco')">Endereço</th>
+        <th onclick="doSort('poscl','nClasses')">Classes</th>
+        <th onclick="doSort('poscl','eans')">EANs / Lotes</th>
+        <th onclick="doSort('poscl','totalQt')" class="num">Qtd Total</th>
+        <th>Descrições</th>
+      </tr></thead>
+      <tbody id="posBody"></tbody>
+    </table></div>
+    <div id="posEmpty" class="empty" style="display:none"><div class="empty-i">📍</div><div>Carrega os ficheiros Unilog para analisar posições</div></div>
+    <div id="posOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhuma posição com classes misturadas</div></div>
+  </div>
+  </div><!-- /alert-posclasse -->
 </div>
 
 <!-- ══ CADASTRO ══ -->
@@ -1092,8 +1128,8 @@ let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','FI','SI','Total',''];
 
-let sapData=null,uniData=null,reconData={},suspData=[],occParams=[],reconNotas={},cadEdits={};
-let showAll=false,activeDepot='11',editOccId=null,company='DFB',sorts={},pecasData=[];
+let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],occParams=[],reconNotas={},cadEdits={};
+let showAll=false,activeDepot='11',activePosDepot='',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
 async function init(){
@@ -1104,8 +1140,7 @@ async function init(){
       t.classList.add('active');
       document.getElementById('page-'+t.dataset.page).classList.add('active');
       if(t.dataset.page==='recon')renderReconPage();
-      if(t.dataset.page==='suspeitos')renderSusp();
-      if(t.dataset.page==='somunilog')renderSoUnilog();
+      if(t.dataset.page==='alertas')renderAlertPage();
       if(t.dataset.page==='cadastro')renderCadastro();
       if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
       if(t.dataset.page==='reclamacoes'){loadReclamacoes();}
@@ -1436,6 +1471,7 @@ function buildSusp(){
     suspData.push({EAN_norm,Lote_norm,qt,desc,similar:best,depots,cat:param?.cat||autoCat(desc).cat||''});
   }
   const badge=document.getElementById('suspBadge');badge.textContent=suspData.length;badge.style.display=suspData.length>0?'':'none';
+  updateAlertBadge();
 }
 
 // ── BUILD & RENDER DUPLICADOS ──
@@ -1541,6 +1577,7 @@ function buildSoUnilog(){
   const uniqueEANs=new Set(soUnilogData.map(r=>r.EAN_norm));
   badge.textContent=uniqueEANs.size;
   badge.style.display=uniqueEANs.size>0?'':'none';
+  updateAlertBadge();
 }
 
 let _renderSoUnilogBusy=false;
@@ -1601,6 +1638,187 @@ function exportSoUnilogXlsx(){
   XLSX.writeFile(wb,`so_unilog_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
+// ── ALERTAS: TAB SWITCH ──
+function alertTab(name,el){
+  el.closest('#alertIts').querySelectorAll('.it').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('alert-suspeitos').style.display=name==='suspeitos'?'':'none';
+  document.getElementById('alert-somunilog').style.display=name==='somunilog'?'':'none';
+  document.getElementById('alert-posclasse').style.display=name==='posclasse'?'':'none';
+  if(name==='suspeitos')renderSusp();
+  else if(name==='somunilog')renderSoUnilog();
+  else renderPosClasse();
+}
+function renderAlertPage(){
+  const active=document.querySelector('#alertIts .it.active');
+  const tab=active?.dataset?.tab||'suspeitos';
+  if(tab==='suspeitos')renderSusp();
+  else if(tab==='somunilog')renderSoUnilog();
+  else renderPosClasse();
+}
+function updateAlertBadge(){
+  const badge=document.getElementById('alertBadge');
+  if(!badge)return;
+  const n=(suspData?.length||0)+(posClasseData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
+  badge.textContent=n;
+  badge.style.display=n>0?'':'none';
+}
+
+// ── POSIÇÕES + 1 DEPÓSITO ──
+function isDC(e){return e&&e.includes('DC');}
+function buildPosClasse(){
+  posClasseData=[];
+  if(!uniData)return;
+  const groups={};
+  uniData.forEach(r=>{
+    const end=(r.endereco||'').trim();
+    if(!end||isDC(end))return;
+    const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
+    if(!dk)return;
+    const key=dk+'|'+end;
+    if(!groups[key])groups[key]={dk,endereco:end,classes:new Set(),items:[]};
+    groups[key].classes.add(r.classe);
+    groups[key].items.push(r);
+  });
+  for(const g of Object.values(groups)){
+    if(g.classes.size<2)continue;
+    const eans=new Set(),lotes=new Set(),descs=new Set();
+    let totalQt=0;
+    g.items.forEach(r=>{
+      eans.add(r.EAN_norm);
+      if(r.Lote_norm)lotes.add(r.Lote_norm);
+      if(r.produto)descs.add(r.produto);
+      totalQt+=r.qt;
+    });
+    posClasseData.push({
+      dk:g.dk,
+      depLabel:DEPOT_MAP[g.dk]?.label.split('—')[1]?.trim()||g.dk,
+      endereco:g.endereco,
+      classes:[...g.classes].sort(),
+      items:g.items,
+      eans:[...eans],
+      lotes:[...lotes],
+      descs:[...descs],
+      totalQt,
+      nClasses:g.classes.size
+    });
+  }
+  posClasseData.sort((a,b)=>b.nClasses-a.nClasses||a.endereco.localeCompare(b.endereco));
+  const badge=document.getElementById('posClasseBadge');
+  if(badge){badge.textContent=posClasseData.length;badge.style.display=posClasseData.length>0?'':'none';}
+  updateAlertBadge();
+}
+function renderPosDepPills(){
+  const c=document.getElementById('posDepPills');if(!c)return;
+  c.innerHTML='';
+  const all=document.createElement('div');all.className='dpl'+(!activePosDepot?' active':'');all.textContent='Todos';
+  all.onclick=()=>{activePosDepot='';renderPosDepPills();renderPosClasse();};c.appendChild(all);
+  for(const dk of DKS){
+    const el=document.createElement('div');el.className='dpl'+(dk===activePosDepot?' active':'');
+    el.textContent=DEPOT_MAP[dk].label.split('—')[1]?.trim()||dk;
+    el.onclick=()=>{activePosDepot=dk;renderPosDepPills();renderPosClasse();};c.appendChild(el);
+  }
+}
+let _renderPosClasseBusy=false;
+function renderPosClasse(){if(_renderPosClasseBusy)return;_renderPosClasseBusy=true;try{_renderPosClasse();}finally{_renderPosClasseBusy=false;}}
+function _renderPosClasse(){
+  const body=document.getElementById('posBody');
+  const empty=document.getElementById('posEmpty');
+  const ok=document.getElementById('posOk');
+  if(!uniData){
+    if(body)body.innerHTML='';
+    if(empty)empty.style.display='block';
+    if(ok)ok.style.display='none';
+    return;
+  }
+  if(empty)empty.style.display='none';
+  renderPosDepPills();
+  let rows=[...posClasseData];
+  const srch=document.getElementById('posSrch')?.value.toLowerCase()||'';
+  if(activePosDepot)rows=rows.filter(r=>r.dk===activePosDepot);
+  if(srch)rows=rows.filter(r=>
+    r.endereco.toLowerCase().includes(srch)||
+    r.eans.some(e=>e.includes(srch)||matchProdSrch(srch,e,''))||
+    r.descs.some(d=>d.toLowerCase().includes(srch))||
+    r.lotes.some(l=>l.toLowerCase().includes(srch))
+  );
+  applySort('poscl',rows);updateSortHeaders('poscl');
+  const mixClasses=rows.reduce((s,r)=>s+r.nClasses,0);
+  const totalQt=rows.reduce((s,r)=>s+r.totalQt,0);
+  const totalEans=new Set(rows.flatMap(r=>r.eans)).size;
+  document.getElementById('posKpis').innerHTML=`
+    <div class="kpi"><div class="kl">Posições com problema</div><div class="kv r">${fmt(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Classes misturadas</div><div class="kv y">${fmt(mixClasses)}</div><div class="ks">soma por posição</div></div>
+    <div class="kpi"><div class="kl">EANs afectados</div><div class="kv b">${fmt(totalEans)}</div></div>
+    <div class="kpi"><div class="kl">Qtd total</div><div class="kv">${fmt(totalQt)}</div></div>
+  `;
+  body.innerHTML='';
+  document.getElementById('posOk').style.display=rows.length===0?'block':'none';
+  for(const r of rows){
+    const clsHtml=r.classes.map(cl=>{
+      const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));
+      const lbl=dk?DEPOT_MAP[dk].label.split('—')[1]?.trim():'';
+      return`<span class="badge berr" style="margin-right:2px;margin-bottom:2px">${lbl?lbl+'/':''}Cl.${cl}</span>`;
+    }).join('');
+    const pairs=[];
+    const seen=new Set();
+    r.items.forEach(it=>{
+      const k=it.EAN_norm+'|'+(it.Lote_norm||'');
+      if(seen.has(k))return;
+      seen.add(k);
+      pairs.push({ean:it.EAN_norm,lote:it.Lote_norm||'—',classe:it.classe});
+    });
+    const eanHtml=pairs.slice(0,4).map(p=>`<div style="font-size:10px;margin-bottom:2px">${sapCodeHtml(p.ean)} <span class="badge bneu">${p.ean}</span> <span style="font-family:var(--mono);color:var(--muted)">${p.lote}</span> <span class="badge bgray">Cl.${p.classe}</span></div>`).join('')+(pairs.length>4?`<div style="font-size:10px;color:var(--muted)">+${pairs.length-4} mais</div>`:'');
+    const descHtml=[...r.descs].slice(0,2).map(d=>`<div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d)}">${d}</div>`).join('')+(r.descs.length>2?`<div style="font-size:10px;color:var(--muted)">+${r.descs.length-2} descrições</div>`:'');
+    const tr=document.createElement('tr');tr.className='dr';
+    tr.innerHTML=`
+      <td><span class="badge binfo">${r.depLabel}</span></td>
+      <td style="font-family:var(--mono);font-size:11px">${r.endereco}</td>
+      <td>${clsHtml}</td>
+      <td>${eanHtml||'—'}</td>
+      <td class="num">${fmt(r.totalQt)}</td>
+      <td style="max-width:200px">${descHtml||'—'}</td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!rows.length&&uniData)document.getElementById('posOk').style.display='block';
+}
+function exportPosClasseXlsx(){
+  if(!posClasseData.length){toast('Sem dados','error');return;}
+  let rows=[...posClasseData];
+  const srch=document.getElementById('posSrch')?.value.toLowerCase()||'';
+  if(activePosDepot)rows=rows.filter(r=>r.dk===activePosDepot);
+  if(srch)rows=rows.filter(r=>
+    r.endereco.toLowerCase().includes(srch)||
+    r.eans.some(e=>e.includes(srch)||matchProdSrch(srch,e,''))||
+    r.descs.some(d=>d.toLowerCase().includes(srch))
+  );
+  const data=[];
+  rows.forEach(r=>{
+    const seen=new Set();
+    r.items.forEach(it=>{
+      const k=it.EAN_norm+'|'+(it.Lote_norm||'')+'|'+it.classe;
+      if(seen.has(k))return;
+      seen.add(k);
+      data.push({
+        Deposito:r.depLabel,
+        Endereco:r.endereco,
+        Classes:r.classes.join(', '),
+        Classe_Item:it.classe,
+        Cod_SAP:getSapCode(it.EAN_norm),
+        EAN:it.EAN_norm,
+        Lote:it.Lote_norm||'',
+        Descricao:it.produto||'',
+        QtUnilog:it.qt
+      });
+    });
+  });
+  if(!data.length){toast('Sem dados','error');return;}
+  const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Pos Classes');
+  XLSX.writeFile(wb,`pos_classes_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 
 function simRatio(a,b){const la=a.length,lb=b.length;if(!la||!lb)return 0;const dp=Array.from({length:la+1},(_,i)=>Array.from({length:lb+1},(_,j)=>i===0?j:j===0?i:0));for(let i=1;i<=la;i++)for(let j=1;j<=lb;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return 1-dp[la][lb]/Math.max(la,lb);}
 
@@ -1610,7 +1828,7 @@ async function processAll(){
   company=document.getElementById('coSel').value;
   document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
   await loadOccParams();
-  buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();await autoSeedOcc();await processPecas();renderUpKpis();updateChip();
+  buildRecon();buildSusp();buildSoUnilog();buildPosClasse();checkDuplicadosAlert();await autoSeedOcc();await processPecas();renderUpKpis();updateChip();
   const procAt=new Date().toISOString();
   try{
     const payload={id:company,company,uploaded_at:procAt,sap_rows:sapData.length,unilog_rows:uniData.length,sap_data:JSON.stringify(sapData),unilog_data:JSON.stringify(uniData),recon_summary:JSON.stringify(buildSummary())};
@@ -1774,7 +1992,7 @@ function switchCompany(){
   DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
   DKS=Object.keys(DEPOT_MAP);
   // Reset all data
-  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];
+  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
   renderUpKpis();
@@ -1782,6 +2000,9 @@ function switchCompany(){
   const qb=document.getElementById('transQbBody');if(qb)qb.innerHTML='';
   const badge=document.getElementById('recBadge');if(badge){badge.textContent='';badge.style.display='none';}
   const suspBadge=document.getElementById('suspBadge');if(suspBadge){suspBadge.textContent='';suspBadge.style.display='none';}
+  const suBadge=document.getElementById('suBadge');if(suBadge){suBadge.textContent='';suBadge.style.display='none';}
+  const posClasseBadge=document.getElementById('posClasseBadge');if(posClasseBadge){posClasseBadge.textContent='';posClasseBadge.style.display='none';}
+  const alertBadge=document.getElementById('alertBadge');if(alertBadge){alertBadge.textContent='';alertBadge.style.display='none';}
   // Try to load saved data for the new company
   loadFromDB(true);
   toast('Empresa: '+company,'info');
@@ -1798,13 +2019,13 @@ async function loadFromDB(silent=false){
     invalidateSapMaps();
     // Load occParams first so MUIM category filtering works in buildRecon
     await loadOccParams();
-    buildRecon();buildSusp();buildSoUnilog();checkDuplicadosAlert();await processPecas();await loadPecasData();renderUpKpis();updateChip();
+    buildRecon();buildSusp();buildSoUnilog();buildPosClasse();checkDuplicadosAlert();await processPecas();await loadPecasData();renderUpKpis();updateChip();
     // Re-render active page if it needs data
     const activePage=document.querySelector('.page.active');
     if(activePage){
       if(activePage.id==='page-occupation')renderOccView();
       if(activePage.id==='page-recon')renderReconPage();
-      if(activePage.id==='page-suspeitos')renderSusp();
+      if(activePage.id==='page-alertas')renderAlertPage();
       if(activePage.id==='page-cadastro')renderCadastro();
       if(activePage.id==='page-pecas')renderPecas();
     }
@@ -3217,6 +3438,7 @@ function doSort(table,col){
   if(table==='recon')renderRecon();
   else if(table==='susp')renderSusp();
   else if(table==='su')renderSoUnilog();
+  else if(table==='poscl')renderPosClasse();
   else if(table==='occ')renderOccView();
   else if(table==='transEc')renderTrans('ecommerce');
   else if(table==='transQb')renderTrans('qbrasil');
