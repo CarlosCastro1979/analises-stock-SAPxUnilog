@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619240000 -->
+<!DOCTYPE html><!-- v20260619250000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -5262,42 +5262,82 @@ function exportTransXlsx(tipo){
 
 
 // ── RESIZABLE COLUMNS ──
-function makeResizable(table){
-  const cols=table.querySelectorAll('th');
-  cols.forEach(th=>{
+const COL_RESIZE_STORAGE='logistica_colWidths_v1';
+
+function colResizeKey(table){
+  if(table.id)return table.id;
+  const body=table.querySelector('tbody[id]');
+  if(body)return body.id.replace(/Body$/,'Table');
+  return 'tbl_'+[...document.querySelectorAll('.tw2 table')].indexOf(table);
+}
+function loadColWidths(key){
+  try{const all=JSON.parse(localStorage.getItem(COL_RESIZE_STORAGE)||'{}');return all[key]||null;}catch{return null;}
+}
+function saveColWidths(key,widths){
+  try{const all=JSON.parse(localStorage.getItem(COL_RESIZE_STORAGE)||'{}');all[key]=widths;localStorage.setItem(COL_RESIZE_STORAGE,JSON.stringify(all));}catch{}
+}
+function ensureColgroup(table,n){
+  let cg=table.querySelector('colgroup');
+  if(!cg){cg=document.createElement('colgroup');table.insertBefore(cg,table.firstChild);}
+  while(cg.children.length<n)cg.appendChild(document.createElement('col'));
+  while(cg.children.length>n)cg.removeChild(cg.lastChild);
+  return cg;
+}
+function initColResize(table){
+  if(!table||table.dataset.colResizeInit)return;
+  const ths=[...table.querySelectorAll('thead th')];
+  if(!ths.length)return;
+  table.dataset.colResizeInit='1';
+  const key=colResizeKey(table);
+  const cg=ensureColgroup(table,ths.length);
+  const saved=loadColWidths(key);
+  ths.forEach((th,i)=>{
+    if(saved&&saved[i]){
+      const w=saved[i];
+      cg.children[i].style.width=w+'px';
+      th.style.width=w+'px';
+    }
     if(th.querySelector('.resizer'))return;
     const resizer=document.createElement('div');
     resizer.className='resizer';
+    resizer.title='Arrastar para redimensionar';
     th.appendChild(resizer);
     let startX,startW;
+    const onMove=e=>{
+      const w=Math.max(48,startW+(e.pageX-startX));
+      cg.children[i].style.width=w+'px';
+      th.style.width=w+'px';
+    };
+    const onUp=()=>{
+      resizer.classList.remove('dragging');
+      document.body.style.cursor='';
+      document.body.style.userSelect='';
+      document.removeEventListener('mousemove',onMove);
+      document.removeEventListener('mouseup',onUp);
+      const widths=ths.map((t,j)=>parseInt(cg.children[j].style.width,10)||t.offsetWidth);
+      saveColWidths(key,widths);
+    };
     resizer.addEventListener('mousedown',e=>{
+      e.preventDefault();
+      e.stopPropagation();
       startX=e.pageX;
-      startW=th.offsetWidth;
+      startW=th.offsetWidth||parseInt(cg.children[i].style.width,10)||80;
       resizer.classList.add('dragging');
-      const onMove=e=>{
-        const w=Math.max(40,startW+(e.pageX-startX));
-        th.style.width=w+'px';th.style.minWidth=w+'px';
-      };
-      const onUp=()=>{
-        resizer.classList.remove('dragging');
-        document.removeEventListener('mousemove',onMove);
-        document.removeEventListener('mouseup',onUp);
-      };
+      document.body.style.cursor='col-resize';
+      document.body.style.userSelect='none';
       document.addEventListener('mousemove',onMove);
       document.addEventListener('mouseup',onUp);
-      e.preventDefault();
     });
   });
 }
-// Apply to all tables after render
-function applyResizable(){
-  document.querySelectorAll('.tw2 table').forEach(t=>{
-    if(!t.dataset.resizable){makeResizable(t);t.dataset.resizable='1';}
-  });
+let _colResizeTimer=null;
+function scheduleColResize(){
+  clearTimeout(_colResizeTimer);
+  _colResizeTimer=setTimeout(()=>{
+    document.querySelectorAll('.tw2 table').forEach(initColResize);
+  },0);
 }
-// Hook into nav tab clicks
-const _origNavClick=document.querySelectorAll('.nt');
-
+function applyResizable(){scheduleColResize();}
 
 init();
 initMultiselects();
