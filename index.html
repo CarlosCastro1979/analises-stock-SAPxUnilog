@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619210000 -->
+<!DOCTYPE html><!-- v20260619234500 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -404,6 +404,7 @@ select.cad-inp{cursor:pointer;}
     <div class="it" data-tab="somunilog" onclick="alertTab('somunilog',this)">Só Unilog<span id="suBadge" class="bc" style="display:none"></span></div>
     <div class="it" data-tab="posclasse" onclick="alertTab('posclasse',this)">Posições + 1 Depósito<span id="posClasseBadge" class="bc" style="display:none"></span></div>
     <div class="it" data-tab="vencforadep" onclick="alertTab('vencforadep',this)">Vencidos fora dep.<span id="vencForaDepBadge" class="bc" style="display:none"></span></div>
+    <div class="it" data-tab="semvalidade" onclick="alertTab('semvalidade',this)">Produtos sem validade<span id="semValidadeBadge" class="bc" style="display:none"></span></div>
   </div>
 
   <div id="alert-suspeitos">
@@ -511,10 +512,10 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bg bs" onclick="exportVencForaDepXlsx()">⬇ Excel</button>
     </div>
     <p id="vencDescWms" style="font-size:12px;color:var(--text2);margin-bottom:6px;">
-      <strong>Unilog (WMS):</strong> produtos com EAN, lote, quantidade e posição, <strong>validade expirada</strong>, fora da classe 104 (dep. vencidos). Equipamento profissional e máquinas domésticas excluídos.
+      <strong>Unilog (WMS):</strong> produtos com EAN, lote, quantidade e posição, <strong>validade expirada</strong>, fora da classe 104 (dep. vencidos). Excluídos: equip. profissional, máquinas domésticas, vinhos e validade 00.0000.
     </p>
     <p id="vencDescSap" style="font-size:12px;color:var(--text2);margin-bottom:6px;display:none">
-      <strong>SAP:</strong> produtos com validade expirada fora do dep. vencidos (<span id="vencSapDepLbl">0009</span>). Equipamento profissional e máquinas domésticas excluídos.
+      <strong>SAP:</strong> produtos com validade expirada fora do dep. vencidos (<span id="vencSapDepLbl">0009</span>). Excluídos: equip. profissional, máquinas domésticas, vinhos e validade 00.0000.
     </p>
     <p id="vencForaDepStats" style="font-size:11px;color:var(--muted);margin-bottom:14px;display:none"></p>
     <div class="dp" id="vencDepPills"></div>
@@ -540,6 +541,38 @@ select.cad-inp{cursor:pointer;}
     <div id="vencOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum produto vencido fora do dep. vencidos</div></div>
   </div>
   </div><!-- /alert-vencforadep -->
+
+  <div id="alert-semvalidade" style="display:none">
+  <div class="card">
+    <div class="ch">
+      <div class="ct">Produtos sem validade (validade 00.0000)</div>
+      <button class="btn bg bs" onclick="exportSemValidadeXlsx()">⬇ Excel</button>
+    </div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
+      Cafés no Unilog (WMS) com validade sentinel <strong>00.0000</strong> (ou equivalente: 0, 00/00/0000, vazio). Indica artigos registados sem data de validade real — rever cadastro e receção.
+    </p>
+    <div class="tb">
+      <input class="inp is" id="semValSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderSemValidade()">
+      <div class="ms-wrap" id="ms-semValCat" data-placeholder="Categorias" data-onchange="renderSemValidade"><div class="ms-btn" onclick="msTogOpen('semValCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('semValCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('semValCat')">Todas</button><button onclick="msClrAll('semValCat')">Limpar</button></div><div class="ms-list"></div></div></div>
+    </div>
+    <div class="kr" id="semValKpis"></div>
+    <div class="tw2"><table id="semValTable">
+      <thead><tr>
+        <th onclick="doSort('semval','sapCode')">Cód. SAP</th>
+        <th onclick="doSort('semval','EAN_norm')">EAN</th>
+        <th onclick="doSort('semval','produto')">Descrição</th>
+        <th onclick="doSort('semval','Lote_norm')">Lote</th>
+        <th onclick="doSort('semval','qt')" class="num">Qtd</th>
+        <th onclick="doSort('semval','validade')">Validade</th>
+        <th onclick="doSort('semval','depClasse')">Depósito / Classe</th>
+        <th onclick="doSort('semval','endereco')">Endereço</th>
+      </tr></thead>
+      <tbody id="semValBody"></tbody>
+    </table></div>
+    <div id="semValEmpty" class="empty" style="display:none"><div class="empty-i">📅</div><div>Carrega os ficheiros Unilog para analisar validades</div></div>
+    <div id="semValOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum café com validade 00.0000</div></div>
+  </div>
+  </div><!-- /alert-semvalidade -->
 </div>
 
 <!-- ══ CADASTRO ══ -->
@@ -610,7 +643,7 @@ select.cad-inp{cursor:pointer;}
         Um EAN deve corresponder a um único código de material SAP. Os casos abaixo indicam inconsistências na base de dados SAP que devem ser corrigidas com urgência.
       </p>
       <div class="kr" id="dupKpis"></div>
-      <div class="tw2"><table>
+      <div class="tw2"><table id="dupTable">
         <thead><tr>
           <th>EAN</th><th>Descrição</th><th class="num">Nº Materiais</th><th>Materiais SAP</th><th>Depósitos</th>
         </tr></thead>
@@ -651,7 +684,7 @@ select.cad-inp{cursor:pointer;}
         </select>
       </div>
       <div class="kr" id="ovKpis"></div>
-      <div class="tw2"><table>
+      <div class="tw2"><table id="ovTable">
         <thead><tr>
           <th onclick="doSort('occ','sapCode')">Cód. SAP</th>
           <th onclick="doSort('occ','ean')">EAN</th>
@@ -719,7 +752,7 @@ select.cad-inp{cursor:pointer;}
         <select class="inp" id="recMes" onchange="renderRecLista()"><option value="">Todos os meses</option></select>
       </div>
       <div class="kr" id="recKpis"></div>
-      <div class="tw2"><table>
+      <div class="tw2"><table id="recTable">
         <thead><tr>
           <th onclick="doSort('rec','numero')">Nº</th>
           <th onclick="doSort('rec','criado_em')">Data</th>
@@ -934,7 +967,7 @@ select.cad-inp{cursor:pointer;}
         <select class="inp" id="auditCat" onchange="renderAuditoria()"><option value="">Todas as categorias</option></select>
       </div>
       <div class="kr" id="auditKpis"></div>
-      <div class="tw2"><table>
+      <div class="tw2"><table id="auditTable">
         <thead><tr>
           <th onclick="doSort('audit','cat')">Categoria</th>
           <th onclick="doSort('audit','sapCode')">Cód. SAP</th>
@@ -998,7 +1031,7 @@ select.cad-inp{cursor:pointer;}
         </select>
       </div>
       <div class="kr" id="transEcKpis"></div>
-      <div class="tw2"><table>
+      <div class="tw2"><table id="transEcTable">
         <thead><tr>
           <th onclick="doSort('transEc','cat')">Cat.</th>
           <th onclick="doSort('transEc','sapCode')">Cód. SAP</th>
@@ -1043,7 +1076,7 @@ select.cad-inp{cursor:pointer;}
         </select>
       </div>
       <div class="kr" id="transQbKpis"></div>
-      <div class="tw2"><table>
+      <div class="tw2"><table id="transQbTable">
         <thead><tr>
           <th onclick="doSort('transQb','cat')">Cat.</th>
           <th onclick="doSort('transQb','sapCode')">Cód. SAP</th>
@@ -1095,7 +1128,7 @@ select.cad-inp{cursor:pointer;}
       </div>
     </div>
     <div class="kr" id="pecasKpis"></div>
-    <div class="tw2"><table>
+    <div class="tw2"><table id="pecasTable">
       <thead><tr>
         <th onclick="doSort('pecas','material')">Cód. SAP</th>
         <th onclick="doSort('pecas','desc')">Descrição</th>
@@ -1119,7 +1152,7 @@ select.cad-inp{cursor:pointer;}
 <div class="page" id="page-history">
   <div class="card">
     <div class="ch"><div class="ct">Histórico de Uploads</div></div>
-    <div class="tw2"><table>
+    <div class="tw2"><table id="histTable">
       <thead><tr>
         <th onclick="doSort('hist','uploaded_at')">Data/Hora</th>
         <th onclick="doSort('hist','company')">Empresa</th>
@@ -1171,7 +1204,7 @@ let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','FI','SI','Total',''];
 
-let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={};
+let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={};
 let showAll=false,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
@@ -1218,6 +1251,7 @@ async function init(){
         }
       }
       if(t.dataset.page==='history')renderHistory();
+      scheduleColResize();
     };
   });
   try{
@@ -1225,6 +1259,7 @@ async function init(){
     setDB(!error);
     if(!error){await loadFromDB(true);await loadOccParams();await loadReconNotas();await loadPecasData();}
   }catch(e){setDB(false);}
+  scheduleColResize();
 }
 function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok':'');document.getElementById('dbLbl').textContent=ok?'Supabase OK':'offline';}
 
@@ -1277,7 +1312,53 @@ function isEquipProfissional(ean,dk){
   const param=occParams.find(p=>p.ean===ean);
   return param?.cat===muimCat;
 }
+const MAQUINA_DOM_CAT='Máquinas Domésticas';
+const VINHO_CAT='Vinho';
+function isMaquinaDomestica(ean,desc){
+  const param=occParams.find(p=>p.ean===ean);
+  if(param?.cat===MAQUINA_DOM_CAT)return true;
+  if(desc){const{cat}=autoCat(desc);if(cat===MAQUINA_DOM_CAT)return true;}
+  return false;
+}
+function isVinhoProduct(ean,desc,cat){
+  const c=cat||(occParams.find(p=>p.ean===ean)?.cat)||(desc?autoCat(desc).cat:'');
+  return c===VINHO_CAT;
+}
+function isValidadeSentinel(v){
+  if(v===null||v===undefined)return true;
+  const s=String(v).trim();
+  if(!s||s==='—'||s==='0000-00-00')return true;
+  if(s==='0'||s==='00.0000'||s==='00.00.0000'||s==='00/00/0000'||s==='00/00/00')return true;
+  const digits=s.replace(/[^\d]/g,'');
+  if(!digits||/^0+$/.test(digits))return true;
+  return false;
+}
+function isValidadeIgnorada(validadeStr,ean,desc,cat){
+  if(isMaquinaDomestica(ean,desc))return true;
+  if(isVinhoProduct(ean,desc,cat))return true;
+  if(isValidadeSentinel(validadeStr))return true;
+  return false;
+}
+function hasRealValidade(validadeStr,ean,desc,cat){
+  if(isValidadeIgnorada(validadeStr,ean,desc,cat))return false;
+  return !!parseValidadeDate(validadeStr);
+}
+function isCafeProduct(ean,desc,cat,subcat){
+  const param=occParams.find(p=>p.ean===ean);
+  const c=(cat||param?.cat||'').trim();
+  const sc=(subcat||param?.subcat||'').trim();
+  if(/^café/i.test(c)||/café|cápsula|capsule|grão|moído|molido|cápsulas/i.test(c))return true;
+  if(/^café/i.test(sc)||/café|cápsula|grão|moído|molido/i.test(sc))return true;
+  if(desc){
+    const ac=autoCat(desc);
+    if(/^café/i.test(ac.cat)||/café|cápsula|grão|moído|molido/i.test(ac.cat+ac.subcat))return true;
+    const d=desc.toLowerCase();
+    if(/\bcaf[eé]\b|cápsula|\bcaps\b|\bgr\b|moído|molido|em grão|em grao/.test(d))return true;
+  }
+  return false;
+}
 function parseValidadeDate(v){
+  if(isValidadeSentinel(v))return null;
   if(v===null||v===undefined||v===''||v==='—'||v==='0000-00-00')return null;
   if(v instanceof Date&&!isNaN(v.getTime())){const d=new Date(v.getFullYear(),v.getMonth(),v.getDate());d.setHours(0,0,0,0);return d;}
   const s=String(v).trim();
@@ -1396,14 +1477,22 @@ function calcReconTotals({catFilter=null,subcatFilter=null,depotFilter=null,diff
 }
 
 function calcValorGapByEan({catFilter=null}={}){
+  // Exclui equipamento profissional / MUIM (sem valorização no banner).
+  // Verificação DELTA PLATINUM (exemplo reclamação):
+  //   dif_qtd=-66, preço SAP=27,68 → difValorQtd = -66×27,68 ≈ -R$ 1.826,88
+  //   valor SAP = 14489×27,68 ≈ R$ 401.055 · valor WMS = 14555×39,59 ≈ R$ 576.232
+  //   difValor (total) = WMS−SAP ≈ +R$ 175.176 (mistura qtd E preço unitário diferente)
+  //   difValorPreco = total − qtd ≈ +R$ 177.003 (= qtd WMS × (preço WMS − preço SAP))
   const precoMap=buildSapPrecoMap();
   const byEan={};
-  const wmsValorByEan={},wmsQtByEan={};
+  const wmsValorByEan={};
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
   if(uniData)uniData.forEach(r=>{if(r.EAN_norm&&r.produto&&!dm[r.EAN_norm])dm[r.EAN_norm]=r.produto;});
   for(const dk of DKS){
+    if(DEPOT_MAP[dk]?.catOnly)continue; // MUIM — só equip. profissional
     for(const r of (reconData[dk]||[])){
+      if(isEquipProfissional(r.EAN_norm,dk))continue;
       const param=occParams.find(p=>p.ean===r.EAN_norm);
       if(catFilter?.size&&!catFilter.has(param?.cat||''))continue;
       const ean=r.EAN_norm;
@@ -1415,35 +1504,31 @@ function calcValorGapByEan({catFilter=null}={}){
   }
   if(uniData){
     for(const dk of DKS){
+      if(DEPOT_MAP[dk]?.catOnly)continue;
       for(const ur of uniRowsForDepot(dk)){
+        if(isEquipProfissional(ur.EAN_norm,dk))continue;
         const param=occParams.find(p=>p.ean===ur.EAN_norm);
         if(catFilter?.size&&!catFilter.has(param?.cat||''))continue;
         const ean=ur.EAN_norm;
-        const qt=Number(ur.qt)||0;
         if(!byEan[ean]){
           byEan[ean]={EAN_norm:ean,desc:ur.produto||dm[ean]||'',cat:param?.cat||'',subcat:param?.subcat||'',qtSap:0,qtUni:0,difQt:0};
         }
-        if(!isEquipProfissional(ur.EAN_norm,dk)){
-          const lv=wmsLineValor(ur);
-          wmsValorByEan[ean]=(wmsValorByEan[ean]||0)+lv;
-        }
-        wmsQtByEan[ean]=(wmsQtByEan[ean]||0)+qt;
+        const lv=wmsLineValor(ur);
+        wmsValorByEan[ean]=(wmsValorByEan[ean]||0)+lv;
       }
     }
   }
   const rows=Object.values(byEan).map(r=>{
-    const semValor=isEquipProfissional(r.EAN_norm,null);
-    const precoSap=semValor?0:(precoMap[r.EAN_norm]||0);
-    const valorSap=semValor?0:r.qtSap*precoSap;
-    const valorWms=semValor?0:(wmsValorByEan[r.EAN_norm]||0);
-    const precoWms=semValor?0:(r.qtUni>0&&valorWms>0?valorWms/r.qtUni:0);
-    const difValor=semValor?0:valorWms-valorSap;
-    const difValorRecon=semValor?0:r.difQt*precoSap;
-    return{...r,semValor,precoSap,precoWms,valorSap,valorWms,difValor,difValorRecon,sapCode:getSapCode(r.EAN_norm)};
-  }).filter(r=>r.valorSap!==0||r.valorWms!==0||r.qtSap!==0||r.qtUni!==0);
-  rows.sort((a,b)=>Math.abs(b.difValor)-Math.abs(a.difValor));
-  const gapTotal=rows.reduce((s,r)=>s+(r.semValor?0:r.difValor),0);
-  return{rows,gapTotal,precoMap};
+    const precoSap=precoMap[r.EAN_norm]||0;
+    const valorSap=r.qtSap*precoSap;
+    const valorWms=wmsValorByEan[r.EAN_norm]||0;
+    const precoWms=r.qtUni>0&&valorWms>0?valorWms/r.qtUni:0;
+    const difValor=valorWms-valorSap;
+    const difValorQtd=r.difQt*precoSap;
+    const difValorPreco=difValor-difValorQtd;
+    return{...r,precoSap,precoWms,valorSap,valorWms,difValor,difValorQtd,difValorPreco,sapCode:getSapCode(r.EAN_norm)};
+  }).filter(r=>!isEquipProfissional(r.EAN_norm,null)&&(r.valorSap!==0||r.valorWms!==0||r.qtSap!==0||r.qtUni!==0));
+  return{rows,gapTotal:rows.reduce((s,r)=>s+r.difValor,0),precoMap};
 }
 
 // ── AUTO CATEGORY ──
@@ -1642,6 +1727,7 @@ function renderDuplicados(){
     body.appendChild(tr);
   }
   if(!dups.length)eRow(body,5,'');
+  scheduleColResize();
 }
 
 // ── SÓ UNILOG ──
@@ -1709,6 +1795,7 @@ function _renderSoUnilog(){
     body.appendChild(tr);
   }
   if(!rows.length)eRow(body,7,'Nenhum resultado');
+  scheduleColResize();
 }
 
 function exportSoUnilogXlsx(){
@@ -1735,6 +1822,7 @@ function alertTab(name,el){
   else if(name==='somunilog')renderSoUnilog();
   else if(name==='vencforadep')renderVencidoForaDep();
   else renderPosClasse();
+  scheduleColResize();
 }
 function renderAlertPage(){
   const active=document.querySelector('#alertIts .it.active');
@@ -1743,6 +1831,7 @@ function renderAlertPage(){
   else if(tab==='somunilog')renderSoUnilog();
   else if(tab==='vencforadep')renderVencidoForaDep();
   else renderPosClasse();
+  scheduleColResize();
 }
 function updateAlertBadge(){
   const badge=document.getElementById('alertBadge');
@@ -1919,6 +2008,7 @@ function vencSubTab(tab,el){
   const depLbl=document.getElementById('vencSapDepLbl');
   if(depLbl)depLbl.textContent=company==='QB'?'0099':'0009';
   renderVencidoForaDep();
+  scheduleColResize();
 }
 function vencSortKey(){return activeVencSubTab==='sap'?'vencforadepSap':'vencforadep';}
 function vencDoSort(col){doSort(vencSortKey(),col);}
@@ -1940,10 +2030,19 @@ function buildVencidoForaDepWms(){
   if(!uniData)return;
   const vencidosDk=getVencidosDepotKey();
   const today=new Date();today.setHours(0,0,0,0);
-  const stats={analizadas:uniData.length,comValidade:0,vencidas:0,validadeNaoParseada:0,foraDepVencidos:0,jaNoDepVencidos:0,equipProf:0,semLote:0,semEndereco:0,dc:0,classeDesconhecida:0};
+  const stats={analizadas:uniData.length,comValidade:0,vencidas:0,validadeNaoParseada:0,foraDepVencidos:0,jaNoDepVencidos:0,equipProf:0,maquinaDom:0,vinho:0,validadeIgnorada:0,semLote:0,semEndereco:0,dc:0,classeDesconhecida:0};
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
   uniData.forEach(r=>{
+    const desc=r.produto||dm[r.EAN_norm]||'';
+    const param=occParams.find(p=>p.ean===r.EAN_norm);
+    const cat=param?.cat||autoCat(desc).cat||'';
+    if(isValidadeIgnorada(r.validade,r.EAN_norm,desc,cat)){
+      if(isMaquinaDomestica(r.EAN_norm,desc))stats.maquinaDom++;
+      else if(isVinhoProduct(r.EAN_norm,desc,cat))stats.vinho++;
+      else stats.validadeIgnorada++;
+      return;
+    }
     const validadeDate=parseValidadeDate(r.validade);
     if(validadeDate)stats.comValidade++;
     else if((r.validade||'').trim())stats.validadeNaoParseada++;
@@ -1958,8 +2057,6 @@ function buildVencidoForaDepWms(){
     const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
     if(!dk){stats.classeDesconhecida++;return;}
     if(dk===vencidosDk){stats.jaNoDepVencidos++;return;}
-    const param=occParams.find(p=>p.ean===r.EAN_norm);
-    const desc=r.produto||dm[r.EAN_norm]||'';
     if(isEquipProfissional(r.EAN_norm,dk)){stats.equipProf++;return;}
     stats.foraDepVencidos++;
     const depLabel=DEPOT_MAP[dk]?.label.split('—')[1]?.trim()||dk;
@@ -1976,7 +2073,7 @@ function buildVencidoForaDepWms(){
       classe:r.classe,
       endereco:end,
       depClasseActual:`${depLabel} / Cl.${r.classe}`,
-      cat:param?.cat||autoCat(desc).cat||'',
+      cat,
       sapCode:getSapCode(r.EAN_norm)
     });
   });
@@ -1990,8 +2087,17 @@ function buildVencidoForaDepSap(){
   if(!sapData)return;
   const vencidosDk=getVencidosDepotKey();
   const today=new Date();today.setHours(0,0,0,0);
-  const stats={analizadas:sapData.length,comValidade:0,vencidas:0,validadeNaoParseada:0,foraDepVencidos:0,jaNoDepVencidos:0,equipProf:0,semLote:0,semEan:0,qtZero:0,depDesconhecido:0};
+  const stats={analizadas:sapData.length,comValidade:0,vencidas:0,validadeNaoParseada:0,foraDepVencidos:0,jaNoDepVencidos:0,equipProf:0,maquinaDom:0,vinho:0,validadeIgnorada:0,semLote:0,semEan:0,qtZero:0,depDesconhecido:0};
   sapData.forEach(r=>{
+    const desc=r.desc||'';
+    const param=occParams.find(p=>p.ean===r.EAN_norm);
+    const cat=param?.cat||autoCat(desc).cat||'';
+    if(isValidadeIgnorada(r.validade,r.EAN_norm,desc,cat)){
+      if(isMaquinaDomestica(r.EAN_norm,desc))stats.maquinaDom++;
+      else if(isVinhoProduct(r.EAN_norm,desc,cat))stats.vinho++;
+      else stats.validadeIgnorada++;
+      return;
+    }
     const validadeDate=parseValidadeDate(r.validade);
     if(validadeDate)stats.comValidade++;
     else if((r.validade||'').trim())stats.validadeNaoParseada++;
@@ -2004,8 +2110,6 @@ function buildVencidoForaDepSap(){
     if(!Object.keys(DEPOT_MAP).includes(dk)){stats.depDesconhecido++;return;}
     if(dk===vencidosDk){stats.jaNoDepVencidos++;return;}
     if(isEquipProfissional(r.EAN_norm,dk)){stats.equipProf++;return;}
-    const param=occParams.find(p=>p.ean===r.EAN_norm);
-    const desc=r.desc||'';
     stats.foraDepVencidos++;
     const depFull=DEPOT_MAP[dk]?.label||dk;
     const depLabel=depFull.split('—')[1]?.trim()||dk;
@@ -2022,7 +2126,7 @@ function buildVencidoForaDepSap(){
       depLabel,
       depClasseActual:depFull,
       preco:r.preco||0,
-      cat:param?.cat||autoCat(desc).cat||'',
+      cat,
       sapCode:r.material||getSapCode(r.EAN_norm)
     });
   });
@@ -2067,6 +2171,9 @@ function _renderVencidoForaDepWms(){
     let extra='';
     if(s.jaNoDepVencidos)extra+=` · ${fmt(s.jaNoDepVencidos)} já na classe/dep. vencidos (cl. 104)`;
     if(s.equipProf)extra+=` · ${fmt(s.equipProf)} equip. profissional`;
+    if(s.maquinaDom)extra+=` · ${fmt(s.maquinaDom)} máquinas domésticas`;
+    if(s.vinho)extra+=` · ${fmt(s.vinho)} vinhos (sem validade)`;
+    if(s.validadeIgnorada)extra+=` · ${fmt(s.validadeIgnorada)} validade 00.0000 ignorada`;
     if(s.validadeNaoParseada)extra+=` · ${fmt(s.validadeNaoParseada)} validade não parseada`;
     statsEl.textContent=`Analisadas ${fmt(s.analizadas)} linhas Unilog · ${fmt(s.comValidade)} com validade parseada · ${fmt(s.vencidas)} vencidas · ${fmt(s.foraDepVencidos)} fora do dep. vencidos${extra}`;
     statsEl.style.display='block';
@@ -2129,6 +2236,9 @@ function _renderVencidoForaDepSap(){
     let extra='';
     if(s.jaNoDepVencidos)extra+=` · ${fmt(s.jaNoDepVencidos)} já no dep. vencidos (${vencDepLbl})`;
     if(s.equipProf)extra+=` · ${fmt(s.equipProf)} equip. profissional`;
+    if(s.maquinaDom)extra+=` · ${fmt(s.maquinaDom)} máquinas domésticas`;
+    if(s.vinho)extra+=` · ${fmt(s.vinho)} vinhos (sem validade)`;
+    if(s.validadeIgnorada)extra+=` · ${fmt(s.validadeIgnorada)} validade 00.0000 ignorada`;
     if(s.validadeNaoParseada)extra+=` · ${fmt(s.validadeNaoParseada)} validade não parseada`;
     statsEl.textContent=`Analisadas ${fmt(s.analizadas)} linhas SAP · ${fmt(s.comValidade)} com validade parseada · ${fmt(s.vencidas)} vencidas · ${fmt(s.foraDepVencidos)} fora do dep. vencidos${extra}`;
     statsEl.style.display='block';
@@ -2250,9 +2360,17 @@ function updateLoadBanner(uploadedAt){
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
           <div>
             <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text)">Maior dif. valor SAP vs WMS</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:4px">Por EAN — valor WMS − valor SAP (preços de cada sistema). Ordenado por |dif. valor|.</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px;max-width:720px;line-height:1.45">
+              Por EAN — excl. equipamento profissional / MUIM.
+              <strong>Dif. valor (total)</strong> = valor WMS − valor SAP (cada sistema com o seu preço unitário).
+              <strong>Dif. valor qtd</strong> = dif. qtd × preço SAP (igual à conciliação).
+              <strong>Dif. valor preço</strong> = residual por preço unitário diferente entre SAP e WMS.
+            </div>
           </div>
-          <button type="button" class="btn bg bs" onclick="exportValorGapXlsx()">⬇ Excel</button>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" class="btn bg bs" id="bannerValorGapSortBtn" onclick="toggleValorGapSort()">Ordenar: |total|</button>
+            <button type="button" class="btn bg bs" onclick="exportValorGapXlsx()">⬇ Excel</button>
+          </div>
         </div>
         <div id="bannerValorGapSummary" style="font-size:11px;color:var(--text2);margin-bottom:10px"></div>
         <div class="tw2"><table id="bannerValorGapTable">
@@ -2261,7 +2379,10 @@ function updateLoadBanner(uploadedAt){
             <th class="num">Qtd SAP</th><th class="num">Qtd WMS</th>
             <th class="num">Preço SAP</th><th class="num">Preço WMS</th>
             <th class="num">Valor SAP</th><th class="num">Valor WMS</th>
-            <th class="num">Dif. Valor</th><th class="num">Dif. Qtd</th>
+            <th class="num" title="Valor WMS − valor SAP">Dif. valor (total)</th>
+            <th class="num" title="Dif. qtd × preço SAP">Dif. valor qtd</th>
+            <th class="num" title="Impacto do preço unitário diferente">Dif. valor preço</th>
+            <th class="num">Dif. Qtd</th>
           </tr></thead>
           <tbody id="bannerValorGapBody"></tbody>
         </table></div>
@@ -2272,7 +2393,7 @@ function updateLoadBanner(uploadedAt){
   recalcBanner();
 }
 
-let _valorGapOpen=false,_valorGapRows=[];
+let _valorGapOpen=false,_valorGapRows=[],_valorGapSort='total';
 function toggleValorGapPanel(){
   _valorGapOpen=!_valorGapOpen;
   const panel=document.getElementById('bannerValorGapPanel');
@@ -2281,55 +2402,73 @@ function toggleValorGapPanel(){
   if(btn)btn.textContent=(_valorGapOpen?'▾ ':'▸ ')+'Ver artigos com maior dif. de valor SAP vs WMS';
   if(_valorGapOpen)renderValorGapPanel();
 }
+function toggleValorGapSort(){
+  _valorGapSort=_valorGapSort==='total'?'qtd':'total';
+  const btn=document.getElementById('bannerValorGapSortBtn');
+  if(btn)btn.textContent='Ordenar: |'+(_valorGapSort==='total'?'total':'valor qtd')+'|';
+  renderValorGapPanel();
+}
+function sortValorGapRows(rows){
+  const key=_valorGapSort==='qtd'?'difValorQtd':'difValor';
+  return[...rows].sort((a,b)=>Math.abs(b[key])-Math.abs(a[key]));
+}
 
 function renderValorGapPanel(){
   const wrap=document.getElementById('bannerValorGapWrap');
   const body=document.getElementById('bannerValorGapBody');
   const summary=document.getElementById('bannerValorGapSummary');
+  const sortBtn=document.getElementById('bannerValorGapSortBtn');
   if(!wrap||!body)return;
   const selCats=msGet('bannerCat');
   const catFilter=selCats.size?selCats:null;
   const{rows,gapTotal}=calcValorGapByEan({catFilter});
-  _valorGapRows=rows;
+  const sorted=sortValorGapRows(rows);
+  _valorGapRows=sorted;
   const temVlr=rows.some(r=>r.valorSap>0||r.valorWms>0);
   wrap.style.display=temVlr?'block':'none';
+  if(sortBtn)sortBtn.textContent='Ordenar: |'+(_valorGapSort==='total'?'total':'valor qtd')+'|';
   if(!temVlr){body.innerHTML='';return;}
-  const top=rows.slice(0,15);
+  const top=sorted.slice(0,15);
   const fQ=v=>v.toLocaleString('pt-BR');
   const fP=v=>v>0?v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
   const recon=calcReconTotals({catFilter});
   const bannerGap=(recon.valorUni||0)-(recon.valorSap||0);
-  summary.innerHTML=`Gap total banner (WMS − SAP): <strong>${fmtBrl(bannerGap)}</strong> · Soma dif. valor por EAN: <strong>${fmtBrlLiq(gapTotal)}</strong> · Mostrando top ${top.length} de ${rows.length} EANs`;
+  const gapQtd=rows.reduce((s,r)=>s+r.difValorQtd,0);
+  const gapPreco=rows.reduce((s,r)=>s+r.difValorPreco,0);
+  const sortLbl=_valorGapSort==='total'?'|dif. valor total|':'|dif. valor qtd|';
+  summary.innerHTML=`Gap total banner (WMS − SAP): <strong>${fmtBrl(bannerGap)}</strong> · Soma dif. valor por EAN: <strong>${fmtBrlLiq(gapTotal)}</strong> (qtd: <strong>${fmtBrlLiq(gapQtd)}</strong> · preço: <strong>${fmtBrlLiq(gapPreco)}</strong>) · Top ${top.length} de ${rows.length} EANs · ordenado por ${sortLbl}`;
+  const liqCls=v=>v>0?'pos':v<0?'neg':'';
   body.innerHTML=top.map(r=>{
-    const sv=r.semValor;
-    const dvCls=!sv&&r.difValor>0?'pos':!sv&&r.difValor<0?'neg':'';
     const dqCls=r.difQt>0?'pos':r.difQt<0?'neg':'';
-    return`<tr${!sv&&Math.abs(r.difValor)>1000?' class="dr"':''}>
+    return`<tr${Math.abs(r.difValor)>1000?' class="dr"':''}>
       <td>${sapCodeHtml(r.EAN_norm)}</td>
       <td><span class="badge bneu">${r.EAN_norm}</span></td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
       <td class="num">${fQ(r.qtSap)}</td>
       <td class="num">${fQ(r.qtUni)}</td>
-      <td class="num">${sv?'—':fP(r.precoSap)}</td>
-      <td class="num">${sv?'—':fP(r.precoWms)}</td>
-      <td class="num">${sv?'—':fmtBrl(r.valorSap)}</td>
-      <td class="num">${sv?'—':fmtBrl(r.valorWms)}</td>
-      <td class="num ${dvCls}">${sv?'—':fmtBrlLiq(r.difValor)}</td>
+      <td class="num">${fP(r.precoSap)}</td>
+      <td class="num">${fP(r.precoWms)}</td>
+      <td class="num">${fmtBrl(r.valorSap)}</td>
+      <td class="num">${fmtBrl(r.valorWms)}</td>
+      <td class="num ${liqCls(r.difValor)}">${fmtBrlLiq(r.difValor)}</td>
+      <td class="num ${liqCls(r.difValorQtd)}">${fmtBrlLiq(r.difValorQtd)}</td>
+      <td class="num ${liqCls(r.difValorPreco)}">${fmtBrlLiq(r.difValorPreco)}</td>
       <td class="num ${dqCls}">${r.difQt>0?'+':''}${fQ(r.difQt)}</td>
     </tr>`;
   }).join('');
+  scheduleColResize();
 }
 
 function exportValorGapXlsx(){
   if(!_valorGapRows.length){toast('Sem dados','error');return;}
   const data=_valorGapRows.map(r=>({
     Cod_SAP:r.sapCode,EAN:r.EAN_norm,Descricao:r.desc,Categoria:r.cat,Subcategoria:r.subcat,
-    Qtd_SAP:r.qtSap,Qtd_WMS:r.qtUni,Preco_SAP:r.semValor?'':r.precoSap,Preco_WMS:r.semValor?'':r.precoWms,
-    Valor_SAP:r.semValor?'':r.valorSap,Valor_WMS:r.semValor?'':r.valorWms,Dif_Valor:r.semValor?'':r.difValor,Dif_Qtd:r.difQt,
-    Dif_Valor_Recon_SAP:r.semValor?'':r.difValorRecon
+    Qtd_SAP:r.qtSap,Qtd_WMS:r.qtUni,Preco_SAP:r.precoSap,Preco_WMS:r.precoWms,
+    Valor_SAP:r.valorSap,Valor_WMS:r.valorWms,
+    Dif_Valor_Total:r.difValor,Dif_Valor_Qtd:r.difValorQtd,Dif_Valor_Preco:r.difValorPreco,Dif_Qtd:r.difQt
   }));
   const ws=XLSX.utils.json_to_sheet(data);
-  ws['!cols']=[{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12},{wch:12},{wch:14},{wch:14},{wch:14},{wch:10},{wch:16}];
+  ws['!cols']=[{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12},{wch:12},{wch:14},{wch:14},{wch:16},{wch:16},{wch:16},{wch:10}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Dif Valor SAP WMS');
   XLSX.writeFile(wb,`dif_valor_sap_wms_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
@@ -2473,6 +2612,7 @@ function reconTab(name,el){
   document.getElementById('recon-lote').style.display=name==='lote'?'':'none';
   document.getElementById('recon-ean').style.display=name==='ean'?'':'none';
   if(name==='ean')renderEanView();
+  scheduleColResize();
 }
 
 let showAllEan=false;
@@ -2594,6 +2734,7 @@ function _renderEanView(){
   // Update badge on tab
   const badge=document.getElementById('reconEanBadge');
   badge.textContent=comDiff;badge.style.display=comDiff>0?'':'none';
+  scheduleColResize();
 }
 
 function exportEanXlsx(){
@@ -2786,7 +2927,7 @@ function _renderRecon(){
     body.appendChild(tr);
   }
   if(!rows.length)eRow(body,14,'Nenhum resultado');
-  setTimeout(applyResizable,0);
+  scheduleColResize();
 }
 
 function findOther(ean,lote,curDk){const found=[];for(const dk of DKS){if(dk===curDk)continue;const m=(reconData[dk]||[]).find(r=>r.EAN_norm===ean&&r.Lote_norm===lote);if(m&&(m.qt_sap>0||m.qt_uni>0))found.push({label:DEPOT_MAP[dk].label.split('—')[1]?.trim()||DEPOT_MAP[dk].label,dep:dk.padStart(4,'0'),qt_sap:m.qt_sap,qt_uni:m.qt_uni,enderecos:m.uni_enderecos||[]});}return found;}
@@ -2860,6 +3001,7 @@ function _renderSusp(){
     `;
     body.appendChild(tr);
   }
+  scheduleColResize();
 }
 
 // ── CADASTRO ──
@@ -2876,6 +3018,7 @@ function cadTab(name,el){
   document.getElementById('cad-artigos').style.display=name==='artigos'?'':'none';
   document.getElementById('cad-duplicados').style.display=name==='duplicados'?'':'none';
   if(name==='duplicados')renderDuplicados();
+  scheduleColResize();
 }
 let _renderCadastroBusy=false;
 function renderCadastro(){if(_renderCadastroBusy)return;_renderCadastroBusy=true;try{_renderCadastro();}finally{_renderCadastroBusy=false;}}
@@ -2992,6 +3135,7 @@ function _renderCadastro(){
         body.appendChild(tr);
   }
   if(!items.length)eRow(body,9,'Nenhum resultado');
+  scheduleColResize();
 }
 function cadEdit(ean,field,value){if(!cadEdits[ean])cadEdits[ean]={};cadEdits[ean][field]=value;}
 async function cadAutoSave(ean,field,value){
@@ -3311,7 +3455,7 @@ function _renderOccView(){
     body.appendChild(tr);
   }
   if(!rows.length)eRow(body,14,'Nenhum resultado');
-  setTimeout(applyResizable,0);
+  scheduleColResize();
 }
 
 // ── OCC BASE ──
@@ -3801,7 +3945,7 @@ function renderPecas(){
     `;
     body.appendChild(tr);
   }
-  applyResizable();
+  scheduleColResize();
 }
 
 function exportPecasXlsx(){
@@ -4901,7 +5045,7 @@ function _renderTrans(tipo){
     body.appendChild(tr);
   }
   if(!filtered.length)eRow(body,12,'Clica "Calcular" para processar');
-  setTimeout(applyResizable,0);
+  scheduleColResize();
 }
 
 function updateSeg(key,val,tipo){
