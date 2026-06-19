@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619183000 -->
+<!DOCTYPE html><!-- v20260619223000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -54,12 +54,14 @@ header{background:var(--navy);border-bottom:none;padding:0 24px;display:flex;ali
 .ct::before{content:'';width:3px;height:13px;background:var(--red);border-radius:2px;display:block;}
 
 /* KPI */
-.kr{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px;}
-.kpi{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,0.05);}
-.kl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px;font-weight:600;}
-.kv{font-family:var(--mono);font-size:24px;font-weight:700;color:var(--text);}
+.kr{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px;margin-bottom:16px;}
+.kpi{background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-width:0;overflow:hidden;}
+.kl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px;font-weight:600;line-height:1.3;word-break:normal;}
+.kv{font-family:var(--mono);font-size:clamp(13px,2vw,24px);font-weight:700;color:var(--text);line-height:1.25;min-width:0;overflow:hidden;}
+.kv .kv-n{display:inline-block;white-space:nowrap;max-width:100%;}
+.kv .kv-n.long{font-size:clamp(11px,1.55vw,17px);letter-spacing:-.02em;}
 .kv.g{color:var(--green);}.kv.r{color:var(--red);}.kv.y{color:var(--yellow);}.kv.b{color:var(--blue);}
-.ks{font-size:10px;color:var(--muted);margin-top:3px;}
+.ks{font-size:10px;color:var(--muted);margin-top:3px;line-height:1.3;}
 
 /* BUTTONS */
 .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:none;transition:all .15s;font-family:var(--sans);}
@@ -549,7 +551,7 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bg bs" onclick="exportSemValidadeXlsx()">⬇ Excel</button>
     </div>
     <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
-      Cafés no Unilog (WMS) com validade sentinel <strong>00.0000</strong> (ou equivalente: 0, 00/00/0000, vazio). Indica artigos registados sem data de validade real — rever cadastro e receção.
+      Cafés (grão, moído, cápsulas) no Unilog com validade sentinel explícita <strong>00.0000</strong> (ou equivalente: 0, 00/00/0000). Posições com validade vazia ou data real noutra linha do mesmo EAN+lote são excluídas.
     </p>
     <div class="tb">
       <input class="inp is" id="semValSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderSemValidade()">
@@ -1197,11 +1199,11 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const db=supabase.createClient(SB_URL,SB_KEY);
 
 // Depot maps per company
-const DEPOT_MAP_DFB={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2','FI'],label:'0044 — Avarias'},'MUIM':{classes:['00'],label:'MUIM — Equipamento Profissional',catOnly:'Equipamento Profissional'}};
-const DEPOT_MAP_QB={'11':{classes:['00'],label:'0011 — Disponível'},'44':{classes:['A1','A2','FI'],label:'0044 — Avarias'},'99':{classes:['104'],label:'0099 — Vencidos'}};
+const DEPOT_MAP_DFB={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2','FI','SI'],label:'0044 — Avarias'},'MUIM':{classes:['00'],label:'MUIM — Equipamento Profissional',catOnly:'Equipamento Profissional'}};
+const DEPOT_MAP_QB={'11':{classes:['00'],label:'0011 — Disponível'},'44':{classes:['A1','A2','FI','SI'],label:'0044 — Avarias'},'99':{classes:['104'],label:'0099 — Vencidos'}};
 let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
-const EXCL=['93','SI','Total',''];
+const EXCL=['93','Total',''];
 
 let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={};
 let showAll=false,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
@@ -1312,14 +1314,15 @@ function logUniClasseCounts(label){
   if(!uniData?.length){console.log(`[${label}] sem dados Unilog`);return;}
   const counts={};
   uniData.forEach(r=>{counts[r.classe]=(counts[r.classe]||0)+1;});
-  console.log(`[${label}] Unilog linhas por classe:`,counts,'total:',uniData.length,'FI:',counts.FI||0);
+  console.log(`[${label}] Unilog linhas por classe:`,counts,'total:',uniData.length,'FI:',counts.FI||0,'SI:',counts.SI||0);
   for(const dk of DKS){
     const classes=DEPOT_MAP[dk]?.classes||[];
-    if(!classes.includes('FI'))continue;
+    if(classes.length<=1)continue;
     const n=uniData.filter(r=>classes.includes(r.classe)).length;
-    console.log(`[${label}] depot ${dk} (${DEPOT_MAP[dk].label}):`,n,'linhas WMS');
+    console.log(`[${label}] depot ${dk} (${DEPOT_MAP[dk].label}):`,n,'linhas WMS · por classe:',Object.fromEntries(classes.map(c=>[c,uniData.filter(r=>r.classe===c).length])));
   }
   if(!(counts.FI>0))console.warn(`[${label}] AVISO: 0 linhas classe FI — re-carregar ficheiro Unilog e Processar (cache antigo pode ter sido gerado com FI em EXCL)`);
+  if(!(counts.SI>0))console.warn(`[${label}] AVISO: 0 linhas classe SI — re-carregar ficheiro Unilog e Processar (cache antigo pode ter sido gerado com SI em EXCL)`);
 }
 function normValidadeField(v){
   if(v===null||v===undefined||v==='')return'';
@@ -1339,17 +1342,36 @@ function normValidadeField(v){
   const s=String(v).trim();
   return(s==='—'||s==='0000-00-00')?'':s;
 }
-function pickUniValidadeField(r){
-  const candidates=[];
-  for(const c of UNI_VALIDADE_COLS){
+function displayExplicitSentinel(v){
+  if(typeof v==='number'&&v===0)return'0';
+  return String(v).trim();
+}
+function pickUniValidadeLoteField(r){
+  for(const c of ['Validade Lote','Validade Lote.','Validade Lote ','Data Validade']){
     const raw=r[c];
     if(raw===null||raw===undefined||raw==='')continue;
-    candidates.push(normValidadeField(raw));
+    const n=normValidadeField(raw);
+    if(n)return n;
+    if(isExplicitValidadeSentinel(raw))return displayExplicitSentinel(raw);
   }
-  for(const n of candidates){
-    if(n&&parseValidadeDate(n))return n;
+  return'';
+}
+function pickUniValidadeHeaderField(r){
+  const raw=r['Validade'];
+  if(raw===null||raw===undefined||raw==='')return'';
+  const n=normValidadeField(raw);
+  if(n)return n;
+  if(isExplicitValidadeSentinel(raw))return displayExplicitSentinel(raw);
+  return'';
+}
+function pickUniValidadeField(r){
+  const lote=pickUniValidadeLoteField(r);
+  const header=pickUniValidadeHeaderField(r);
+  const vals=[lote,header].filter(v=>v!==null&&v!==undefined&&String(v).trim()!=='');
+  for(const n of vals){
+    if(parseValidadeDate(n))return n;
   }
-  return candidates[0]||'';
+  return vals[0]||'';
 }
 function normUni(rows){
   const counts={};
@@ -1357,10 +1379,12 @@ function normUni(rows){
   for(const r of rows){
     const classe=normUniClasse(pickUniClasseField(r));
     if(!classe)continue;
-    out.push({classe,EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:pickUniValidadeField(r),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()});
+    const validadeLote=pickUniValidadeLoteField(r);
+    const validadeHeader=pickUniValidadeHeaderField(r);
+    out.push({classe,EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:pickUniValidadeField(r),validadeLote,validadeHeader,vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()});
     counts[classe]=(counts[classe]||0)+1;
   }
-  console.log('[normUni] linhas por classe:',counts,'total:',out.length,'FI:',counts.FI||0);
+  console.log('[normUni] linhas por classe:',counts,'total:',out.length,'FI:',counts.FI||0,'SI:',counts.SI||0);
   return out;
 }
 function getVencidosDepotKey(){return company==='QB'?'99':'9';}
@@ -1387,14 +1411,35 @@ function isVinhoProduct(ean,desc,cat){
   const c=cat||(occParams.find(p=>p.ean===ean)?.cat)||(desc?autoCat(desc).cat:'');
   return c===VINHO_CAT;
 }
-function isValidadeSentinel(v){
-  if(v===null||v===undefined)return true;
+function isExplicitValidadeSentinel(v){
+  if(v===null||v===undefined)return false;
   if(typeof v==='number')return v===0;
   const s=String(v).trim();
-  if(!s||s==='—'||s==='0000-00-00')return true;
+  if(!s||s==='—'||s==='0000-00-00')return false;
   const sl=s.toLowerCase();
-  if(sl==='0'||sl==='00.0000'||sl==='00.00.0000'||sl==='00/00/0000'||sl==='00/00/00'||sl==='00-00-0000'||sl==='00-00-00')return true;
+  return sl==='0'||sl==='00.0000'||sl==='00.00.0000'||sl==='00/00/0000'||sl==='00/00/00'||sl==='00-00-0000'||sl==='00-00-00';
+}
+function isValidadeSentinel(v){
+  if(v===null||v===undefined)return true;
+  if(isExplicitValidadeSentinel(v))return true;
+  const s=String(v).trim();
+  return!s||s==='—'||s==='0000-00-00';
+}
+function uniRowValidadeFields(r){
+  const vals=[r.validadeLote,r.validadeHeader,r.validade].filter(v=>v!==null&&v!==undefined&&String(v).trim()!=='');
+  return[...new Set(vals)];
+}
+function uniRowHasRealValidade(r){
+  for(const v of uniRowValidadeFields(r)){
+    if(parseValidadeDate(v))return true;
+  }
   return false;
+}
+function uniRowExplicitSentinel(r){
+  for(const v of uniRowValidadeFields(r)){
+    if(isExplicitValidadeSentinel(v))return displayExplicitSentinel(v);
+  }
+  return null;
 }
 function isValidadeIgnorada(validadeStr,ean,desc,cat){
   if(isMaquinaDomestica(ean,desc))return true;
@@ -1406,14 +1451,13 @@ function hasRealValidade(validadeStr,ean,desc,cat){
   if(isValidadeIgnorada(validadeStr,ean,desc,cat))return false;
   return !!parseValidadeDate(validadeStr);
 }
+function normCatLabel(s){return String(s||'').trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu,'');}
 function isCafeProduct(ean,desc,cat,subcat){
   const param=occParams.find(p=>p.ean===ean);
   let c=(cat||param?.cat||'').trim();
-  let sc=(subcat||param?.subcat||'').trim();
-  if(!c&&!sc&&desc){const ac=autoCat(desc);c=ac.cat||'';sc=ac.subcat||'';}
-  const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/\p{M}/gu,'');
-  const t=`${norm(c)} ${norm(sc)}`;
-  return /cafe|moido|grao|capsula/.test(t);
+  if(!c&&desc)c=autoCat(desc).cat||'';
+  const nc=normCatLabel(c);
+  return nc==='cafe em grao'||nc==='cafe moido'||nc==='cafe em capsulas';
 }
 function parseValidadeDate(v){
   if(v===null||v===undefined||v===''||v==='—'||v==='0000-00-00')return null;
@@ -1488,9 +1532,16 @@ function matchProdSrch(srch,ean,desc,lote){
   return ean.includes(srch)||(desc||'').toLowerCase().includes(srch)||(lote||'').toLowerCase().includes(srch)||sap.includes(srch);
 }
 function kvLiqCls(v){if(!Number.isFinite(v))return '';return v>0?'y':v<0?'r':'';}
-function fmtBrlLiq(v){if(v==null||!Number.isFinite(v))return '—';const s=Math.abs(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});return v>0?'+'+s:v<0?'-'+s:s;}
+const NBSP='\u00A0';
+function brlCore(v){return Math.abs(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:2,maximumFractionDigits:2}).replace(/\s/g,NBSP);}
+function fmtBrl(v){if(v==null||!Number.isFinite(v))return '—';return brlCore(v);}
+function fmtBrlLiq(v){if(v==null||!Number.isFinite(v))return '—';const s=brlCore(v);if(v>0)return '+'+NBSP+s;if(v<0)return '-'+NBSP+s;return s;}
+function fmtKv(val){const s=String(val);const long=s.length>11;return `<span class="kv-n${long?' long':''}">${s}</span>`;}
+function fmtKvNum(n){if(n==null||!Number.isFinite(n))return fmtKv('—');return fmtKv(Number(n).toLocaleString('pt-BR'));}
+function fmtKvSigned(n){if(n==null||!Number.isFinite(n))return fmtKv('—');const abs=Number(n).toLocaleString('pt-BR');if(n>0)return fmtKv('+'+NBSP+abs);if(n<0)return fmtKv('-'+NBSP+abs);return fmtKv(abs);}
+function fmtKvBrl(v){return fmtKv(fmtBrl(v));}
+function fmtKvBrlLiq(v){return fmtKv(fmtBrlLiq(v));}
 function fmtValorDifCell(diff,preco){const p=Number(preco)||0;if(p<=0)return '—';return fmtBrlLiq(diff*p);}
-function fmtBrl(v){if(v==null||!Number.isFinite(v))return '—';return Math.abs(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:2,maximumFractionDigits:2});}
 function reconRowValor(r,precoMap,dk){if(isEquipProfissional(r.EAN_norm,dk))return 0;const p=(precoMap||buildSapPrecoMap())[r.EAN_norm]||0;return r.diff*p;}
 function wmsLineValor(r){const qt=Number(r.qt)||0;if(qt<=0)return 0;const vlr=Number(r.vlr)||0;if(vlr>0)return qt*vlr;const vt=Number(r.vlrTotal)||0;return vt>0?vt:0;}
 function calcValorTotSapFromRows(rows,{eanKey='EAN_norm',qtKey='qt',dk=null,getDk=null,precoKey=null}={}){
@@ -1571,8 +1622,8 @@ function calcEanViewWmsValor(filteredRows){
 }
 function kpiValorTotCards(valorSap,valorWms,temPreco){
   if(!temPreco)return '';
-  return `<div class="kpi"><div class="kl">Valor Total SAP</div><div class="kv b">${fmtBrl(valorSap)}</div><div class="ks">preço SAP × qtd</div></div>
-    <div class="kpi"><div class="kl">Valor Total WMS</div><div class="kv b">${fmtBrl(valorWms)}</div><div class="ks">preço WMS × qtd</div></div>`;
+  return `<div class="kpi"><div class="kl">Valor Total SAP</div><div class="kv b">${fmtKvBrl(valorSap)}</div><div class="ks">preço SAP × qtd</div></div>
+    <div class="kpi"><div class="kl">Valor Total WMS</div><div class="kv b">${fmtKvBrl(valorWms)}</div><div class="ks">preço WMS × qtd</div></div>`;
 }
 function uniRowsForDepot(dk){
   const depConf=DEPOT_MAP[dk];
@@ -1863,8 +1914,8 @@ function renderDuplicados(){
   const dups=buildDuplicados();
   document.getElementById('dupEmpty').style.display=dups.length===0?'block':'none';
   document.getElementById('dupKpis').innerHTML=`
-    <div class="kpi"><div class="kl">EANs duplicados</div><div class="kv r">${dups.length}</div></div>
-    <div class="kpi"><div class="kl">Total materiais extra</div><div class="kv y">${dups.reduce((s,d)=>s+d.mats.size-1,0)}</div></div>
+    <div class="kpi"><div class="kl">EANs duplicados</div><div class="kv r">${fmtKvNum(dups.length)}</div></div>
+    <div class="kpi"><div class="kl">Total materiais extra</div><div class="kv y">${fmtKvNum(dups.reduce((s,d)=>s+d.mats.size-1,0))}</div></div>
   `;
   const body=document.getElementById('dupBody');body.innerHTML='';
   for(const d of dups){
@@ -1926,9 +1977,9 @@ function _renderSoUnilog(){
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{getDk:r=>DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe))});
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows,{classeKey:'classe'});
   document.getElementById('suKpis').innerHTML=`
-    <div class="kpi"><div class="kl">EANs desconhecidos</div><div class="kv r">${fmt(uniqueEANs)}</div></div>
-    <div class="kpi"><div class="kl">Linhas Unilog</div><div class="kv">${fmt(rows.length)}</div></div>
-    <div class="kpi"><div class="kl">Stock total</div><div class="kv y">${fmt(totalQt)}</div></div>
+    <div class="kpi"><div class="kl">EANs desconhecidos</div><div class="kv r">${fmtKvNum(uniqueEANs)}</div></div>
+    <div class="kpi"><div class="kl">Linhas Unilog</div><div class="kv">${fmtKvNum(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Stock total</div><div class="kv y">${fmtKvNum(totalQt)}</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
   `;
 
@@ -2084,10 +2135,10 @@ function _renderPosClasse(){
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows.flatMap(r=>r.items.map(ur=>({EAN_norm:ur.EAN_norm,qt:ur.qt,classe:ur.classe}))),{getDk:ur=>DKS.find(k=>DEPOT_MAP[k].classes.includes(ur.classe))});
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows,{itemsKey:'items'});
   document.getElementById('posKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Posições com problema</div><div class="kv r">${fmt(rows.length)}</div></div>
-    <div class="kpi"><div class="kl">Classes misturadas</div><div class="kv y">${fmt(mixClasses)}</div><div class="ks">soma por posição</div></div>
-    <div class="kpi"><div class="kl">EANs afectados</div><div class="kv b">${fmt(totalEans)}</div></div>
-    <div class="kpi"><div class="kl">Qtd total</div><div class="kv">${fmt(totalQt)}</div></div>
+    <div class="kpi"><div class="kl">Posições com problema</div><div class="kv r">${fmtKvNum(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Classes misturadas</div><div class="kv y">${fmtKvNum(mixClasses)}</div><div class="ks">soma por posição</div></div>
+    <div class="kpi"><div class="kl">EANs afectados</div><div class="kv b">${fmtKvNum(totalEans)}</div></div>
+    <div class="kpi"><div class="kl">Qtd total</div><div class="kv">${fmtKvNum(totalQt)}</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
   `;
   body.innerHTML='';
@@ -2358,9 +2409,9 @@ function _renderVencidoForaDepWms(){
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{getDk:r=>r.dk});
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows,{getDk:r=>r.dk});
   document.getElementById('vencKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">Unilog (WMS)</div></div>
-    <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmt(totalEans)}</div></div>
-    <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
+    <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">Unilog (WMS)</div></div>
+    <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmtKvNum(totalEans)}</div></div>
+    <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmtKvNum(totalQt)}</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
     <div class="kpi"><div class="kl">Por depósito actual</div><div class="ks" style="margin-top:6px;line-height:1.6">${depHtml||'—'}</div></div>
   `;
@@ -2426,9 +2477,9 @@ function _renderVencidoForaDepSap(){
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{getDk:r=>r.dk,precoKey:'preco'});
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows,{getDk:r=>r.dk});
   document.getElementById('vencKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">SAP</div></div>
-    <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmt(totalEans)}</div></div>
-    <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
+    <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">SAP</div></div>
+    <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmtKvNum(totalEans)}</div></div>
+    <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmtKvNum(totalQt)}</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
     <div class="kpi"><div class="kl">Por depósito SAP</div><div class="ks" style="margin-top:6px;line-height:1.6">${depHtml||'—'}</div></div>
   `;
@@ -2487,7 +2538,9 @@ function buildSemValidade(){
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
   const groups=new Map();
-  let sentinelRows=0;
+  let explicitSentinelRows=0;
+  let excludedByReal=0;
+  let excludedNoExplicit=0;
   uniData.forEach(r=>{
     if(!r.EAN_norm||r.qt<=0)return;
     const desc=r.produto||dm[r.EAN_norm]||'';
@@ -2498,32 +2551,33 @@ function buildSemValidade(){
     const key=`${r.EAN_norm}\0${r.Lote_norm||''}`;
     let g=groups.get(key);
     if(!g){
-      g={EAN_norm:r.EAN_norm,produto:desc,Lote_norm:r.Lote_norm||'',qt:0,cat,subcat,sapCode:getSapCode(r.EAN_norm),hasSentinel:false,hasReal:false,sentinelValidade:''};
+      g={EAN_norm:r.EAN_norm,produto:desc,Lote_norm:r.Lote_norm||'',qt:0,cat,subcat,sapCode:getSapCode(r.EAN_norm),hasExplicitSentinel:false,hasReal:false,sentinelValidade:''};
       groups.set(key,g);
     }
     g.qt+=r.qt;
-    if(parseValidadeDate(r.validade))g.hasReal=true;
-    else if(isValidadeSentinel(r.validade)){
-      g.hasSentinel=true;
-      sentinelRows++;
-      if(!g.sentinelValidade)g.sentinelValidade=r.validade||'00.0000';
+    if(uniRowHasRealValidade(r))g.hasReal=true;
+    const sent=uniRowExplicitSentinel(r);
+    if(sent){
+      g.hasExplicitSentinel=true;
+      explicitSentinelRows++;
+      if(!g.sentinelValidade)g.sentinelValidade=sent;
     }
   });
-  let excludedByReal=0;
   semValidadeData=[...groups.values()].filter(g=>{
-    if(g.hasSentinel&&g.hasReal){excludedByReal++;return false;}
-    return g.hasSentinel&&!g.hasReal;
+    if(g.hasReal){if(g.hasExplicitSentinel)excludedByReal++;return false;}
+    if(!g.hasExplicitSentinel){excludedNoExplicit++;return false;}
+    return true;
   }).map(g=>({
     EAN_norm:g.EAN_norm,
     produto:g.produto,
     Lote_norm:g.Lote_norm,
     qt:g.qt,
-    validade:g.sentinelValidade||'00.0000',
+    validade:g.sentinelValidade,
     cat:g.cat,
     subcat:g.subcat,
     sapCode:g.sapCode
   }));
-  semValidadeStats={combos:semValidadeData.length,sentinelRows,excludedByReal};
+  semValidadeStats={combos:semValidadeData.length,explicitSentinelRows,excludedByReal,excludedNoExplicit};
   semValidadeData.sort((a,b)=>String(a.produto||'').localeCompare(String(b.produto||''))||a.EAN_norm.localeCompare(b.EAN_norm)||String(a.Lote_norm||'').localeCompare(String(b.Lote_norm||'')));
   const badge=document.getElementById('semValidadeBadge');
   if(badge){badge.textContent=semValidadeData.length;badge.style.display=semValidadeData.length>0?'':'none';}
@@ -2557,10 +2611,10 @@ function _renderSemValidade(){
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows);
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows);
   document.getElementById('semValKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">${fmt(st.combos??rows.length)} combos com validade 00.0000 detectada${exclNote}</div></div>
-    <div class="kpi"><div class="kl">Linhas sentinel</div><div class="kv b">${fmt(st.sentinelRows||0)}</div><div class="ks">posições WMS com validade vazia/00.0000</div></div>
-    <div class="kpi"><div class="kl">EANs únicos</div><div class="kv b">${fmt(totalEans)}</div></div>
-    <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
+    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.combos??rows.length)} combos com validade 00.0000 detectada${exclNote}</div></div>
+    <div class="kpi"><div class="kl">Linhas sentinel</div><div class="kv b">${fmtKvNum(st.sentinelRows||0)}</div><div class="ks">posições WMS com validade vazia/00.0000</div></div>
+    <div class="kpi"><div class="kl">EANs únicos</div><div class="kv b">${fmtKvNum(totalEans)}</div></div>
+    <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmtKvNum(totalQt)}</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
   `;
   body.innerHTML='';
@@ -2618,7 +2672,7 @@ async function processAll(){
   logUniClasseCounts('processAll (antes build)');
   buildRecon();buildSusp();buildSoUnilog();buildPosClasse();buildVencidoForaDep();checkDuplicadosAlert();await autoSeedOcc();await processPecas();renderUpKpis();updateChip();
   logUniClasseCounts('processAll (após build)');
-  console.log('[processAll] recon depot 44:',(reconData['44']||[]).length,'linhas · com stock WMS:',(reconData['44']||[]).filter(r=>r.qt_uni>0).length,'· FI em uni_classes:',(reconData['44']||[]).filter(r=>(r.uni_classes||[]).includes('FI')).length);
+  console.log('[processAll] recon depot 44:',(reconData['44']||[]).length,'linhas · com stock WMS:',(reconData['44']||[]).filter(r=>r.qt_uni>0).length,'· FI em uni_classes:',(reconData['44']||[]).filter(r=>(r.uni_classes||[]).includes('FI')).length,'· SI em uni_classes:',(reconData['44']||[]).filter(r=>(r.uni_classes||[]).includes('SI')).length);
   const procAt=new Date().toISOString();
   try{
     const payload={id:company,company,uploaded_at:procAt,sap_rows:sapData.length,unilog_rows:uniData.length,sap_data:JSON.stringify(sapData),unilog_data:JSON.stringify(uniData),recon_summary:JSON.stringify(buildSummary())};
@@ -2651,7 +2705,7 @@ function updateLoadBanner(uploadedAt){
         </div>
       </div>
     </div>
-    <div id="bannerKpis" style="display:grid;gap:8px"></div>
+    <div id="bannerKpis" class="kr" style="margin-bottom:0"></div>
     <div id="bannerValorGapWrap" style="display:none;margin-top:10px">
       <button type="button" class="btn bg bs" id="bannerValorGapBtn" onclick="toggleValorGapPanel()" style="width:100%;justify-content:center">▸ Ver artigos com maior dif. de valor SAP vs WMS</button>
       <div id="bannerValorGapPanel" style="display:none;margin-top:10px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
@@ -2760,23 +2814,20 @@ function recalcBanner(){
   const difPares=sapPairs.size-uniPairs.size;
   const difQt=recon.difQt;
   const difVlr=recon.difVlr;
-  const fQ=v=>v.toLocaleString('pt-BR');
-  const sign=v=>v>0?'+':v<0?'-':'';
-  const cls=v=>v!==0?'neg':'pos';
   const temVlr=recon.temPreco;
-  const cols=temVlr?9:6;
-  kpisEl.style.gridTemplateColumns=`repeat(${cols},1fr)`;
+  kpisEl.className='kr';
+  kpisEl.style.marginBottom='0';
   kpisEl.innerHTML=`
-    <div class="kpi"><div class="kl">EAN+Lote SAP</div><div class="kv">${fQ(sapPairs.size)}</div></div>
-    <div class="kpi"><div class="kl">EAN+Lote WMS</div><div class="kv">${fQ(uniPairs.size)}</div></div>
-    <div class="kpi"><div class="kl">Dif. Pares</div><div class="kv ${cls(difPares)}">${sign(difPares)}${fQ(Math.abs(difPares))}</div></div>
-    <div class="kpi"><div class="kl">Qtd SAP</div><div class="kv">${fQ(qtSap)}</div></div>
-    <div class="kpi"><div class="kl">Qtd WMS</div><div class="kv">${fQ(qtUni)}</div></div>
-    <div class="kpi"><div class="kl">Dif. Qtd</div><div class="kv ${cls(difQt)}">${sign(difQt)}${fQ(Math.abs(difQt))}</div></div>
+    <div class="kpi"><div class="kl">EAN+Lote SAP</div><div class="kv">${fmtKvNum(sapPairs.size)}</div></div>
+    <div class="kpi"><div class="kl">EAN+Lote WMS</div><div class="kv">${fmtKvNum(uniPairs.size)}</div></div>
+    <div class="kpi"><div class="kl">Dif. Pares</div><div class="kv ${kvLiqCls(difPares)}">${fmtKvSigned(difPares)}</div></div>
+    <div class="kpi"><div class="kl">Qtd SAP</div><div class="kv">${fmtKvNum(qtSap)}</div></div>
+    <div class="kpi"><div class="kl">Qtd WMS</div><div class="kv">${fmtKvNum(qtUni)}</div></div>
+    <div class="kpi"><div class="kl">Dif. Qtd</div><div class="kv ${kvLiqCls(difQt)}">${fmtKvSigned(difQt)}</div></div>
     ${temVlr?`
-    <div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fmtBrl(recon.valorSap)}</div><div class="ks">preço SAP × qtd · excl. equip. prof.</div></div>
-    <div class="kpi"><div class="kl">Valor WMS</div><div class="kv b">${fmtBrl(recon.valorUni)}</div><div class="ks">preço WMS × qtd · excl. equip. prof.</div></div>
-    <div class="kpi"><div class="kl">Dif. Valor</div><div class="kv ${kvLiqCls(difVlr)}">${fmtBrlLiq(difVlr)}</div><div class="ks">preço SAP × dif qtd · excl. equip. prof.</div></div>`:''}
+    <div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fmtKvBrl(recon.valorSap)}</div><div class="ks">preço SAP × qtd · excl. equip. prof.</div></div>
+    <div class="kpi"><div class="kl">Valor WMS</div><div class="kv b">${fmtKvBrl(recon.valorUni)}</div><div class="ks">preço WMS × qtd · excl. equip. prof.</div></div>
+    <div class="kpi"><div class="kl">Dif. Valor</div><div class="kv ${kvLiqCls(difVlr)}">${fmtKvBrlLiq(difVlr)}</div><div class="ks">preço SAP × dif qtd · excl. equip. prof.</div></div>`:''}
   `;
   if(temVlr)renderValorGapPanel();
 }
@@ -2873,12 +2924,12 @@ function renderUpKpis(){
   for(const dk of DKS){const rows=reconData[dk]||[];tot+=rows.length;diffs+=rows.filter(r=>r.diff!==0).length;oSap+=rows.filter(r=>r.qt_uni===0&&r.qt_sap>0).length;oUni+=rows.filter(r=>r.qt_sap===0&&r.qt_uni>0).length;}
   const pct=tot>0?Math.round((tot-diffs)/tot*100):0;
   document.getElementById('upKpiRow').innerHTML=`
-    <div class="kpi"><div class="kl">Combos EAN+Lote</div><div class="kv">${fmt(tot)}</div></div>
-    <div class="kpi"><div class="kl">Em conformidade</div><div class="kv g">${fmt(tot-diffs)}</div><div class="ks">${pct}%</div></div>
-    <div class="kpi"><div class="kl">Com diferença</div><div class="kv r">${fmt(diffs)}</div></div>
-    <div class="kpi"><div class="kl">Só no SAP</div><div class="kv y">${fmt(oSap)}</div></div>
-    <div class="kpi"><div class="kl">Só no Unilog</div><div class="kv y">${fmt(oUni)}</div></div>
-    <div class="kpi"><div class="kl">Lotes suspeitos</div><div class="kv b">${fmt(suspData.length)}</div></div>
+    <div class="kpi"><div class="kl">Combos EAN+Lote</div><div class="kv">${fmtKvNum(tot)}</div></div>
+    <div class="kpi"><div class="kl">Em conformidade</div><div class="kv g">${fmtKvNum(tot-diffs)}</div><div class="ks">${pct}%</div></div>
+    <div class="kpi"><div class="kl">Com diferença</div><div class="kv r">${fmtKvNum(diffs)}</div></div>
+    <div class="kpi"><div class="kl">Só no SAP</div><div class="kv y">${fmtKvNum(oSap)}</div></div>
+    <div class="kpi"><div class="kl">Só no Unilog</div><div class="kv y">${fmtKvNum(oUni)}</div></div>
+    <div class="kpi"><div class="kl">Lotes suspeitos</div><div class="kv b">${fmtKvNum(suspData.length)}</div></div>
   `;
 }
 
@@ -2969,12 +3020,12 @@ function _renderEanView(){
   const {total:valorWms,temPreco:temPrecoWms}=calcEanViewWmsValor(rows);
   const temPreco=temPrecoSap||temPrecoWms||rows.some(r=>!r.semValor&&r.preco>0);
   document.getElementById('eanKpis').innerHTML=`
-    <div class="kpi"><div class="kl">EANs</div><div class="kv">${fmt(rows.length)}</div></div>
-    <div class="kpi"><div class="kl">Com divergência</div><div class="kv r">${fmt(comDiff)}</div><div class="ks">${rows.length?Math.round(comDiff/rows.length*100):0}%</div></div>
-    <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmt(rows.length-comDiff)}</div></div>
-    <div class="kpi"><div class="kl">Dif. qtd (líquido)</div><div class="kv ${kvLiqCls(totalNetDiff)}">${totalNetDiff>0?'+':''}${fmt(totalNetDiff)}</div><div class="ks">unidades</div></div>
+    <div class="kpi"><div class="kl">EANs</div><div class="kv">${fmtKvNum(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Com divergência</div><div class="kv r">${fmtKvNum(comDiff)}</div><div class="ks">${rows.length?Math.round(comDiff/rows.length*100):0}%</div></div>
+    <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmtKvNum(rows.length-comDiff)}</div></div>
+    <div class="kpi"><div class="kl">Dif. qtd (líquido)</div><div class="kv ${kvLiqCls(totalNetDiff)}">${fmtKvSigned(totalNetDiff)}</div><div class="ks">unidades</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
-    ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · excl. equip. prof.</div></div>`:''}
+    ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtKvBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · excl. equip. prof.</div></div>`:''}
   `;
 
   body.innerHTML='';
@@ -3159,14 +3210,14 @@ function _renderRecon(){
   const depLbl=DEPOT_MAP[activeDepot]?.label.split('—')[1]?.trim()||activeDepot;
   const classLbl=activeReconClass?` · Cl. ${activeReconClass}`:'';
   document.getElementById('reconKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Combos</div><div class="kv">${fmt(rows.length)}</div><div class="ks">dep. ${depLbl}${classLbl}</div></div>
-    <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmt(okCount)}</div><div class="ks">${pct}%</div></div>
-    <div class="kpi"><div class="kl">Com diferença</div><div class="kv r">${fmt(comDiff)}</div></div>
-    <div class="kpi"><div class="kl">Qt SAP</div><div class="kv">${fmt(rows.reduce((s,r)=>s+r.qt_sap,0))}</div></div>
-    <div class="kpi"><div class="kl">Qt Unilog</div><div class="kv">${fmt(rows.reduce((s,r)=>s+r.qt_uni,0))}</div></div>
-    <div class="kpi"><div class="kl">Dif. qtd (líquido)</div><div class="kv ${kvLiqCls(totalNetDiff)}">${totalNetDiff>0?'+':''}${fmt(totalNetDiff)}</div><div class="ks">unidades</div></div>
+    <div class="kpi"><div class="kl">Combos</div><div class="kv">${fmtKvNum(rows.length)}</div><div class="ks">dep. ${depLbl}${classLbl}</div></div>
+    <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmtKvNum(okCount)}</div><div class="ks">${pct}%</div></div>
+    <div class="kpi"><div class="kl">Com diferença</div><div class="kv r">${fmtKvNum(comDiff)}</div></div>
+    <div class="kpi"><div class="kl">Qt SAP</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_sap,0))}</div></div>
+    <div class="kpi"><div class="kl">Qt Unilog</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_uni,0))}</div></div>
+    <div class="kpi"><div class="kl">Dif. qtd (líquido)</div><div class="kv ${kvLiqCls(totalNetDiff)}">${fmtKvSigned(totalNetDiff)}</div><div class="ks">unidades</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
-    ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · excl. equip. prof.</div></div>`:''}
+    ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtKvBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · excl. equip. prof.</div></div>`:''}
   `;
 
   const body=document.getElementById('reconBody');body.innerHTML='';
@@ -3243,9 +3294,9 @@ function _renderSusp(){
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows);
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows);
   document.getElementById('suspKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Lotes suspeitos</div><div class="kv r">${fmt(rows.length)}</div></div>
-    <div class="kpi"><div class="kl">Com similar SAP</div><div class="kv y">${fmt(withSim)}</div><div class="ks">provável erro digitação</div></div>
-    <div class="kpi"><div class="kl">Sem correspondência</div><div class="kv">${fmt(rows.length-withSim)}</div></div>
+    <div class="kpi"><div class="kl">Lotes suspeitos</div><div class="kv r">${fmtKvNum(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Com similar SAP</div><div class="kv y">${fmtKvNum(withSim)}</div><div class="ks">provável erro digitação</div></div>
+    <div class="kpi"><div class="kl">Sem correspondência</div><div class="kv">${fmtKvNum(rows.length-withSim)}</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
   `;
 
@@ -3337,7 +3388,7 @@ function _renderCadastro(){
       notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),
       hasParam:!!p,
       stockTotal:(sapData||[]).filter(r=>r.EAN_norm===e.ean).reduce((s,r)=>s+r.qt,0),
-      stockUni:(uniData||[]).filter(r=>r.EAN_norm===e.ean&&!['93','SI'].includes(r.classe)).reduce((s,r)=>s+r.qt,0)};
+      stockUni:(uniData||[]).filter(r=>r.EAN_norm===e.ean&&r.classe!=='93').reduce((s,r)=>s+r.qt,0)};
   });
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
   msUpdate('cadCat',allCats,'Categorias','renderCadastro');
@@ -3621,7 +3672,7 @@ function _renderOccView(){
   const allSubs=[...new Set(subSrc.map(p=>p.subcat).filter(Boolean))].sort();
   msUpdate('ovSub',allSubs,'Subcategorias','renderOccView');
   const selSubs=msGet('ovSub');
-  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI']};
+  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI','SI']};
   const filteredClasses=depF?(depClassMap[depF]||[]):null;
   const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
   const isDC=e=>e&&e.includes('DC');
@@ -3688,12 +3739,12 @@ function _renderOccView(){
   const tP=filteredEnderecos.size;const tPoup=rows.reduce((s,r)=>s+(r.poupanca||0),0);const tOpt=tP-tPoup;const uC=rows.reduce((s,r)=>s+(r.totalSubutil||0)+(r.totalConsolidavel||0),0);
   const wP=rows.filter(r=>r.param).length;
   document.getElementById('ovKpis').innerHTML=`
-    <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmt(rows.length)}</div></div>
-    <div class="kpi"><div class="kl">Com parâmetro</div><div class="kv g">${fmt(wP)}</div><div class="ks">${rows.length?Math.round(wP/rows.length*100):0}%</div></div>
-    <div class="kpi"><div class="kl">Posições Reais</div><div class="kv b">${fmt(tP)}</div><div class="ks">${depF?("Dep "+depF.padStart(4,"0")):"Todos os depósitos"} · endereços únicos</div></div>
-    <div class="kpi"><div class="kl">Após Optimização</div><div class="kv">${fmt(tOpt)}</div></div>
-    <div class="kpi"><div class="kl">Posições a Libertar</div><div class="kv ${tPoup>0?'r':''}">${fmt(tPoup)}</div><div class="ks">${tP>0?Math.round(tPoup/tP*100):0}% do total</div></div>
-    <div class="kpi"><div class="kl">Lotes Subaproveit.</div><div class="kv y">${fmt(uC)}</div></div>
+    <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmtKvNum(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Com parâmetro</div><div class="kv g">${fmtKvNum(wP)}</div><div class="ks">${rows.length?Math.round(wP/rows.length*100):0}%</div></div>
+    <div class="kpi"><div class="kl">Posições Reais</div><div class="kv b">${fmtKvNum(tP)}</div><div class="ks">${depF?("Dep "+depF.padStart(4,"0")):"Todos os depósitos"} · endereços únicos</div></div>
+    <div class="kpi"><div class="kl">Após Optimização</div><div class="kv">${fmtKvNum(tOpt)}</div></div>
+    <div class="kpi"><div class="kl">Posições a Libertar</div><div class="kv ${tPoup>0?'r':''}">${fmtKvNum(tPoup)}</div><div class="ks">${tP>0?Math.round(tPoup/tP*100):0}% do total</div></div>
+    <div class="kpi"><div class="kl">Lotes Subaproveit.</div><div class="kv y">${fmtKvNum(uC)}</div></div>
   `;
   const body=document.getElementById('ovBody');body.innerHTML='';
   for(const r of rows){
@@ -3795,7 +3846,7 @@ function exportOccXlsx(){
   const selSubs=msGet('ovSub');
   const depF=[...msGetVals("ovDep")][0]||"";
   const alertF=[...msGetVals("ovAlerta")][0]||"";
-  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI']};
+  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI','SI']};
   const filteredClasses=depF?(depClassMap[depF]||[]):null;
   const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
   const isDC=e=>e&&e.includes('DC');
@@ -4204,11 +4255,11 @@ function renderPecas(){
   const comStock=rows.filter(r=>r.qt>0).length;
   const aRepor=rows.filter(r=>r.pedido12m>0).length;
   document.getElementById('pecasKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Total peças</div><div class="kv">${fmt(rows.length)}</div></div>
-    <div class="kpi"><div class="kl">Com stock</div><div class="kv g">${fmt(comStock)}</div></div>
-    <div class="kpi"><div class="kl">Stock zero</div><div class="kv ${rows.length-comStock>0?'r':''}">${fmt(rows.length-comStock)}</div></div>
-    <div class="kpi"><div class="kl">A repor</div><div class="kv y">${fmt(aRepor)}</div></div>
-    <div class="kpi"><div class="kl">Valor stock</div><div class="kv b">${totalValor.toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0})}</div></div>
+    <div class="kpi"><div class="kl">Total peças</div><div class="kv">${fmtKvNum(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Com stock</div><div class="kv g">${fmtKvNum(comStock)}</div></div>
+    <div class="kpi"><div class="kl">Stock zero</div><div class="kv ${rows.length-comStock>0?'r':''}">${fmtKvNum(rows.length-comStock)}</div></div>
+    <div class="kpi"><div class="kl">A repor</div><div class="kv y">${fmtKvNum(aRepor)}</div></div>
+    <div class="kpi"><div class="kl">Valor stock</div><div class="kv b">${fmtKvBrl(totalValor)}</div></div>
   `;
 
   body.innerHTML='';
@@ -4384,11 +4435,11 @@ function renderRecLista(){
   const tMedio=temposMedio.length>0?Math.round(temposMedio.reduce((a,b)=>a+b,0)/temposMedio.length):null;
 
   document.getElementById('recKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Total</div><div class="kv">${fmt(rows.length)}</div></div>
-    <div class="kpi"><div class="kl">Abertas</div><div class="kv r">${fmt(abertas)}</div></div>
-    <div class="kpi"><div class="kl">Em Tratamento</div><div class="kv y">${fmt(tratamento)}</div></div>
-    <div class="kpi"><div class="kl">Encerradas</div><div class="kv g">${fmt(encerradas)}</div></div>
-    <div class="kpi"><div class="kl">Tempo Médio</div><div class="kv b">${tMedio!==null?tMedio+'h':'—'}</div><div class="ks">resolução</div></div>
+    <div class="kpi"><div class="kl">Total</div><div class="kv">${fmtKvNum(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Abertas</div><div class="kv r">${fmtKvNum(abertas)}</div></div>
+    <div class="kpi"><div class="kl">Em Tratamento</div><div class="kv y">${fmtKvNum(tratamento)}</div></div>
+    <div class="kpi"><div class="kl">Encerradas</div><div class="kv g">${fmtKvNum(encerradas)}</div></div>
+    <div class="kpi"><div class="kl">Tempo Médio</div><div class="kv b">${fmtKv(tMedio!==null?tMedio+'h':'—')}</div><div class="ks">resolução</div></div>
   `;
 
   const body=document.getElementById('recBody');body.innerHTML='';
@@ -4438,10 +4489,10 @@ function renderDashboard(){
   const tMedio=tempos.length>0?Math.round(tempos.reduce((a,b)=>a+b,0)/tempos.length):null;
 
   document.getElementById('dashKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Total reclamações</div><div class="kv">${fmt(total)}</div></div>
-    <div class="kpi"><div class="kl">Encerradas</div><div class="kv g">${fmt(encerradas)}</div><div class="ks">${taxaRes}% resolução</div></div>
-    <div class="kpi"><div class="kl">Abertas/Em trat.</div><div class="kv r">${fmt(total-encerradas)}</div></div>
-    <div class="kpi"><div class="kl">Tempo médio resolução</div><div class="kv b">${tMedio!==null?tMedio+'h':'—'}</div></div>
+    <div class="kpi"><div class="kl">Total reclamações</div><div class="kv">${fmtKvNum(total)}</div></div>
+    <div class="kpi"><div class="kl">Encerradas</div><div class="kv g">${fmtKvNum(encerradas)}</div><div class="ks">${taxaRes}% resolução</div></div>
+    <div class="kpi"><div class="kl">Abertas/Em trat.</div><div class="kv r">${fmtKvNum(total-encerradas)}</div></div>
+    <div class="kpi"><div class="kl">Tempo médio resolução</div><div class="kv b">${fmtKv(tMedio!==null?tMedio+'h':'—')}</div></div>
   `;
 
   // By area and type
@@ -4868,8 +4919,8 @@ async function renderAuditoria(){
   updateSortHeaders('audit');
 
   document.getElementById('auditKpis').innerHTML=
-    '<div class="kpi"><div class="kl">Produtos a verificar</div><div class="kv r">'+fmt(rows.length)+'</div></div>'+
-    '<div class="kpi"><div class="kl">Stock total dep.0011</div><div class="kv b">'+fmt(rows.reduce((s,r)=>s+r.qt,0))+'</div></div>';
+    '<div class="kpi"><div class="kl">Produtos a verificar</div><div class="kv r">'+fmtKvNum(rows.length)+'</div></div>'+
+    '<div class="kpi"><div class="kl">Stock total dep.0011</div><div class="kv b">'+fmtKvNum(rows.reduce((s,r)=>s+r.qt,0))+'</div></div>';
 
   const body=document.getElementById('auditBody');body.innerHTML='';
   document.getElementById('auditEmpty').style.display=rows.length===0?'block':'none';
@@ -5239,11 +5290,11 @@ function _renderTrans(tipo){
   // Update company chip
   const tcc=document.getElementById('transCoChip');if(tcc)tcc.textContent=company;
   kpis.innerHTML=`
-    <div class="kpi"><div class="kl">EANs</div><div class="kv">${fmt(filtered.length)}</div></div>
-    <div class="kpi"><div class="kl">Necessitam transf.</div><div class="kv r">${fmt(filtered.filter(r=>r.necessidade>0&&!r.semValidade).length)}</div></div>
-    <div class="kpi"><div class="kl">Stock OK</div><div class="kv g">${fmt(filtered.filter(r=>r.necessidade===0).length)}</div></div>
-    <div class="kpi"><div class="kl">Sem stock válido</div><div class="kv y">${fmt(filtered.filter(r=>r.semValidade).length)}</div></div>
-    <div class="kpi"><div class="kl">Total un. a transferir</div><div class="kv b">${fmt(filtered.reduce((s,r)=>s+r.necessidade,0))}</div></div>
+    <div class="kpi"><div class="kl">EANs</div><div class="kv">${fmtKvNum(filtered.length)}</div></div>
+    <div class="kpi"><div class="kl">Necessitam transf.</div><div class="kv r">${fmtKvNum(filtered.filter(r=>r.necessidade>0&&!r.semValidade).length)}</div></div>
+    <div class="kpi"><div class="kl">Stock OK</div><div class="kv g">${fmtKvNum(filtered.filter(r=>r.necessidade===0).length)}</div></div>
+    <div class="kpi"><div class="kl">Sem stock válido</div><div class="kv y">${fmtKvNum(filtered.filter(r=>r.semValidade).length)}</div></div>
+    <div class="kpi"><div class="kl">Total un. a transferir</div><div class="kv b">${fmtKvNum(filtered.reduce((s,r)=>s+r.necessidade,0))}</div></div>
   `;
 
   body.innerHTML='';
