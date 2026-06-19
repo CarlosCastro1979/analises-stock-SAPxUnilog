@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619194501 -->
+<!DOCTYPE html><!-- v20260619201501 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1251,6 +1251,14 @@ function normUni(rows){
   return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:String(r['Validade']||r['Validade Lote']||r['Validade Lote.']||'').trim(),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()}));
 }
 function getVencidosDepotKey(){return company==='QB'?'99':'9';}
+function getMuimCat(){const muimConf=Object.values(DEPOT_MAP).find(d=>d.catOnly);return muimConf?.catOnly||null;}
+function isEquipProfissional(ean,dk){
+  if(dk==='MUIM')return true;
+  const muimCat=getMuimCat();
+  if(!muimCat)return false;
+  const param=occParams.find(p=>p.ean===ean);
+  return param?.cat===muimCat;
+}
 function parseValidadeDate(v){
   if(!v||v===''||v==='—'||v==='0000-00-00')return null;
   const s=String(v).trim();
@@ -1886,6 +1894,7 @@ function buildVencidoForaDep(){
     if(!dk||dk===vencidosDk)return;
     const param=occParams.find(p=>p.ean===r.EAN_norm);
     const desc=r.produto||dm[r.EAN_norm]||'';
+    if(isEquipProfissional(r.EAN_norm,dk))return;
     vencidoForaDepData.push({
       EAN_norm:r.EAN_norm,
       produto:desc,
