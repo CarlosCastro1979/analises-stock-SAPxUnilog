@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619173001 -->
+<!DOCTYPE html><!-- v20260619194501 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -402,6 +402,7 @@ select.cad-inp{cursor:pointer;}
     <div class="it active" data-tab="suspeitos" onclick="alertTab('suspeitos',this)">Lotes Suspeitos<span id="suspBadge" class="bc" style="display:none"></span></div>
     <div class="it" data-tab="somunilog" onclick="alertTab('somunilog',this)">Só Unilog<span id="suBadge" class="bc" style="display:none"></span></div>
     <div class="it" data-tab="posclasse" onclick="alertTab('posclasse',this)">Posições + 1 Depósito<span id="posClasseBadge" class="bc" style="display:none"></span></div>
+    <div class="it" data-tab="vencforadep" onclick="alertTab('vencforadep',this)">Vencidos fora dep.<span id="vencForaDepBadge" class="bc" style="display:none"></span></div>
   </div>
 
   <div id="alert-suspeitos">
@@ -497,6 +498,41 @@ select.cad-inp{cursor:pointer;}
     <div id="posOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhuma posição com classes misturadas</div></div>
   </div>
   </div><!-- /alert-posclasse -->
+
+  <div id="alert-vencforadep" style="display:none">
+  <div class="card">
+    <div class="ch">
+      <div class="ct">Validade vencida fora do depósito de vencidos</div>
+      <button class="btn bg bs" onclick="exportVencForaDepXlsx()">⬇ Excel</button>
+    </div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
+      Produtos com EAN, lote, quantidade e posição definidos, com <strong>validade expirada</strong>, mas alocados em depósito diferente do dep. vencidos (cl. 104).
+    </p>
+    <div class="dp" id="vencDepPills"></div>
+    <div class="tb">
+      <input class="inp is" id="vencSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderVencidoForaDep()">
+      <div class="ms-wrap" id="ms-vencCat" data-placeholder="Categorias" data-onchange="renderVencidoForaDep"><div class="ms-btn" onclick="msTogOpen('vencCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('vencCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('vencCat')">Todas</button><button onclick="msClrAll('vencCat')">Limpar</button></div><div class="ms-list"></div></div></div>
+    </div>
+    <div class="kr" id="vencKpis"></div>
+    <div class="tw2"><table>
+      <thead><tr>
+        <th onclick="doSort('vencforadep','sapCode')">Cód. SAP</th>
+        <th onclick="doSort('vencforadep','EAN_norm')">EAN</th>
+        <th onclick="doSort('vencforadep','produto')">Descrição</th>
+        <th onclick="doSort('vencforadep','Lote_norm')">Lote</th>
+        <th onclick="doSort('vencforadep','qt')" class="num">Qtd</th>
+        <th onclick="doSort('vencforadep','validade')">Validade</th>
+        <th onclick="doSort('vencforadep','depLabel')">Depósito actual</th>
+        <th onclick="doSort('vencforadep','classe')">Classe</th>
+        <th onclick="doSort('vencforadep','endereco')">Endereço / Posição</th>
+        <th onclick="doSort('vencforadep','diasVencido')" class="num">Dias vencido</th>
+      </tr></thead>
+      <tbody id="vencBody"></tbody>
+    </table></div>
+    <div id="vencEmpty" class="empty" style="display:none"><div class="empty-i">📅</div><div>Carrega os ficheiros Unilog para analisar validades</div></div>
+    <div id="vencOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum produto vencido fora do dep. vencidos</div></div>
+  </div>
+  </div><!-- /alert-vencforadep -->
 </div>
 
 <!-- ══ CADASTRO ══ -->
@@ -1128,8 +1164,8 @@ let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','FI','SI','Total',''];
 
-let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],occParams=[],reconNotas={},cadEdits={};
-let showAll=false,activeDepot='11',activePosDepot='',editOccId=null,company='DFB',sorts={},pecasData=[];
+let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],occParams=[],reconNotas={},cadEdits={};
+let showAll=false,activeDepot='11',activePosDepot='',activeVencDepot='',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
 async function init(){
@@ -1212,7 +1248,18 @@ function normSap(rows){
     .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito)&&r.EAN_norm);
 }
 function normUni(rows){
-  return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()}));
+  return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:String(r['Validade']||r['Validade Lote']||r['Validade Lote.']||'').trim(),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()}));
+}
+function getVencidosDepotKey(){return company==='QB'?'99':'9';}
+function parseValidadeDate(v){
+  if(!v||v===''||v==='—'||v==='0000-00-00')return null;
+  const s=String(v).trim();
+  const p=s.split('/');
+  if(p.length===3){const d=new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0]));if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}}
+  const m=s.match(/(\d{2})\.(\d{2})\.(\d{4})/)||s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if(m){try{const d=s.includes('.')?new Date(m[3],parseInt(m[2])-1,parseInt(m[1])):new Date(m[1],parseInt(m[2])-1,parseInt(m[3]));if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}}catch{}}
+  const d2=new Date(s);if(!isNaN(d2.getTime())){d2.setHours(0,0,0,0);return d2;}
+  return null;
 }
 
 // ── SAP CODE / PRICE HELPERS ──
@@ -1644,8 +1691,10 @@ function alertTab(name,el){
   document.getElementById('alert-suspeitos').style.display=name==='suspeitos'?'':'none';
   document.getElementById('alert-somunilog').style.display=name==='somunilog'?'':'none';
   document.getElementById('alert-posclasse').style.display=name==='posclasse'?'':'none';
+  document.getElementById('alert-vencforadep').style.display=name==='vencforadep'?'':'none';
   if(name==='suspeitos')renderSusp();
   else if(name==='somunilog')renderSoUnilog();
+  else if(name==='vencforadep')renderVencidoForaDep();
   else renderPosClasse();
 }
 function renderAlertPage(){
@@ -1653,12 +1702,13 @@ function renderAlertPage(){
   const tab=active?.dataset?.tab||'suspeitos';
   if(tab==='suspeitos')renderSusp();
   else if(tab==='somunilog')renderSoUnilog();
+  else if(tab==='vencforadep')renderVencidoForaDep();
   else renderPosClasse();
 }
 function updateAlertBadge(){
   const badge=document.getElementById('alertBadge');
   if(!badge)return;
-  const n=(suspData?.length||0)+(posClasseData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
+  const n=(suspData?.length||0)+(posClasseData?.length||0)+(vencidoForaDepData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
   badge.textContent=n;
   badge.style.display=n>0?'':'none';
 }
@@ -1818,6 +1868,139 @@ function exportPosClasseXlsx(){
   XLSX.writeFile(wb,`pos_classes_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
+// ── VENCIDOS FORA DEPÓSITO ──
+function buildVencidoForaDep(){
+  vencidoForaDepData=[];
+  if(!uniData)return;
+  const vencidosDk=getVencidosDepotKey();
+  const today=new Date();today.setHours(0,0,0,0);
+  const dm={};
+  if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
+  uniData.forEach(r=>{
+    if(!r.EAN_norm||!r.Lote_norm||r.qt<=0)return;
+    const end=(r.endereco||'').trim();
+    if(!end||isDC(end))return;
+    const validadeDate=parseValidadeDate(r.validade);
+    if(!validadeDate||validadeDate>=today)return;
+    const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
+    if(!dk||dk===vencidosDk)return;
+    const param=occParams.find(p=>p.ean===r.EAN_norm);
+    const desc=r.produto||dm[r.EAN_norm]||'';
+    vencidoForaDepData.push({
+      EAN_norm:r.EAN_norm,
+      produto:desc,
+      Lote_norm:r.Lote_norm,
+      qt:r.qt,
+      validade:r.validade||'',
+      validadeDate,
+      diasVencido:Math.floor((today-validadeDate)/(1000*86400)),
+      dk,
+      depLabel:DEPOT_MAP[dk]?.label.split('—')[1]?.trim()||dk,
+      classe:r.classe,
+      endereco:end,
+      cat:param?.cat||autoCat(desc).cat||'',
+      sapCode:getSapCode(r.EAN_norm)
+    });
+  });
+  vencidoForaDepData.sort((a,b)=>b.diasVencido-a.diasVencido||a.EAN_norm.localeCompare(b.EAN_norm));
+  const badge=document.getElementById('vencForaDepBadge');
+  if(badge){badge.textContent=vencidoForaDepData.length;badge.style.display=vencidoForaDepData.length>0?'':'none';}
+  updateAlertBadge();
+}
+function renderVencDepPills(){
+  const c=document.getElementById('vencDepPills');if(!c)return;
+  c.innerHTML='';
+  const all=document.createElement('div');all.className='dpl'+(!activeVencDepot?' active':'');all.textContent='Todos';
+  all.onclick=()=>{activeVencDepot='';renderVencDepPills();renderVencidoForaDep();};c.appendChild(all);
+  for(const dk of DKS){
+    if(dk===getVencidosDepotKey())continue;
+    const el=document.createElement('div');el.className='dpl'+(dk===activeVencDepot?' active':'');
+    el.textContent=DEPOT_MAP[dk].label.split('—')[1]?.trim()||dk;
+    el.onclick=()=>{activeVencDepot=dk;renderVencDepPills();renderVencidoForaDep();};c.appendChild(el);
+  }
+}
+let _renderVencForaDepBusy=false;
+function renderVencidoForaDep(){if(_renderVencForaDepBusy)return;_renderVencForaDepBusy=true;try{_renderVencidoForaDep();}finally{_renderVencForaDepBusy=false;}}
+function _renderVencidoForaDep(){
+  const body=document.getElementById('vencBody');
+  const empty=document.getElementById('vencEmpty');
+  const ok=document.getElementById('vencOk');
+  if(!uniData){
+    if(body)body.innerHTML='';
+    if(empty)empty.style.display='block';
+    if(ok)ok.style.display='none';
+    return;
+  }
+  if(empty)empty.style.display='none';
+  renderVencDepPills();
+  let rows=[...vencidoForaDepData];
+  const srch=document.getElementById('vencSrch')?.value.toLowerCase()||'';
+  const cats=[...new Set(vencidoForaDepData.map(r=>r.cat).filter(Boolean))].sort();
+  msUpdate('vencCat',cats,'Categorias','renderVencidoForaDep');
+  const selCats=msGet('vencCat');
+  if(activeVencDepot)rows=rows.filter(r=>r.dk===activeVencDepot);
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm));
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
+  applySort('vencforadep',rows);updateSortHeaders('vencforadep');
+  const totalQt=rows.reduce((s,r)=>s+r.qt,0);
+  const totalEans=new Set(rows.map(r=>r.EAN_norm)).size;
+  const byDep={};
+  rows.forEach(r=>{byDep[r.depLabel]=(byDep[r.depLabel]||0)+1;});
+  const depKs=Object.keys(byDep).sort();
+  const depHtml=depKs.slice(0,4).map(d=>`<span class="badge bwarn" style="margin-right:4px">${d}: ${byDep[d]}</span>`).join('')+(depKs.length>4?`<span style="font-size:10px;color:var(--muted)">+${depKs.length-4} dep.</span>`:'');
+  document.getElementById('vencKpis').innerHTML=`
+    <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmt(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmt(totalEans)}</div></div>
+    <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
+    <div class="kpi"><div class="kl">Por depósito actual</div><div class="ks" style="margin-top:6px;line-height:1.6">${depHtml||'—'}</div></div>
+  `;
+  body.innerHTML='';
+  document.getElementById('vencOk').style.display=rows.length===0?'block':'none';
+  for(const r of rows){
+    const tr=document.createElement('tr');tr.className='dr';
+    tr.innerHTML=`
+      <td>${sapCodeHtml(r.EAN_norm)}</td>
+      <td><span class="badge bneu">${r.EAN_norm}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.produto)}">${r.produto||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm}</span></td>
+      <td class="num">${fmt(r.qt)}</td>
+      <td><span class="badge berr">${r.validade||'—'}</span></td>
+      <td><span class="badge binfo">${r.depLabel}</span></td>
+      <td><span class="badge bgray">Cl.${r.classe}</span></td>
+      <td style="font-family:var(--mono);font-size:11px">${r.endereco}</td>
+      <td class="num neg">${fmt(r.diasVencido)}</td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!rows.length&&uniData)document.getElementById('vencOk').style.display='block';
+}
+function exportVencForaDepXlsx(){
+  if(!vencidoForaDepData.length){toast('Sem dados','error');return;}
+  let rows=[...vencidoForaDepData];
+  const srch=document.getElementById('vencSrch')?.value.toLowerCase()||'';
+  const selCats=msGet('vencCat');
+  if(activeVencDepot)rows=rows.filter(r=>r.dk===activeVencDepot);
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm));
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
+  const data=rows.map(r=>({
+    Categoria:r.cat||'',
+    Cod_SAP:r.sapCode||getSapCode(r.EAN_norm),
+    EAN:r.EAN_norm,
+    Descricao:r.produto||'',
+    Lote:r.Lote_norm,
+    Qtd:r.qt,
+    Validade:r.validade,
+    Deposito_Actual:r.depLabel,
+    Classe:r.classe,
+    Endereco:r.endereco,
+    Dias_Vencido:r.diasVencido
+  }));
+  if(!data.length){toast('Sem dados','error');return;}
+  const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Vencidos Fora Dep');
+  XLSX.writeFile(wb,`vencidos_fora_dep_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 
 function simRatio(a,b){const la=a.length,lb=b.length;if(!la||!lb)return 0;const dp=Array.from({length:la+1},(_,i)=>Array.from({length:lb+1},(_,j)=>i===0?j:j===0?i:0));for(let i=1;i<=la;i++)for(let j=1;j<=lb;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return 1-dp[la][lb]/Math.max(la,lb);}
 
@@ -1827,7 +2010,7 @@ async function processAll(){
   company=document.getElementById('coSel').value;
   document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
   await loadOccParams();
-  buildRecon();buildSusp();buildSoUnilog();buildPosClasse();checkDuplicadosAlert();await autoSeedOcc();await processPecas();renderUpKpis();updateChip();
+  buildRecon();buildSusp();buildSoUnilog();buildPosClasse();buildVencidoForaDep();checkDuplicadosAlert();await autoSeedOcc();await processPecas();renderUpKpis();updateChip();
   const procAt=new Date().toISOString();
   try{
     const payload={id:company,company,uploaded_at:procAt,sap_rows:sapData.length,unilog_rows:uniData.length,sap_data:JSON.stringify(sapData),unilog_data:JSON.stringify(uniData),recon_summary:JSON.stringify(buildSummary())};
@@ -1991,7 +2174,7 @@ function switchCompany(){
   DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
   DKS=Object.keys(DEPOT_MAP);
   // Reset all data
-  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];
+  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
   renderUpKpis();
@@ -2001,6 +2184,7 @@ function switchCompany(){
   const suspBadge=document.getElementById('suspBadge');if(suspBadge){suspBadge.textContent='';suspBadge.style.display='none';}
   const suBadge=document.getElementById('suBadge');if(suBadge){suBadge.textContent='';suBadge.style.display='none';}
   const posClasseBadge=document.getElementById('posClasseBadge');if(posClasseBadge){posClasseBadge.textContent='';posClasseBadge.style.display='none';}
+  const vencForaDepBadge=document.getElementById('vencForaDepBadge');if(vencForaDepBadge){vencForaDepBadge.textContent='';vencForaDepBadge.style.display='none';}
   const alertBadge=document.getElementById('alertBadge');if(alertBadge){alertBadge.textContent='';alertBadge.style.display='none';}
   // Try to load saved data for the new company
   loadFromDB(true);
@@ -2018,7 +2202,7 @@ async function loadFromDB(silent=false){
     invalidateSapMaps();
     // Load occParams first so MUIM category filtering works in buildRecon
     await loadOccParams();
-    buildRecon();buildSusp();buildSoUnilog();buildPosClasse();checkDuplicadosAlert();await processPecas();await loadPecasData();renderUpKpis();updateChip();
+    buildRecon();buildSusp();buildSoUnilog();buildPosClasse();buildVencidoForaDep();checkDuplicadosAlert();await processPecas();await loadPecasData();renderUpKpis();updateChip();
     // Re-render active page if it needs data
     const activePage=document.querySelector('.page.active');
     if(activePage){
@@ -3438,6 +3622,7 @@ function doSort(table,col){
   else if(table==='susp')renderSusp();
   else if(table==='su')renderSoUnilog();
   else if(table==='poscl')renderPosClasse();
+  else if(table==='vencforadep')renderVencidoForaDep();
   else if(table==='occ')renderOccView();
   else if(table==='transEc')renderTrans('ecommerce');
   else if(table==='transQb')renderTrans('qbrasil');
