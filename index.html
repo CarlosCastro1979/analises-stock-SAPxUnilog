@@ -2607,12 +2607,13 @@ function _renderSemValidade(){
   const totalQt=rows.reduce((s,r)=>s+r.qt,0);
   const totalEans=new Set(rows.map(r=>r.EAN_norm)).size;
   const st=semValidadeStats||{};
-  const exclNote=st.excludedByReal?` · ${fmt(st.excludedByReal)} excl. (validade real noutra posição)`:'';
+  const exclReal=st.excludedByReal?` · ${fmt(st.excludedByReal)} excl. (validade real)`:'';
+  const exclEmpty=st.excludedNoExplicit?` · ${fmt(st.excludedNoExplicit)} excl. (sem 00.0000)`:'';
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows);
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows);
   document.getElementById('semValKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.combos??rows.length)} combos com validade 00.0000 detectada${exclNote}</div></div>
-    <div class="kpi"><div class="kl">Linhas sentinel</div><div class="kv b">${fmtKvNum(st.sentinelRows||0)}</div><div class="ks">posições WMS com validade vazia/00.0000</div></div>
+    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.combos??rows.length)} combos listados${exclReal}${exclEmpty}</div></div>
+    <div class="kpi"><div class="kl">Linhas 00.0000</div><div class="kv b">${fmtKvNum(st.explicitSentinelRows||0)}</div><div class="ks">posições WMS com sentinel explícito</div></div>
     <div class="kpi"><div class="kl">EANs únicos</div><div class="kv b">${fmtKvNum(totalEans)}</div></div>
     <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmtKvNum(totalQt)}</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
@@ -2628,7 +2629,7 @@ function _renderSemValidade(){
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.produto)}">${r.produto||'—'}</td>
       <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm||'—'}</span></td>
       <td class="num">${fmt(r.qt)}</td>
-      <td><span class="badge bwarn">${r.validade||'00.0000'}</span></td>
+      <td><span class="badge bwarn">${r.validade||'—'}</span></td>
       <td><span class="badge binfo">${catLbl||'—'}</span></td>
     `;
     body.appendChild(tr);
@@ -2650,7 +2651,7 @@ function exportSemValidadeXlsx(){
     Descricao:r.produto||'',
     Lote:r.Lote_norm,
     Qtd_Total:r.qt,
-    Validade:r.validade||'00.0000',
+    Validade:r.validade||'',
     Categoria:r.cat||'',
     Subcategoria:r.subcat||''
   }));
