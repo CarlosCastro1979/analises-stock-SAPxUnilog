@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619310000 -->
+<!DOCTYPE html><!-- v20260619320000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1197,11 +1197,11 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const db=supabase.createClient(SB_URL,SB_KEY);
 
 // Depot maps per company
-const DEPOT_MAP_DFB={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2'],label:'0044 — Avarias'},'MUIM':{classes:['00'],label:'MUIM — Equipamento Profissional',catOnly:'Equipamento Profissional'}};
-const DEPOT_MAP_QB={'11':{classes:['00'],label:'0011 — Disponível'},'44':{classes:['A1','A2'],label:'0044 — Avarias'},'99':{classes:['104'],label:'0099 — Vencidos'}};
+const DEPOT_MAP_DFB={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2','FI'],label:'0044 — Avarias'},'MUIM':{classes:['00'],label:'MUIM — Equipamento Profissional',catOnly:'Equipamento Profissional'}};
+const DEPOT_MAP_QB={'11':{classes:['00'],label:'0011 — Disponível'},'44':{classes:['A1','A2','FI'],label:'0044 — Avarias'},'99':{classes:['104'],label:'0099 — Vencidos'}};
 let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
-const EXCL=['93','FI','SI','Total',''];
+const EXCL=['93','SI','Total',''];
 
 let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={};
 let showAll=false,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
@@ -3159,7 +3159,7 @@ function _renderCadastro(){
       notes:edited?.notes!==undefined?edited.notes:(p?.notes||''),
       hasParam:!!p,
       stockTotal:(sapData||[]).filter(r=>r.EAN_norm===e.ean).reduce((s,r)=>s+r.qt,0),
-      stockUni:(uniData||[]).filter(r=>r.EAN_norm===e.ean&&!['93','FI','SI'].includes(r.classe)).reduce((s,r)=>s+r.qt,0)};
+      stockUni:(uniData||[]).filter(r=>r.EAN_norm===e.ean&&!['93','SI'].includes(r.classe)).reduce((s,r)=>s+r.qt,0)};
   });
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
   msUpdate('cadCat',allCats,'Categorias','renderCadastro');
@@ -3443,7 +3443,7 @@ function _renderOccView(){
   const allSubs=[...new Set(subSrc.map(p=>p.subcat).filter(Boolean))].sort();
   msUpdate('ovSub',allSubs,'Subcategorias','renderOccView');
   const selSubs=msGet('ovSub');
-  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2']};
+  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI']};
   const filteredClasses=depF?(depClassMap[depF]||[]):null;
   const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
   const isDC=e=>e&&e.includes('DC');
@@ -3617,7 +3617,7 @@ function exportOccXlsx(){
   const selSubs=msGet('ovSub');
   const depF=[...msGetVals("ovDep")][0]||"";
   const alertF=[...msGetVals("ovAlerta")][0]||"";
-  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2']};
+  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI']};
   const filteredClasses=depF?(depClassMap[depF]||[]):null;
   const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
   const isDC=e=>e&&e.includes('DC');
