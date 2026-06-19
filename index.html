@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619180000 -->
+<!DOCTYPE html><!-- v20260619183000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1533,7 +1533,7 @@ function calcValorTotWmsFromUniMatch(rows,{eanKey='EAN_norm',loteKey='Lote_norm'
       if(classe&&ur.classe!==classe)return;
       const urDk=DKS.find(k=>DEPOT_MAP[k].classes.includes(ur.classe));
       if(depot&&urDk!==depot)return;
-      if(isEquipProfissional(ean,urDk))continue;
+      if(isEquipProfissional(ean,urDk))return;
       const lv=wmsLineValor(ur);
       if(lv!==0)temPreco=true;
       total+=lv;
