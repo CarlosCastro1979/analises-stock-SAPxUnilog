@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619213000 -->
+<!DOCTYPE html><!-- v20260619230000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -298,6 +298,7 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bg bs" onclick="exportReconXlsx()">⬇ Excel</button>
     </div>
     <div class="dp" id="depotPills"></div>
+    <div class="dp" id="reconClassPills" style="display:none"></div>
     <div class="tb">
       <input class="inp is" id="reconSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderRecon()">
       <select class="inp" id="reconEstado" onchange="renderRecon()">
@@ -500,13 +501,20 @@ select.cad-inp{cursor:pointer;}
   </div><!-- /alert-posclasse -->
 
   <div id="alert-vencforadep" style="display:none">
+  <div class="its" id="vencSubIts">
+    <div class="it active" data-vtab="wms" onclick="vencSubTab('wms',this)">Unilog (WMS)<span id="vencWmsBadge" class="bc" style="display:none"></span></div>
+    <div class="it" data-vtab="sap" onclick="vencSubTab('sap',this)">SAP<span id="vencSapBadge" class="bc" style="display:none"></span></div>
+  </div>
   <div class="card">
     <div class="ch">
       <div class="ct">Validade vencida fora do depósito de vencidos</div>
       <button class="btn bg bs" onclick="exportVencForaDepXlsx()">⬇ Excel</button>
     </div>
-    <p style="font-size:12px;color:var(--text2);margin-bottom:6px;">
-      Produtos com EAN, lote, quantidade e posição definidos, com <strong>validade expirada</strong>, mas alocados em depósito diferente do dep. vencidos (cl. 104). Equipamento profissional (MUIM) excluído — sem validade.
+    <p id="vencDescWms" style="font-size:12px;color:var(--text2);margin-bottom:6px;">
+      <strong>Unilog (WMS):</strong> produtos com EAN, lote, quantidade e posição, <strong>validade expirada</strong>, fora da classe 104 (dep. vencidos). Equipamento profissional excluído.
+    </p>
+    <p id="vencDescSap" style="font-size:12px;color:var(--text2);margin-bottom:6px;display:none">
+      <strong>SAP:</strong> produtos com validade expirada fora do dep. vencidos (<span id="vencSapDepLbl">0009</span>). Equipamento profissional excluído.
     </p>
     <p id="vencForaDepStats" style="font-size:11px;color:var(--muted);margin-bottom:14px;display:none"></p>
     <div class="dp" id="vencDepPills"></div>
@@ -517,20 +525,18 @@ select.cad-inp{cursor:pointer;}
     <div class="kr" id="vencKpis"></div>
     <div class="tw2"><table>
       <thead><tr>
-        <th onclick="doSort('vencforadep','sapCode')">Cód. SAP</th>
-        <th onclick="doSort('vencforadep','EAN_norm')">EAN</th>
-        <th onclick="doSort('vencforadep','produto')">Descrição</th>
-        <th onclick="doSort('vencforadep','Lote_norm')">Lote</th>
-        <th onclick="doSort('vencforadep','qt')" class="num">Qtd</th>
-        <th onclick="doSort('vencforadep','validade')">Validade</th>
-        <th onclick="doSort('vencforadep','depLabel')">Depósito actual</th>
-        <th onclick="doSort('vencforadep','classe')">Classe</th>
-        <th onclick="doSort('vencforadep','endereco')">Endereço / Posição</th>
-        <th onclick="doSort('vencforadep','diasVencido')" class="num">Dias vencido</th>
+        <th onclick="vencDoSort('sapCode')">Cód. SAP</th>
+        <th onclick="vencDoSort('EAN_norm')">EAN</th>
+        <th onclick="vencDoSort('produto')">Descrição</th>
+        <th onclick="vencDoSort('Lote_norm')">Lote</th>
+        <th onclick="vencDoSort('qt')" class="num">Qtd</th>
+        <th onclick="vencDoSort('validade')">Validade</th>
+        <th onclick="vencDoSort('depClasseActual')">Depósito / Classe actual</th>
+        <th onclick="vencDoSort('diasVencido')" class="num">Dias vencido</th>
       </tr></thead>
       <tbody id="vencBody"></tbody>
     </table></div>
-    <div id="vencEmpty" class="empty" style="display:none"><div class="empty-i">📅</div><div>Carrega os ficheiros Unilog para analisar validades</div></div>
+    <div id="vencEmpty" class="empty" style="display:none"><div class="empty-i">📅</div><div>Carrega os ficheiros para analisar validades</div></div>
     <div id="vencOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum produto vencido fora do dep. vencidos</div></div>
   </div>
   </div><!-- /alert-vencforadep -->
@@ -1165,8 +1171,8 @@ let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','FI','SI','Total',''];
 
-let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencForaDepStats=null,occParams=[],reconNotas={},cadEdits={};
-let showAll=false,activeDepot='11',activePosDepot='',activeVencDepot='',editOccId=null,company='DFB',sorts={},pecasData=[];
+let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={};
+let showAll=false,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
 async function init(){
@@ -1261,7 +1267,9 @@ function normUni(rows){
 }
 function getVencidosDepotKey(){return company==='QB'?'99':'9';}
 function getMuimCat(){const muimConf=Object.values(DEPOT_MAP).find(d=>d.catOnly);return muimConf?.catOnly||null;}
-function isVencForaDepDepot(dk){return!!dk&&dk!==getVencidosDepotKey()&&dk!=='MUIM';}
+function isVencForaDepDepot(dk){return!!dk&&dk!==getVencidosDepotKey()&&!DEPOT_MAP[dk]?.catOnly;}
+function reconDepotHasMultiClass(dk){return(DEPOT_MAP[dk]?.classes?.length||0)>1;}
+function reconRowMatchesClass(r,cl){if(!cl)return true;const ucs=r.uni_classes||[];return ucs.includes(cl);}
 function isEquipProfissional(ean,dk){
   if(dk==='MUIM')return true;
   const muimCat=getMuimCat();
@@ -1901,12 +1909,13 @@ function buildVencidoForaDep(){
   if(!uniData)return;
   const vencidosDk=getVencidosDepotKey();
   const today=new Date();today.setHours(0,0,0,0);
-  const stats={analizadas:uniData.length,comValidade:0,vencidas:0,foraDepVencidos:0,jaNoDepVencidos:0,equipProf:0,semLote:0,semEndereco:0,dc:0,classeDesconhecida:0};
+  const stats={analizadas:uniData.length,comValidade:0,vencidas:0,validadeNaoParseada:0,foraDepVencidos:0,jaNoDepVencidos:0,equipProf:0,semLote:0,semEndereco:0,dc:0,classeDesconhecida:0};
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
   uniData.forEach(r=>{
     const validadeDate=parseValidadeDate(r.validade);
     if(validadeDate)stats.comValidade++;
+    else if((r.validade||'').trim())stats.validadeNaoParseada++;
     if(validadeDate&&validadeDate<today)stats.vencidas++;
     if(!r.EAN_norm||r.qt<=0)return;
     if(!r.Lote_norm){stats.semLote++;return;}
@@ -1977,6 +1986,7 @@ function _renderVencidoForaDep(){
     let extra='';
     if(s.jaNoDepVencidos)extra+=` · ${fmt(s.jaNoDepVencidos)} já no dep. vencidos (cl. 104)`;
     if(s.equipProf)extra+=` · ${fmt(s.equipProf)} equip. profissional`;
+    if(s.validadeNaoParseada)extra+=` · ${fmt(s.validadeNaoParseada)} validade não parseada`;
     statsEl.textContent=`Analisadas ${fmt(s.analizadas)} linhas Unilog · ${fmt(s.comValidade)} com validade parseada · ${fmt(s.vencidas)} vencidas · ${fmt(s.foraDepVencidos)} fora do dep. vencidos${extra}`;
     statsEl.style.display='block';
   }else if(statsEl)statsEl.style.display='none';
@@ -2475,7 +2485,7 @@ function renderReconPage(){
   if(!Object.keys(reconData).length){document.getElementById('reconEmpty').style.display='block';return;}
   document.getElementById('reconEmpty').style.display='none';
   // cat filter updated dynamically in renderRecon
-  renderDepotPills();renderRecon();
+  renderDepotPills();renderReconClassPills();renderRecon();
 }
 
 function renderDepotPills(){
@@ -2484,8 +2494,27 @@ function renderDepotPills(){
     const info=DEPOT_MAP[dk];const rows=reconData[dk]||[];const diffs=rows.filter(r=>r.diff!==0).length;
     const el=document.createElement('div');el.className='dpl'+(dk===activeDepot?' active':'');
     el.innerHTML=`${info.label} <span style="font-size:9px;opacity:.8;margin-left:4px">${diffs>0?'⚠ '+diffs:'✓'}</span>`;
-    el.onclick=()=>{activeDepot=dk;renderDepotPills();renderRecon();};c.appendChild(el);
+    el.onclick=()=>{activeDepot=dk;activeReconClass='';renderDepotPills();renderReconClassPills();renderRecon();};c.appendChild(el);
   }
+}
+function renderReconClassPills(){
+  const c=document.getElementById('reconClassPills');if(!c)return;
+  const multi=reconDepotHasMultiClass(activeDepot);
+  if(!multi){c.style.display='none';c.innerHTML='';if(activeReconClass)activeReconClass='';return;}
+  c.style.display='flex';
+  const classes=DEPOT_MAP[activeDepot].classes;
+  const allRows=reconData[activeDepot]||[];
+  if(activeReconClass&&!classes.includes(activeReconClass))activeReconClass='';
+  const countDiffs=cl=>allRows.filter(r=>r.diff!==0&&reconRowMatchesClass(r,cl)).length;
+  c.innerHTML='';
+  const mkPill=(lbl,cl)=>{
+    const diffs=countDiffs(cl);
+    const el=document.createElement('div');el.className='dpl'+(activeReconClass===cl?' active':'');
+    el.innerHTML=`${lbl} <span style="font-size:9px;opacity:.8;margin-left:4px">${diffs>0?'⚠ '+diffs:'✓'}</span>`;
+    el.onclick=()=>{activeReconClass=cl;renderReconClassPills();renderRecon();};c.appendChild(el);
+  };
+  mkPill('Todas','');
+  classes.forEach(cl=>mkPill('Cl. '+cl,cl));
 }
 
 function toggleShowAll(){showAll=!showAll;document.getElementById('showAllTg').classList.toggle('on',showAll);document.getElementById('tgLbl').textContent=showAll?'Mostrar tudo':'Só diferenças';renderRecon();}
@@ -2498,7 +2527,9 @@ function renderRecon(){
 }
 function _renderRecon(){
   if(!reconData[activeDepot])return;
+  renderReconClassPills();
   let rows=[...(reconData[activeDepot]||[])];
+  if(activeReconClass)rows=rows.filter(r=>reconRowMatchesClass(r,activeReconClass));
   const srch=document.getElementById('reconSrch').value.toLowerCase();
   const estadoVals=msGetVals('reconEstado');
   const validadeVals=msGetVals('reconValidade');
@@ -2555,8 +2586,9 @@ function _renderRecon(){
   const totalValorLiq=rows.reduce((s,r)=>s+reconRowValor(r,precoMap),0);
   const temPreco=rows.some(r=>(precoMap[r.EAN_norm]||0)>0);
   const depLbl=DEPOT_MAP[activeDepot]?.label.split('—')[1]?.trim()||activeDepot;
+  const classLbl=activeReconClass?` · Cl. ${activeReconClass}`:'';
   document.getElementById('reconKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Combos</div><div class="kv">${fmt(rows.length)}</div><div class="ks">dep. ${depLbl}</div></div>
+    <div class="kpi"><div class="kl">Combos</div><div class="kv">${fmt(rows.length)}</div><div class="ks">dep. ${depLbl}${classLbl}</div></div>
     <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmt(okCount)}</div><div class="ks">${pct}%</div></div>
     <div class="kpi"><div class="kl">Com diferença</div><div class="kv r">${fmt(comDiff)}</div></div>
     <div class="kpi"><div class="kl">Qt SAP</div><div class="kv">${fmt(rows.reduce((s,r)=>s+r.qt_sap,0))}</div></div>
@@ -2943,6 +2975,7 @@ function exportSuspXlsx(){
 function exportReconXlsx(){
   if(!reconData[activeDepot]){toast("Sem dados para exportar","error");return;}
   let rows=[...(reconData[activeDepot]||[])];
+  if(activeReconClass)rows=rows.filter(r=>reconRowMatchesClass(r,activeReconClass));
   const srch=document.getElementById("reconSrch").value.toLowerCase();
   const estadoVals=msGetVals("reconEstado");
   const validadeVals=msGetVals("reconValidade");
@@ -2957,14 +2990,15 @@ function exportReconXlsx(){
   if(selSubs.size)rows=rows.filter(r=>selSubs.has(r.subcat));
   if(minDiffVal>0)rows=rows.filter(r=>Math.abs(r.diff)>=minDiffVal);
   const depLabel=DEPOT_MAP[activeDepot]?.label||activeDepot;
+  const classSuffix=activeReconClass?`_cl${activeReconClass}`:'';
   const precoMap=buildSapPrecoMap();
-  const data=rows.map(r=>{const estado=r.qt_sap===0&&r.qt_uni>0?"Só Unilog":r.qt_uni===0&&r.qt_sap>0?"Só SAP":r.diff===0?"OK":"Divergência";return{Deposito:depLabel,Categoria:r.cat||"",Subcategoria:r.subcat||"",Cod_SAP:getSapCode(r.EAN_norm),EAN:r.EAN_norm,Descricao:r.desc,Lote:r.Lote_norm,Validade:r.validade||"",SAP:r.qt_sap,Unilog:r.qt_uni,Diferenca:r.diff,Preco_SAP:precoMap[r.EAN_norm]||0,Valor_Dif_Liquido:r.diff*(precoMap[r.EAN_norm]||0),Estado:estado,Localizacao_Unilog:(r.uni_enderecos||[]).join(", ")};});
+  const data=rows.map(r=>{const estado=r.qt_sap===0&&r.qt_uni>0?"Só Unilog":r.qt_uni===0&&r.qt_sap>0?"Só SAP":r.diff===0?"OK":"Divergência";return{Deposito:depLabel,Classe:activeReconClass||(r.uni_classes||[]).join(", ")||"",Categoria:r.cat||"",Subcategoria:r.subcat||"",Cod_SAP:getSapCode(r.EAN_norm),EAN:r.EAN_norm,Descricao:r.desc,Lote:r.Lote_norm,Validade:r.validade||"",SAP:r.qt_sap,Unilog:r.qt_uni,Diferenca:r.diff,Preco_SAP:precoMap[r.EAN_norm]||0,Valor_Dif_Liquido:r.diff*(precoMap[r.EAN_norm]||0),Estado:estado,Localizacao_Unilog:(r.uni_enderecos||[]).join(", ")};});
   if(!data.length){toast("Sem dados","error");return;}
   const ws=XLSX.utils.json_to_sheet(data);
   ws["!cols"]=[{wch:20},{wch:16},{wch:14},{wch:14},{wch:32},{wch:14},{wch:12},{wch:8},{wch:8},{wch:10},{wch:14},{wch:30}];
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,"Conciliação");
-  XLSX.writeFile(wb,"conciliacao_"+company+"_dep"+activeDepot+"_"+new Date().toISOString().slice(0,10)+".xlsx");
+  XLSX.writeFile(wb,"conciliacao_"+company+"_dep"+activeDepot+classSuffix+"_"+new Date().toISOString().slice(0,10)+".xlsx");
 }
 function exportDupXlsx(){
   const dups=buildDuplicados();if(!dups.length){toast('Sem duplicados','error');return;}
