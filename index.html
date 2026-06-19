@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619234500 -->
+<!DOCTYPE html><!-- v20260619240000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1818,9 +1818,11 @@ function alertTab(name,el){
   document.getElementById('alert-somunilog').style.display=name==='somunilog'?'':'none';
   document.getElementById('alert-posclasse').style.display=name==='posclasse'?'':'none';
   document.getElementById('alert-vencforadep').style.display=name==='vencforadep'?'':'none';
+  document.getElementById('alert-semvalidade').style.display=name==='semvalidade'?'':'none';
   if(name==='suspeitos')renderSusp();
   else if(name==='somunilog')renderSoUnilog();
   else if(name==='vencforadep')renderVencidoForaDep();
+  else if(name==='semvalidade')renderSemValidade();
   else renderPosClasse();
   scheduleColResize();
 }
@@ -1830,13 +1832,14 @@ function renderAlertPage(){
   if(tab==='suspeitos')renderSusp();
   else if(tab==='somunilog')renderSoUnilog();
   else if(tab==='vencforadep')renderVencidoForaDep();
+  else if(tab==='semvalidade')renderSemValidade();
   else renderPosClasse();
   scheduleColResize();
 }
 function updateAlertBadge(){
   const badge=document.getElementById('alertBadge');
   if(!badge)return;
-  const n=(suspData?.length||0)+(posClasseData?.length||0)+(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
+  const n=(suspData?.length||0)+(posClasseData?.length||0)+(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0)+(semValidadeData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
   badge.textContent=n;
   badge.style.display=n>0?'':'none';
 }
@@ -2015,6 +2018,7 @@ function vencDoSort(col){doSort(vencSortKey(),col);}
 function buildVencidoForaDep(){
   buildVencidoForaDepWms();
   buildVencidoForaDepSap();
+  buildSemValidade();
   const total=(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0);
   const badge=document.getElementById('vencForaDepBadge');
   if(badge){badge.textContent=total;badge.style.display=total>0?'':'none';}
@@ -2311,6 +2315,115 @@ function exportVencForaDepXlsx(){
   XLSX.writeFile(wb,`vencidos_fora_dep_${isSap?'sap':'wms'}_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
+// ── PRODUTOS SEM VALIDADE (CAFÉ 00.0000) ──
+function buildSemValidade(){
+  semValidadeData=[];
+  if(!uniData)return;
+  const dm={};
+  if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
+  uniData.forEach(r=>{
+    if(!r.EAN_norm||r.qt<=0)return;
+    if(!isValidadeSentinel(r.validade))return;
+    const desc=r.produto||dm[r.EAN_norm]||'';
+    const param=occParams.find(p=>p.ean===r.EAN_norm);
+    const cat=param?.cat||autoCat(desc).cat||'';
+    const subcat=param?.subcat||autoCat(desc).subcat||'';
+    if(!isCafeProduct(r.EAN_norm,desc,cat,subcat))return;
+    const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
+    const depLabel=dk?DEPOT_MAP[dk].label.split('—')[1]?.trim()||dk:r.classe;
+    semValidadeData.push({
+      EAN_norm:r.EAN_norm,
+      produto:desc,
+      Lote_norm:r.Lote_norm||'',
+      qt:r.qt,
+      validade:r.validade||'00.0000',
+      classe:r.classe,
+      dk:dk||'',
+      depClasse:dk?`${depLabel} / Cl.${r.classe}`:`Cl.${r.classe}`,
+      endereco:(r.endereco||'').trim(),
+      cat,
+      subcat,
+      sapCode:getSapCode(r.EAN_norm)
+    });
+  });
+  semValidadeData.sort((a,b)=>String(a.produto||'').localeCompare(String(b.produto||''))||a.EAN_norm.localeCompare(b.EAN_norm));
+  const badge=document.getElementById('semValidadeBadge');
+  if(badge){badge.textContent=semValidadeData.length;badge.style.display=semValidadeData.length>0?'':'none';}
+  updateAlertBadge();
+}
+let _renderSemValidadeBusy=false;
+function renderSemValidade(){if(_renderSemValidadeBusy)return;_renderSemValidadeBusy=true;try{_renderSemValidade();}finally{_renderSemValidadeBusy=false;}}
+function _renderSemValidade(){
+  const body=document.getElementById('semValBody');
+  const empty=document.getElementById('semValEmpty');
+  const ok=document.getElementById('semValOk');
+  if(!uniData){
+    if(body)body.innerHTML='';
+    if(empty)empty.style.display='block';
+    if(ok)ok.style.display='none';
+    return;
+  }
+  if(empty)empty.style.display='none';
+  let rows=[...semValidadeData];
+  const srch=document.getElementById('semValSrch')?.value.toLowerCase()||'';
+  const cats=[...new Set(semValidadeData.map(r=>r.cat).filter(Boolean))].sort();
+  msUpdate('semValCat',cats,'Categorias','renderSemValidade');
+  const selCats=msGet('semValCat');
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm));
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
+  applySort('semval',rows);updateSortHeaders('semval');
+  const totalQt=rows.reduce((s,r)=>s+r.qt,0);
+  const totalEans=new Set(rows.map(r=>r.EAN_norm)).size;
+  document.getElementById('semValKpis').innerHTML=`
+    <div class="kpi"><div class="kl">Linhas café</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">validade 00.0000</div></div>
+    <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmt(totalEans)}</div></div>
+    <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
+  `;
+  body.innerHTML='';
+  document.getElementById('semValOk').style.display=rows.length===0?'block':'none';
+  for(const r of rows){
+    const tr=document.createElement('tr');tr.className='dr';
+    tr.innerHTML=`
+      <td>${sapCodeHtml(r.EAN_norm)}</td>
+      <td><span class="badge bneu">${r.EAN_norm}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.produto)}">${r.produto||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm||'—'}</span></td>
+      <td class="num">${fmt(r.qt)}</td>
+      <td><span class="badge bwarn">${r.validade||'00.0000'}</span></td>
+      <td><span class="badge binfo">${r.depClasse}</span></td>
+      <td style="font-family:var(--mono);font-size:11px">${r.endereco||'—'}</td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!rows.length&&uniData)document.getElementById('semValOk').style.display='block';
+  setTimeout(applyResizable,0);
+}
+function exportSemValidadeXlsx(){
+  if(!semValidadeData.length){toast('Sem dados','error');return;}
+  let rows=[...semValidadeData];
+  const srch=document.getElementById('semValSrch')?.value.toLowerCase()||'';
+  const selCats=msGet('semValCat');
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm));
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
+  applySort('semval',rows);
+  const data=rows.map(r=>({
+    Categoria:r.cat||'',
+    Subcategoria:r.subcat||'',
+    Cod_SAP:r.sapCode||getSapCode(r.EAN_norm),
+    EAN:r.EAN_norm,
+    Descricao:r.produto||'',
+    Lote:r.Lote_norm,
+    Qtd:r.qt,
+    Validade:r.validade||'00.0000',
+    Deposito_Classe:r.depClasse,
+    Endereco:r.endereco
+  }));
+  if(!data.length){toast('Sem dados','error');return;}
+  const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Sem Validade Cafe');
+  XLSX.writeFile(wb,`sem_validade_cafe_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 
 function simRatio(a,b){const la=a.length,lb=b.length;if(!la||!lb)return 0;const dp=Array.from({length:la+1},(_,i)=>Array.from({length:lb+1},(_,j)=>i===0?j:j===0?i:0));for(let i=1;i<=la;i++)for(let j=1;j<=lb;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return 1-dp[la][lb]/Math.max(la,lb);}
 
@@ -2373,6 +2486,7 @@ function updateLoadBanner(uploadedAt){
           </div>
         </div>
         <div id="bannerValorGapSummary" style="font-size:11px;color:var(--text2);margin-bottom:10px"></div>
+        <p style="font-size:10px;color:var(--muted);margin-bottom:8px"><strong>Dif. valor total</strong> = WMS − SAP por EAN · <strong>Dif. valor qtd</strong> = dif. qtd × preço SAP · <strong>Dif. valor preço</strong> = impacto do preço unitário diferente (total − qtd). Excl. equip. profissional / MUIM.</p>
         <div class="tw2"><table id="bannerValorGapTable">
           <thead><tr>
             <th>Cód. SAP</th><th>EAN</th><th>Descrição</th>
@@ -2514,7 +2628,7 @@ function switchCompany(){
   DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
   DKS=Object.keys(DEPOT_MAP);
   // Reset all data
-  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];vencForaDepStats=null;vencForaDepSapStats=null;
+  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];vencForaDepStats=null;vencForaDepSapStats=null;
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
   renderUpKpis();
@@ -2525,6 +2639,7 @@ function switchCompany(){
   const suBadge=document.getElementById('suBadge');if(suBadge){suBadge.textContent='';suBadge.style.display='none';}
   const posClasseBadge=document.getElementById('posClasseBadge');if(posClasseBadge){posClasseBadge.textContent='';posClasseBadge.style.display='none';}
   const vencForaDepBadge=document.getElementById('vencForaDepBadge');if(vencForaDepBadge){vencForaDepBadge.textContent='';vencForaDepBadge.style.display='none';}
+  const semValidadeBadge=document.getElementById('semValidadeBadge');if(semValidadeBadge){semValidadeBadge.textContent='';semValidadeBadge.style.display='none';}
   const alertBadge=document.getElementById('alertBadge');if(alertBadge){alertBadge.textContent='';alertBadge.style.display='none';}
   // Try to load saved data for the new company
   loadFromDB(true);
@@ -3613,6 +3728,7 @@ async function renderHistory(){
       tr.innerHTML=`<td style="font-family:var(--mono);font-size:11px">${td.toLocaleDateString('pt-BR')} ${td.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td><td><span class="co-chip">${row.company}</span></td><td class="num">${fmt(row.sap_rows)}</td><td class="num">${fmt(row.unilog_rows)}</td><td class="num ${diffs>0?'neg':''}">${fmt(diffs)}</td><td class="num ${pct>=95?'pos':pct<80?'neg':''}">${pct}%</td>`;
       body.appendChild(tr);
     }
+    scheduleColResize();
   }catch(e){}
 }
 
@@ -4136,6 +4252,7 @@ function renderRecLista(){
     body.appendChild(tr);
   }
   if(!rows.length)eRow(body,10,'Nenhum resultado');
+  scheduleColResize();
 }
 
 // ── DASHBOARD ──
@@ -4599,6 +4716,7 @@ async function renderAuditoria(){
     body.appendChild(tr);
   }
   if(!rows.length)eRow(body,7,'Tudo configurado ✓');
+  scheduleColResize();
 }
 
 
@@ -5147,7 +5265,7 @@ function exportTransXlsx(tipo){
 function makeResizable(table){
   const cols=table.querySelectorAll('th');
   cols.forEach(th=>{
-    // Add resizer handle
+    if(th.querySelector('.resizer'))return;
     const resizer=document.createElement('div');
     resizer.className='resizer';
     th.appendChild(resizer);
@@ -5180,9 +5298,6 @@ function applyResizable(){
 // Hook into nav tab clicks
 const _origNavClick=document.querySelectorAll('.nt');
 
-
-init();
-initMultiselects();
 
 init();
 initMultiselects();
