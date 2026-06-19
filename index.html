@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619201501 -->
+<!DOCTYPE html><!-- v20260619213000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -505,9 +505,10 @@ select.cad-inp{cursor:pointer;}
       <div class="ct">Validade vencida fora do depósito de vencidos</div>
       <button class="btn bg bs" onclick="exportVencForaDepXlsx()">⬇ Excel</button>
     </div>
-    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
-      Produtos com EAN, lote, quantidade e posição definidos, com <strong>validade expirada</strong>, mas alocados em depósito diferente do dep. vencidos (cl. 104).
+    <p style="font-size:12px;color:var(--text2);margin-bottom:6px;">
+      Produtos com EAN, lote, quantidade e posição definidos, com <strong>validade expirada</strong>, mas alocados em depósito diferente do dep. vencidos (cl. 104). Equipamento profissional (MUIM) excluído — sem validade.
     </p>
+    <p id="vencForaDepStats" style="font-size:11px;color:var(--muted);margin-bottom:14px;display:none"></p>
     <div class="dp" id="vencDepPills"></div>
     <div class="tb">
       <input class="inp is" id="vencSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderVencidoForaDep()">
@@ -1164,7 +1165,7 @@ let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','FI','SI','Total',''];
 
-let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],occParams=[],reconNotas={},cadEdits={};
+let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencForaDepStats=null,occParams=[],reconNotas={},cadEdits={};
 let showAll=false,activeDepot='11',activePosDepot='',activeVencDepot='',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
@@ -1247,11 +1248,20 @@ function normSap(rows){
     })
     .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito)&&r.EAN_norm);
 }
+function normValidadeField(v){
+  if(v===null||v===undefined||v==='')return'';
+  if(v instanceof Date&&!isNaN(v.getTime())){
+    return String(v.getDate()).padStart(2,'0')+'/'+String(v.getMonth()+1).padStart(2,'0')+'/'+v.getFullYear();
+  }
+  const s=String(v).trim();
+  return(s==='—'||s==='0000-00-00')?'':s;
+}
 function normUni(rows){
-  return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:String(r['Validade']||r['Validade Lote']||r['Validade Lote.']||'').trim(),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()}));
+  return rows.filter(r=>r['Classe']&&!EXCL.includes(String(r['Classe']).trim())).map(r=>({classe:String(r['Classe']).trim(),EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:normValidadeField(r['Validade']||r['Validade Lote']||r['Validade Lote.']||r['Validade Lote ']||r['Data Validade']||''),vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()}));
 }
 function getVencidosDepotKey(){return company==='QB'?'99':'9';}
 function getMuimCat(){const muimConf=Object.values(DEPOT_MAP).find(d=>d.catOnly);return muimConf?.catOnly||null;}
+function isVencForaDepDepot(dk){return!!dk&&dk!==getVencidosDepotKey()&&dk!=='MUIM';}
 function isEquipProfissional(ean,dk){
   if(dk==='MUIM')return true;
   const muimCat=getMuimCat();
@@ -1260,12 +1270,20 @@ function isEquipProfissional(ean,dk){
   return param?.cat===muimCat;
 }
 function parseValidadeDate(v){
-  if(!v||v===''||v==='—'||v==='0000-00-00')return null;
+  if(v===null||v===undefined||v===''||v==='—'||v==='0000-00-00')return null;
+  if(v instanceof Date&&!isNaN(v.getTime())){const d=new Date(v.getFullYear(),v.getMonth(),v.getDate());d.setHours(0,0,0,0);return d;}
   const s=String(v).trim();
   const p=s.split('/');
-  if(p.length===3){const d=new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0]));if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}}
-  const m=s.match(/(\d{2})\.(\d{2})\.(\d{4})/)||s.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if(m){try{const d=s.includes('.')?new Date(m[3],parseInt(m[2])-1,parseInt(m[1])):new Date(m[1],parseInt(m[2])-1,parseInt(m[3]));if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}}catch{}}
+  if(p.length>=3){const yr=parseInt(String(p[2]).trim(),10);const d=new Date(yr,parseInt(p[1],10)-1,parseInt(p[0],10));if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}}
+  const m=s.match(/(\d{2})\.(\d{2})\.(\d{4})/)||s.match(/(\d{2})-(\d{2})-(\d{4})/)||s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if(m){try{const d=s.includes('.')||s.includes('-')&&m[1].length===2?new Date(parseInt(m[3],10),parseInt(m[2],10)-1,parseInt(m[1],10)):new Date(parseInt(m[1],10),parseInt(m[2],10)-1,parseInt(m[3],10));if(!isNaN(d.getTime())){d.setHours(0,0,0,0);return d;}}catch{}}
+  if(typeof XLSX!=='undefined'&&XLSX.SSF){
+    const serial=parseFloat(s.replace(',','.'));
+    if(!isNaN(serial)&&serial>=1&&serial<1000000){
+      const dc=XLSX.SSF.parse_date_code(serial);
+      if(dc&&dc.y>=1990&&dc.y<=2100){const d=new Date(dc.y,dc.m-1,dc.d);d.setHours(0,0,0,0);return d;}
+    }
+  }
   const d2=new Date(s);if(!isNaN(d2.getTime())){d2.setHours(0,0,0,0);return d2;}
   return null;
 }
@@ -1879,22 +1897,30 @@ function exportPosClasseXlsx(){
 // ── VENCIDOS FORA DEPÓSITO ──
 function buildVencidoForaDep(){
   vencidoForaDepData=[];
+  vencForaDepStats=null;
   if(!uniData)return;
   const vencidosDk=getVencidosDepotKey();
   const today=new Date();today.setHours(0,0,0,0);
+  const stats={analizadas:uniData.length,comValidade:0,vencidas:0,foraDepVencidos:0,jaNoDepVencidos:0,equipProf:0,semLote:0,semEndereco:0,dc:0,classeDesconhecida:0};
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
   uniData.forEach(r=>{
-    if(!r.EAN_norm||!r.Lote_norm||r.qt<=0)return;
-    const end=(r.endereco||'').trim();
-    if(!end||isDC(end))return;
     const validadeDate=parseValidadeDate(r.validade);
+    if(validadeDate)stats.comValidade++;
+    if(validadeDate&&validadeDate<today)stats.vencidas++;
+    if(!r.EAN_norm||r.qt<=0)return;
+    if(!r.Lote_norm){stats.semLote++;return;}
+    const end=(r.endereco||'').trim();
+    if(!end){stats.semEndereco++;return;}
+    if(isDC(end)){stats.dc++;return;}
     if(!validadeDate||validadeDate>=today)return;
     const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
-    if(!dk||dk===vencidosDk)return;
+    if(!dk){stats.classeDesconhecida++;return;}
+    if(dk===vencidosDk){stats.jaNoDepVencidos++;return;}
     const param=occParams.find(p=>p.ean===r.EAN_norm);
     const desc=r.produto||dm[r.EAN_norm]||'';
-    if(isEquipProfissional(r.EAN_norm,dk))return;
+    if(isEquipProfissional(r.EAN_norm,dk)){stats.equipProf++;return;}
+    stats.foraDepVencidos++;
     vencidoForaDepData.push({
       EAN_norm:r.EAN_norm,
       produto:desc,
@@ -1911,6 +1937,8 @@ function buildVencidoForaDep(){
       sapCode:getSapCode(r.EAN_norm)
     });
   });
+  vencForaDepStats=stats;
+  console.log('[vencForaDep]',stats,'alertas:',vencidoForaDepData.length);
   vencidoForaDepData.sort((a,b)=>b.diasVencido-a.diasVencido||a.EAN_norm.localeCompare(b.EAN_norm));
   const badge=document.getElementById('vencForaDepBadge');
   if(badge){badge.textContent=vencidoForaDepData.length;badge.style.display=vencidoForaDepData.length>0?'':'none';}
@@ -1918,11 +1946,12 @@ function buildVencidoForaDep(){
 }
 function renderVencDepPills(){
   const c=document.getElementById('vencDepPills');if(!c)return;
+  if(!isVencForaDepDepot(activeVencDepot))activeVencDepot='';
   c.innerHTML='';
   const all=document.createElement('div');all.className='dpl'+(!activeVencDepot?' active':'');all.textContent='Todos';
   all.onclick=()=>{activeVencDepot='';renderVencDepPills();renderVencidoForaDep();};c.appendChild(all);
   for(const dk of DKS){
-    if(dk===getVencidosDepotKey())continue;
+    if(!isVencForaDepDepot(dk))continue;
     const el=document.createElement('div');el.className='dpl'+(dk===activeVencDepot?' active':'');
     el.textContent=DEPOT_MAP[dk].label.split('—')[1]?.trim()||dk;
     el.onclick=()=>{activeVencDepot=dk;renderVencDepPills();renderVencidoForaDep();};c.appendChild(el);
@@ -1942,6 +1971,15 @@ function _renderVencidoForaDep(){
   }
   if(empty)empty.style.display='none';
   renderVencDepPills();
+  const statsEl=document.getElementById('vencForaDepStats');
+  if(statsEl&&vencForaDepStats){
+    const s=vencForaDepStats;
+    let extra='';
+    if(s.jaNoDepVencidos)extra+=` · ${fmt(s.jaNoDepVencidos)} já no dep. vencidos (cl. 104)`;
+    if(s.equipProf)extra+=` · ${fmt(s.equipProf)} equip. profissional`;
+    statsEl.textContent=`Analisadas ${fmt(s.analizadas)} linhas Unilog · ${fmt(s.comValidade)} com validade parseada · ${fmt(s.vencidas)} vencidas · ${fmt(s.foraDepVencidos)} fora do dep. vencidos${extra}`;
+    statsEl.style.display='block';
+  }else if(statsEl)statsEl.style.display='none';
   let rows=[...vencidoForaDepData];
   const srch=document.getElementById('vencSrch')?.value.toLowerCase()||'';
   const cats=[...new Set(vencidoForaDepData.map(r=>r.cat).filter(Boolean))].sort();
@@ -2183,7 +2221,7 @@ function switchCompany(){
   DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
   DKS=Object.keys(DEPOT_MAP);
   // Reset all data
-  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];
+  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencForaDepStats=null;
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
   renderUpKpis();
