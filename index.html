@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619250000 -->
+<!DOCTYPE html><!-- v20260619310000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -562,10 +562,9 @@ select.cad-inp{cursor:pointer;}
         <th onclick="doSort('semval','EAN_norm')">EAN</th>
         <th onclick="doSort('semval','produto')">Descrição</th>
         <th onclick="doSort('semval','Lote_norm')">Lote</th>
-        <th onclick="doSort('semval','qt')" class="num">Qtd</th>
+        <th onclick="doSort('semval','qt')" class="num">Qtd Total</th>
         <th onclick="doSort('semval','validade')">Validade</th>
-        <th onclick="doSort('semval','depClasse')">Depósito / Classe</th>
-        <th onclick="doSort('semval','endereco')">Endereço</th>
+        <th onclick="doSort('semval','cat')">Categoria</th>
       </tr></thead>
       <tbody id="semValBody"></tbody>
     </table></div>
@@ -1345,17 +1344,12 @@ function hasRealValidade(validadeStr,ean,desc,cat){
 }
 function isCafeProduct(ean,desc,cat,subcat){
   const param=occParams.find(p=>p.ean===ean);
-  const c=(cat||param?.cat||'').trim();
-  const sc=(subcat||param?.subcat||'').trim();
-  if(/^café/i.test(c)||/café|cápsula|capsule|grão|moído|molido|cápsulas/i.test(c))return true;
-  if(/^café/i.test(sc)||/café|cápsula|grão|moído|molido/i.test(sc))return true;
-  if(desc){
-    const ac=autoCat(desc);
-    if(/^café/i.test(ac.cat)||/café|cápsula|grão|moído|molido/i.test(ac.cat+ac.subcat))return true;
-    const d=desc.toLowerCase();
-    if(/\bcaf[eé]\b|cápsula|\bcaps\b|\bgr\b|moído|molido|em grão|em grao/.test(d))return true;
-  }
-  return false;
+  let c=(cat||param?.cat||'').trim();
+  let sc=(subcat||param?.subcat||'').trim();
+  if(!c&&!sc&&desc){const ac=autoCat(desc);c=ac.cat||'';sc=ac.subcat||'';}
+  const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/\p{M}/gu,'');
+  const t=`${norm(c)} ${norm(sc)}`;
+  return /cafe|moido|grao|capsula/.test(t);
 }
 function parseValidadeDate(v){
   if(isValidadeSentinel(v))return null;
@@ -2321,6 +2315,7 @@ function buildSemValidade(){
   if(!uniData)return;
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
+  const agg=new Map();
   uniData.forEach(r=>{
     if(!r.EAN_norm||r.qt<=0)return;
     if(!isValidadeSentinel(r.validade))return;
@@ -2329,24 +2324,24 @@ function buildSemValidade(){
     const cat=param?.cat||autoCat(desc).cat||'';
     const subcat=param?.subcat||autoCat(desc).subcat||'';
     if(!isCafeProduct(r.EAN_norm,desc,cat,subcat))return;
-    const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
-    const depLabel=dk?DEPOT_MAP[dk].label.split('—')[1]?.trim()||dk:r.classe;
-    semValidadeData.push({
-      EAN_norm:r.EAN_norm,
-      produto:desc,
-      Lote_norm:r.Lote_norm||'',
-      qt:r.qt,
-      validade:r.validade||'00.0000',
-      classe:r.classe,
-      dk:dk||'',
-      depClasse:dk?`${depLabel} / Cl.${r.classe}`:`Cl.${r.classe}`,
-      endereco:(r.endereco||'').trim(),
-      cat,
-      subcat,
-      sapCode:getSapCode(r.EAN_norm)
-    });
+    const key=`${r.EAN_norm}\0${r.Lote_norm||''}`;
+    const ex=agg.get(key);
+    if(ex){ex.qt+=r.qt;}
+    else{
+      agg.set(key,{
+        EAN_norm:r.EAN_norm,
+        produto:desc,
+        Lote_norm:r.Lote_norm||'',
+        qt:r.qt,
+        validade:r.validade||'00.0000',
+        cat,
+        subcat,
+        sapCode:getSapCode(r.EAN_norm)
+      });
+    }
   });
-  semValidadeData.sort((a,b)=>String(a.produto||'').localeCompare(String(b.produto||''))||a.EAN_norm.localeCompare(b.EAN_norm));
+  semValidadeData=[...agg.values()];
+  semValidadeData.sort((a,b)=>String(a.produto||'').localeCompare(String(b.produto||''))||a.EAN_norm.localeCompare(b.EAN_norm)||String(a.Lote_norm||'').localeCompare(String(b.Lote_norm||'')));
   const badge=document.getElementById('semValidadeBadge');
   if(badge){badge.textContent=semValidadeData.length;badge.style.display=semValidadeData.length>0?'':'none';}
   updateAlertBadge();
@@ -2375,13 +2370,14 @@ function _renderSemValidade(){
   const totalQt=rows.reduce((s,r)=>s+r.qt,0);
   const totalEans=new Set(rows.map(r=>r.EAN_norm)).size;
   document.getElementById('semValKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Linhas café</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">validade 00.0000</div></div>
-    <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmt(totalEans)}</div></div>
+    <div class="kpi"><div class="kl">Linhas (EAN+lote)</div><div class="kv r">${fmt(rows.length)}</div><div class="ks">validade 00.0000</div></div>
+    <div class="kpi"><div class="kl">EANs únicos</div><div class="kv b">${fmt(totalEans)}</div></div>
     <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmt(totalQt)}</div></div>
   `;
   body.innerHTML='';
   document.getElementById('semValOk').style.display=rows.length===0?'block':'none';
   for(const r of rows){
+    const catLbl=r.subcat?`${r.cat} / ${r.subcat}`:r.cat;
     const tr=document.createElement('tr');tr.className='dr';
     tr.innerHTML=`
       <td>${sapCodeHtml(r.EAN_norm)}</td>
@@ -2390,8 +2386,7 @@ function _renderSemValidade(){
       <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm||'—'}</span></td>
       <td class="num">${fmt(r.qt)}</td>
       <td><span class="badge bwarn">${r.validade||'00.0000'}</span></td>
-      <td><span class="badge binfo">${r.depClasse}</span></td>
-      <td style="font-family:var(--mono);font-size:11px">${r.endereco||'—'}</td>
+      <td><span class="badge binfo">${catLbl||'—'}</span></td>
     `;
     body.appendChild(tr);
   }
@@ -2407,16 +2402,14 @@ function exportSemValidadeXlsx(){
   if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
   applySort('semval',rows);
   const data=rows.map(r=>({
-    Categoria:r.cat||'',
-    Subcategoria:r.subcat||'',
     Cod_SAP:r.sapCode||getSapCode(r.EAN_norm),
     EAN:r.EAN_norm,
     Descricao:r.produto||'',
     Lote:r.Lote_norm,
-    Qtd:r.qt,
+    Qtd_Total:r.qt,
     Validade:r.validade||'00.0000',
-    Deposito_Classe:r.depClasse,
-    Endereco:r.endereco
+    Categoria:r.cat||'',
+    Subcategoria:r.subcat||''
   }));
   if(!data.length){toast('Sem dados','error');return;}
   const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();
