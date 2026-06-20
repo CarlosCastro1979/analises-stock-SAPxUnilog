@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619280000 -->
+<!DOCTYPE html><!-- v20260619290000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2839,7 +2839,6 @@ function updateLoadBanner(uploadedAt){
             <th>Cód. SAP</th><th>EAN</th><th>Descrição</th>
             <th class="num">Qtd SAP</th><th class="num">Qtd WMS</th>
             <th class="num">Preço SAP</th><th class="num">Preço WMS</th>
-            <th class="num">Valor SAP</th><th class="num">Valor WMS</th>
             <th class="num" title="Dif. qtd × preço SAP">Dif. valor</th>
             <th class="num">Dif. Qtd</th>
           </tr></thead>
@@ -2891,8 +2890,6 @@ function renderValorGapPanel(){
       <td class="num">${fQ(r.qtUni)}</td>
       <td class="num">${fP(r.precoSap)}</td>
       <td class="num">${fP(r.precoWms)}</td>
-      <td class="num">${fmtBrl(r.valorSap)}</td>
-      <td class="num">${fmtBrl(r.valorWms)}</td>
       <td class="num ${liqCls(r.difValor)}">${fmtBrlLiq(r.difValor)}</td>
       <td class="num ${dqCls}">${r.difQt>0?'+':''}${fQ(r.difQt)}</td>
     </tr>`;
@@ -2905,11 +2902,10 @@ function exportValorGapXlsx(){
   const data=_valorGapRows.map(r=>({
     Cod_SAP:r.sapCode,EAN:r.EAN_norm,Descricao:r.desc,Categoria:r.cat,Subcategoria:r.subcat,
     Qtd_SAP:r.qtSap,Qtd_WMS:r.qtUni,Preco_SAP:r.precoSap,Preco_WMS:r.precoWms,
-    Valor_SAP:r.valorSap,Valor_WMS:r.valorWms,
     Dif_Valor:r.difValor,Dif_Qtd:r.difQt
   }));
   const ws=XLSX.utils.json_to_sheet(data);
-  ws['!cols']=[{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12},{wch:12},{wch:14},{wch:14},{wch:14},{wch:10}];
+  ws['!cols']=[{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12},{wch:12},{wch:14},{wch:10}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Dif Valor SAP WMS');
   XLSX.writeFile(wb,`dif_valor_sap_wms_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
