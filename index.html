@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619290000 -->
+<!DOCTYPE html><!-- v20260619300000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2920,7 +2920,6 @@ function recalcBanner(){
   const uniPairs=recon.uniPairs;
   const qtSap=recon.qtSap;
   const qtUni=recon.qtUni;
-  const difPares=sapPairs.size-uniPairs.size;
   const difQt=recon.difQt;
   const difVlr=recon.difVlr;
   const temVlr=recon.temPreco;
@@ -2929,7 +2928,6 @@ function recalcBanner(){
   kpisEl.innerHTML=`
     <div class="kpi"><div class="kl">EAN+Lote SAP</div><div class="kv">${fmtKvNum(sapPairs.size)}</div></div>
     <div class="kpi"><div class="kl">EAN+Lote WMS</div><div class="kv">${fmtKvNum(uniPairs.size)}</div></div>
-    <div class="kpi"><div class="kl">Dif. Pares</div><div class="kv ${kvLiqCls(difPares)}">${fmtKvSigned(difPares)}</div></div>
     <div class="kpi"><div class="kl">Qtd SAP</div><div class="kv">${fmtKvNum(qtSap)}</div></div>
     <div class="kpi"><div class="kl">Qtd WMS</div><div class="kv">${fmtKvNum(qtUni)}</div></div>
     <div class="kpi"><div class="kl">Dif. Qtd</div><div class="kv ${kvLiqCls(difQt)}">${fmtKvSigned(difQt)}</div></div>
