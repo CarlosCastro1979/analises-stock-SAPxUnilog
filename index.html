@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622184500 -->
+<!DOCTYPE html><!-- v20260622203000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -413,14 +413,16 @@ select.cad-inp{cursor:pointer;}
 
   <div id="alert-suspeitos">
   <div class="card">
-    <div class="ch"><div class="ct">Lotes só no Unilog — Potencialmente Errados</div><button class="btn bg bs" onclick="exportSuspXlsx()">⬇ Excel</button></div>
-    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">EAN+Lote presentes no Unilog mas <strong>ausentes no SAP</strong>. Observações identificam lotes SAP similares (provável erro de digitação).</p>
+    <div class="ch"><div class="ct">Lotes Suspeitos</div><button class="btn bg bs" onclick="exportSuspXlsx()">⬇ Excel</button></div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;"><strong>Lote só no WMS:</strong> EAN+Lote no Unilog mas ausentes no SAP (com lotes SAP similares). <strong>Lote em múltiplos EANs:</strong> o mesmo lote associado a 2+ EANs distintos (SAP e/ou WMS) — não deveria ocorrer.</p>
     <div class="tb">
       <input class="inp is" id="suspSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderSusp()">
       <select class="inp" id="suspFlt" onchange="renderSusp()">
-        <option value="all">Todos</option>
+        <option value="all">Todos os tipos</option>
+        <option value="wms_only">Lote só no WMS</option>
         <option value="similar">Com similar no SAP</option>
         <option value="no_sim">Sem similar</option>
+        <option value="multi_ean">Lote em múltiplos EANs</option>
       </select>
       <select class="inp" id="suspCat" style="display:none"></select>
       <div class="ms-wrap" id="ms-suspCat" data-placeholder="Categorias" data-onchange="renderSusp"><div class="ms-btn" onclick="msTogOpen('suspCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('suspCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('suspCat')">Todas</button><button onclick="msClrAll('suspCat')">Limpar</button></div><div class="ms-list"></div></div></div>
@@ -429,14 +431,15 @@ select.cad-inp{cursor:pointer;}
     <div class="kr" id="suspKpis"></div>
     <div class="tw2"><table id="suspTable">
       <thead><tr>
+        <th onclick="doSort('susp','tipoLabel')">Tipo</th>
         <th onclick="doSort('susp','cat')">Categoria</th>
         <th onclick="doSort('susp','sapCode')">Cód. SAP</th>
         <th onclick="doSort('susp','EAN_norm')">EAN</th>
         <th onclick="doSort('susp','desc')">Descrição</th>
-        <th onclick="doSort('susp','Lote_norm')">Lote Unilog</th>
-        <th onclick="doSort('susp','qt')" class="num">Qt Unilog</th>
-        <th>Depósito / Classe</th>
-        <th>Lote SAP Similar</th>
+        <th onclick="doSort('susp','Lote_norm')">Lote</th>
+        <th onclick="doSort('susp','qt')" class="num">Quantidade</th>
+        <th onclick="doSort('susp','sistema')">Sistema</th>
+        <th>Detalhe</th>
         <th>Recomendação</th>
         <th>Acção</th>
       </tr></thead>
@@ -587,7 +590,7 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bg bs" onclick="exportValConflXlsx()">⬇ Excel</button>
     </div>
     <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
-      Para cada combinação <strong>EAN + Lote</strong>, detecta quando existem <strong>2 ou mais validades reais distintas</strong> no mesmo sistema (SAP ou WMS). Excluídos: vazio, sentinel (<strong>00.0000</strong>, <strong>00.00.0000</strong>, 0, 00/00/0000).
+      Para cada <strong>Lote</strong> (independentemente do EAN), detecta quando existem <strong>2 ou mais validades reais distintas</strong> no mesmo sistema (SAP ou WMS). Excluídos: vazio, sentinel (<strong>00.0000</strong>, <strong>00.00.0000</strong>, 0, 00/00/0000). Conflitos de EAN no mesmo lote estão na aba Lotes Suspeitos.
     </p>
     <div class="tb">
       <input class="inp is" id="valConflSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderValConfl()">
@@ -601,13 +604,12 @@ select.cad-inp{cursor:pointer;}
     <div class="kr" id="valConflKpis"></div>
     <div class="tw2"><table id="valConflTable">
       <thead><tr>
-        <th onclick="doSort('valconfl','sapCode')">Cód. SAP</th>
-        <th onclick="doSort('valconfl','EAN_norm')">EAN</th>
-        <th onclick="doSort('valconfl','produto')">Descrição</th>
         <th onclick="doSort('valconfl','Lote_norm')">Lote</th>
         <th onclick="doSort('valconfl','sistema')">Sistema</th>
         <th onclick="doSort('valconfl','validadesSapStr')">Validades SAP</th>
         <th onclick="doSort('valconfl','validadesWmsStr')">Validades WMS</th>
+        <th onclick="doSort('valconfl','eansStr')">EANs envolvidos</th>
+        <th onclick="doSort('valconfl','nEans')" class="num">Nº EANs</th>
         <th onclick="doSort('valconfl','qtSap')" class="num">Qtd SAP</th>
         <th onclick="doSort('valconfl','qtWms')" class="num">Qtd WMS</th>
         <th onclick="doSort('valconfl','deposito')">Depósito SAP</th>
@@ -2060,26 +2062,78 @@ function buildRecon(){
 
 // ── BUILD SUSPICIOUS ──
 function buildSusp(){
-  if(!sapData||!uniData)return;
-  const dm={};sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});uniData.forEach(r=>{if(r.EAN_norm&&r.produto&&!dm[r.EAN_norm])dm[r.EAN_norm]=r.produto;});
+  const dm={};
+  if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
+  if(uniData)uniData.forEach(r=>{if(r.EAN_norm&&r.produto&&!dm[r.EAN_norm])dm[r.EAN_norm]=r.produto;});
+  suspData=[];suspValidadosOcultos=0;
+  if(!sapData&&!uniData)return;
+
+  // Mesmo lote em múltiplos EANs (SAP e/ou WMS)
+  const loteEansMap=new Map();
+  function touchLoteEans(lote){
+    let g=loteEansMap.get(lote);
+    if(!g){g={eans:new Map(),hasSap:false,hasWms:false};loteEansMap.set(lote,g);}
+    return g;
+  }
+  if(sapData)sapData.forEach(r=>{
+    if(!r.Lote_norm||!r.EAN_norm||r.qt<=0)return;
+    const g=touchLoteEans(r.Lote_norm);
+    g.hasSap=true;
+    let e=g.eans.get(r.EAN_norm);
+    if(!e)e={EAN_norm:r.EAN_norm,qtSap:0,qtWms:0,desc:''};
+    e.qtSap+=r.qt;
+    if(r.desc)e.desc=r.desc;
+    g.eans.set(r.EAN_norm,e);
+  });
+  if(uniData)uniData.forEach(r=>{
+    if(!r.Lote_norm||!r.EAN_norm||r.qt<=0)return;
+    const g=touchLoteEans(r.Lote_norm);
+    g.hasWms=true;
+    let e=g.eans.get(r.EAN_norm);
+    if(!e)e={EAN_norm:r.EAN_norm,qtSap:0,qtWms:0,desc:''};
+    e.qtWms+=r.qt;
+    if(r.produto)e.desc=r.produto;
+    else if(dm[r.EAN_norm])e.desc=dm[r.EAN_norm];
+    g.eans.set(r.EAN_norm,e);
+  });
+  for(const[Lote_norm,g]of loteEansMap){
+    if(g.eans.size<2)continue;
+    const eans=[...g.eans.values()];
+    let sistema='WMS';
+    if(g.hasSap&&g.hasWms)sistema='Ambos';
+    else if(g.hasSap)sistema='SAP';
+    const qt=eans.reduce((s,e)=>s+e.qtSap+e.qtWms,0);
+    suspData.push({
+      tipo:'multi_ean',tipoLabel:'Lote em múltiplos EANs',Lote_norm,eans,
+      eansStr:eans.map(e=>e.EAN_norm).join(', '),
+      qt,sistema,
+      EAN_norm:eans[0].EAN_norm,
+      desc:eans.map(e=>e.desc).filter(Boolean).join(' · ')||'',
+      similar:null,depots:[],cat:''
+    });
+  }
+
+  if(!sapData||!uniData){
+    const badge=document.getElementById('suspBadge');
+    if(badge){badge.textContent=suspData.length;badge.style.display=suspData.length>0?'':'none';}
+    updateAlertBadge();
+    return;
+  }
   const sapLotes={};sapData.forEach(r=>{if(!r.Lote_norm)return;if(!sapLotes[r.EAN_norm])sapLotes[r.EAN_norm]={};if(!sapLotes[r.EAN_norm][r.Lote_norm])sapLotes[r.EAN_norm][r.Lote_norm]=0;sapLotes[r.EAN_norm][r.Lote_norm]+=r.qt;});
   const uA={};uniData.forEach(r=>{if(!r.Lote_norm)return;const k=r.EAN_norm+'|'+r.Lote_norm;if(!uA[k])uA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,classes:new Set()};uA[k].qt+=r.qt;uA[k].classes.add(r.classe);});
   const sapSet=new Set();sapData.forEach(r=>{if(r.Lote_norm)sapSet.add(r.EAN_norm+'|'+r.Lote_norm);});
-  // SAP EANs set (any deposit)
   const sapEANs=new Set(sapData.map(r=>r.EAN_norm).filter(Boolean));
-  suspData=[];suspValidadosOcultos=0;
   for(const[k,v]of Object.entries(uA)){
     if(sapSet.has(k))continue;
     const{EAN_norm,Lote_norm,qt,classes}=v;
     if(suspValidados.has(k)){suspValidadosOcultos++;continue;}
-    // Only include if EAN exists in SAP (wrong lote) — unknown EANs go to "Só Unilog"
     if(!sapEANs.has(EAN_norm))continue;
     const desc=dm[EAN_norm]||'';
     const depots=[...classes].map(cl=>{const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));return dk?`Dep ${dk.padStart(4,'0')} / Cl.${cl}`:cl;});
     const sapL=Object.keys(sapLotes[EAN_norm]||{});
     let best=null;for(const sl of sapL){const r=simRatio(Lote_norm,sl);if(r>=0.7&&r<1.0){if(!best||r>best.ratio)best={lote:sl,ratio:r,qt:sapLotes[EAN_norm][sl]};}}
     const param=occParams.find(p=>p.ean===EAN_norm);
-    suspData.push({EAN_norm,Lote_norm,qt,desc,similar:best,depots,cat:param?.cat||autoCat(desc).cat||''});
+    suspData.push({tipo:'wms_only',tipoLabel:'Lote só no WMS',EAN_norm,Lote_norm,qt,desc,similar:best,depots,cat:param?.cat||autoCat(desc).cat||'',sistema:'WMS'});
   }
   const badge=document.getElementById('suspBadge');badge.textContent=suspData.length;badge.style.display=suspData.length>0?'':'none';
   updateAlertBadge();
@@ -2918,70 +2972,92 @@ function exportSemValidadeXlsx(){
   XLSX.writeFile(wb,`sem_validade_cafe_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
-// ── VALIDADES CONFLITUOSAS (2+ datas distintas por EAN+Lote) ──
+// ── VALIDADES CONFLITUOSAS (2+ datas distintas por Lote) ──
 function buildValConfl(){
   valConflData=[];
   valConflStats={sap:0,wms:0,ambos:0,total:0};
-  const sapGroups=new Map();
+  const sapLotes=new Map();
   if(sapData){
     sapData.forEach(r=>{
-      if(!r.EAN_norm||r.qt<=0)return;
-      const key=`${r.EAN_norm}\0${r.Lote_norm||''}`;
-      let g=sapGroups.get(key);
+      if(!r.Lote_norm||r.qt<=0)return;
+      let g=sapLotes.get(r.Lote_norm);
       if(!g){
-        g={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm||'',validades:new Map(),qt:0,produto:r.desc||'',sapCode:r.material||getSapCode(r.EAN_norm),depositos:new Set()};
-        sapGroups.set(key,g);
+        g={Lote_norm:r.Lote_norm,validades:new Map(),eans:new Map(),qt:0,depositos:new Set()};
+        sapLotes.set(r.Lote_norm,g);
       }
       g.qt+=r.qt;
       if(r.deposito)g.depositos.add(r.deposito);
-      if(r.desc)g.produto=r.desc;
+      if(r.EAN_norm){
+        let e=g.eans.get(r.EAN_norm);
+        if(!e)e={EAN_norm:r.EAN_norm,qt:0,produto:''};
+        e.qt+=r.qt;
+        if(r.desc)e.produto=r.desc;
+        g.eans.set(r.EAN_norm,e);
+      }
       addRowValidadeToMap(g.validades,r.validade);
     });
   }
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
-  const uniGroups=new Map();
+  const uniLotes=new Map();
   if(uniData){
     uniData.forEach(r=>{
-      if(!r.EAN_norm||r.qt<=0)return;
-      const key=`${r.EAN_norm}\0${r.Lote_norm||''}`;
-      let g=uniGroups.get(key);
+      if(!r.Lote_norm||r.qt<=0)return;
+      let g=uniLotes.get(r.Lote_norm);
       if(!g){
-        g={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm||'',validades:new Map(),qt:0,produto:r.produto||dm[r.EAN_norm]||'',classes:new Set()};
-        uniGroups.set(key,g);
+        g={Lote_norm:r.Lote_norm,validades:new Map(),eans:new Map(),qt:0,classes:new Set()};
+        uniLotes.set(r.Lote_norm,g);
       }
       g.qt+=r.qt;
       if(r.classe)g.classes.add(r.classe);
-      if(r.produto)g.produto=r.produto;
+      if(r.EAN_norm){
+        let e=g.eans.get(r.EAN_norm);
+        if(!e)e={EAN_norm:r.EAN_norm,qt:0,produto:''};
+        e.qt+=r.qt;
+        if(r.produto)e.produto=r.produto;
+        else if(dm[r.EAN_norm])e.produto=dm[r.EAN_norm];
+        g.eans.set(r.EAN_norm,e);
+      }
       for(const f of['validadeLote','validadeHeader','validade'])addRowValidadeToMap(g.validades,r[f]);
     });
   }
-  const allKeys=new Set([...sapGroups.keys(),...uniGroups.keys()]);
-  for(const key of allKeys){
-    const sg=sapGroups.get(key);
-    const ug=uniGroups.get(key);
+  const allLotes=new Set([...sapLotes.keys(),...uniLotes.keys()]);
+  for(const Lote_norm of allLotes){
+    const sg=sapLotes.get(Lote_norm);
+    const ug=uniLotes.get(Lote_norm);
     const sapConflict=!!(sg&&sg.validades.size>=2);
     const wmsConflict=!!(ug&&ug.validades.size>=2);
     if(!sapConflict&&!wmsConflict)continue;
-    const parts=key.split('\0');
-    const EAN_norm=parts[0],Lote_norm=parts[1]||'';
     const validadesSap=sg?[...sg.validades.values()].sort():[];
     const validadesWms=ug?[...ug.validades.values()].sort():[];
     let sistema='WMS';
     if(sapConflict&&wmsConflict){sistema='Ambos';valConflStats.ambos++;}
     else if(sapConflict){sistema='SAP';valConflStats.sap++;}
     else valConflStats.wms++;
+    const eanSet=new Set();
+    if(sg)[...sg.eans.keys()].forEach(e=>eanSet.add(e));
+    if(ug)[...ug.eans.keys()].forEach(e=>eanSet.add(e));
+    const eans=[...eanSet].sort();
+    const eanInfo=new Map();
+    if(sg)[...sg.eans.values()].forEach(e=>{eanInfo.set(e.EAN_norm,{EAN_norm:e.EAN_norm,qtSap:e.qt,qtWms:0,produto:e.produto||''});});
+    if(ug)[...ug.eans.values()].forEach(e=>{
+      let x=eanInfo.get(e.EAN_norm);
+      if(!x)x={EAN_norm:e.EAN_norm,qtSap:0,qtWms:0,produto:e.produto||''};
+      x.qtWms+=e.qt;
+      if(e.produto)x.produto=e.produto;
+      eanInfo.set(e.EAN_norm,x);
+    });
+    const eansDetail=[...eanInfo.values()];
     valConflData.push({
-      EAN_norm,Lote_norm,
-      sapCode:sg?.sapCode||getSapCode(EAN_norm),
-      produto:sg?.produto||ug?.produto||'',
-      sistema,
-      validadesSap,
-      validadesWms,
+      Lote_norm,sistema,
+      validadesSap,validadesWms,
       validadesSapStr:validadesSap.join(' · '),
       validadesWmsStr:validadesWms.join(' · '),
       nValidadesSap:validadesSap.length,
       nValidadesWms:validadesWms.length,
+      eans,eansStr:eans.join(', '),
+      eansDetail,
+      nEans:eans.length,
       qtSap:sg?.qt||0,
       qtWms:ug?.qt||0,
       deposito:sg?sapDepLabels(sg.depositos):'',
@@ -2989,7 +3065,7 @@ function buildValConfl(){
     });
   }
   valConflStats.total=valConflData.length;
-  valConflData.sort((a,b)=>String(a.produto||'').localeCompare(String(b.produto||''))||a.EAN_norm.localeCompare(b.EAN_norm)||String(a.Lote_norm||'').localeCompare(String(b.Lote_norm||'')));
+  valConflData.sort((a,b)=>String(a.Lote_norm||'').localeCompare(String(b.Lote_norm||''))||b.nEans-a.nEans);
   console.log('[buildValConfl]',valConflStats,'first5:',valConflData.slice(0,5));
   const badge=document.getElementById('valConflBadge');
   if(badge){badge.textContent=valConflData.length;badge.style.display=valConflData.length>0?'':'none';}
@@ -3011,7 +3087,7 @@ function _renderValConfl(){
   let rows=[...valConflData];
   const srch=document.getElementById('valConflSrch')?.value.toLowerCase()||'';
   const sistema=document.getElementById('valConflSistema')?.value||'';
-  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm)||String(r.validadesSapStr||'').toLowerCase().includes(srch)||String(r.validadesWmsStr||'').toLowerCase().includes(srch));
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.Lote_norm,r.eansStr||'')||String(r.validadesSapStr||'').toLowerCase().includes(srch)||String(r.validadesWmsStr||'').toLowerCase().includes(srch)||(r.eans||[]).some(e=>matchProdSrch(srch,e,e))||(r.eansDetail||[]).some(e=>matchProdSrch(srch,e.EAN_norm,e.produto,r.Lote_norm)));
   if(sistema)rows=rows.filter(r=>r.sistema===sistema);
   applySort('valconfl',rows);updateSortHeaders('valconfl');
   const st=valConflStats||{};
@@ -3020,7 +3096,7 @@ function _renderValConfl(){
   const totalQtSap=rows.reduce((s,r)=>s+(r.qtSap||0),0);
   const totalQtWms=rows.reduce((s,r)=>s+(r.qtWms||0),0);
   document.getElementById('valConflKpis').innerHTML=`
-    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.total??valConflData.length)} conflitos no total</div></div>
+    <div class="kpi"><div class="kl">Lotes com conflito</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.total??valConflData.length)} conflitos no total</div></div>
     <div class="kpi"><div class="kl">Conflitos SAP</div><div class="kv b">${fmtKvNum(st.sap??0)}</div><div class="ks">${fmt(sapN)} visíveis (incl. Ambos)</div></div>
     <div class="kpi"><div class="kl">Conflitos WMS</div><div class="kv y">${fmtKvNum(st.wms??0)}</div><div class="ks">${fmt(wmsN)} visíveis (incl. Ambos)</div></div>
     <div class="kpi"><div class="kl">Qtd SAP / WMS</div><div class="kv">${fmtKvNum(totalQtSap)} / ${fmtKvNum(totalQtWms)}</div></div>
@@ -3031,15 +3107,20 @@ function _renderValConfl(){
     const sisCls=r.sistema==='SAP'?'berr':r.sistema==='WMS'?'bwarn':'bpurple';
     const sapHtml=r.validadesSap.length?r.validadesSap.map(v=>`<span class="badge berr" style="margin:1px">${esc(v)}</span>`).join(''):'—';
     const wmsHtml=r.validadesWms.length?r.validadesWms.map(v=>`<span class="badge bwarn" style="margin:1px">${esc(v)}</span>`).join(''):'—';
+    const eansHtml=(r.eansDetail||[]).map(e=>{
+      const q=[];
+      if(e.qtSap)q.push(`SAP:${fmt(e.qtSap)}`);
+      if(e.qtWms)q.push(`WMS:${fmt(e.qtWms)}`);
+      return `<div style="font-size:11px;margin-bottom:2px"><span class="badge bneu">${e.EAN_norm}</span> ${q.join(' · ')}</div>`;
+    }).join('')||r.eansStr||'—';
     const tr=document.createElement('tr');tr.className='dr';
     tr.innerHTML=`
-      <td>${sapCodeHtml(r.EAN_norm)}</td>
-      <td><span class="badge bneu">${r.EAN_norm}</span></td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.produto)}">${r.produto||'—'}</td>
-      <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm||'—'}</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;font-weight:600">${r.Lote_norm||'—'}</span></td>
       <td><span class="badge ${sisCls}">${r.sistema}</span></td>
       <td>${sapHtml}</td>
       <td>${wmsHtml}</td>
+      <td>${eansHtml}</td>
+      <td class="num">${r.nEans||0}</td>
       <td class="num">${r.qtSap?fmt(r.qtSap):'—'}</td>
       <td class="num">${r.qtWms?fmt(r.qtWms):'—'}</td>
       <td><span class="badge bneu">${r.deposito||'—'}</span></td>
@@ -3055,19 +3136,19 @@ function exportValConflXlsx(){
   let rows=[...valConflData];
   const srch=document.getElementById('valConflSrch')?.value.toLowerCase()||'';
   const sistema=document.getElementById('valConflSistema')?.value||'';
-  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm)||String(r.validadesSapStr||'').toLowerCase().includes(srch)||String(r.validadesWmsStr||'').toLowerCase().includes(srch));
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.Lote_norm,r.eansStr||'')||String(r.validadesSapStr||'').toLowerCase().includes(srch)||String(r.validadesWmsStr||'').toLowerCase().includes(srch)||(r.eans||[]).some(e=>matchProdSrch(srch,e,e))||(r.eansDetail||[]).some(e=>matchProdSrch(srch,e.EAN_norm,e.produto,r.Lote_norm)));
   if(sistema)rows=rows.filter(r=>r.sistema===sistema);
   applySort('valconfl',rows);
   const data=rows.map(r=>({
-    Cod_SAP:r.sapCode||getSapCode(r.EAN_norm),
-    EAN:r.EAN_norm,
-    Descricao:r.produto||'',
     Lote:r.Lote_norm,
     Sistema:r.sistema,
     Validades_SAP:r.validadesSapStr||'',
     Validades_WMS:r.validadesWmsStr||'',
     N_Validades_SAP:r.nValidadesSap,
     N_Validades_WMS:r.nValidadesWms,
+    EANs:r.eansStr||'',
+    N_EANs:r.nEans,
+    EANs_Detalhe:(r.eansDetail||[]).map(e=>`${e.EAN_norm}(SAP:${e.qtSap||0}/WMS:${e.qtWms||0})`).join(' | '),
     Qtd_SAP:r.qtSap||0,
     Qtd_WMS:r.qtWms||0,
     Deposito_SAP:r.deposito||'',
@@ -3720,22 +3801,39 @@ function _renderSusp(){
 
   // Filter rows
   let rows=[...suspData];
-  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.desc,r.Lote_norm));
-  if(fltVals.has('similar'))rows=rows.filter(r=>r.similar);
-  else if(fltVals.has('no_sim'))rows=rows.filter(r=>!r.similar);
-  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat||autoCat(r.desc).cat||''));
+  if(srch)rows=rows.filter(r=>{
+    const eanHit=matchProdSrch(srch,r.EAN_norm,r.desc,r.Lote_norm);
+    const multiHit=r.tipo==='multi_ean'&&(r.eansStr||'').toLowerCase().includes(srch)||(r.eans||[]).some(e=>matchProdSrch(srch,e.EAN_norm,e.desc,r.Lote_norm));
+    return eanHit||multiHit;
+  });
+  if(fltVals.has('multi_ean'))rows=rows.filter(r=>r.tipo==='multi_ean');
+  else if(fltVals.has('wms_only'))rows=rows.filter(r=>r.tipo!=='multi_ean');
+  else if(fltVals.has('similar'))rows=rows.filter(r=>r.tipo!=='multi_ean'&&r.similar);
+  else if(fltVals.has('no_sim'))rows=rows.filter(r=>r.tipo!=='multi_ean'&&!r.similar);
+  if(selCats.size)rows=rows.filter(r=>{
+    if(r.tipo==='multi_ean')return(r.eans||[]).some(e=>selCats.has(occParams.find(p=>p.ean===e.EAN_norm)?.cat||autoCat(e.desc||'').cat||''));
+    return selCats.has(r.cat||autoCat(r.desc).cat||'');
+  });
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
-  rows.forEach(r=>{if(!r.cat){const p=occParams.find(x=>x.ean===r.EAN_norm);r.cat=p?.cat||autoCat(r.desc).cat||'';}});
+  rows.forEach(r=>{
+    if(!r.tipo)r.tipo='wms_only';
+    if(!r.tipoLabel)r.tipoLabel=r.tipo==='multi_ean'?'Lote em múltiplos EANs':'Lote só no WMS';
+    if(!r.cat&&r.tipo!=='multi_ean'){const p=occParams.find(x=>x.ean===r.EAN_norm);r.cat=p?.cat||autoCat(r.desc).cat||'';}
+    if(!r.sapCode)r.sapCode=r.tipo==='multi_ean'?(r.eans||[]).map(e=>getSapCode(e.EAN_norm)).filter(Boolean).join(', '):getSapCode(r.EAN_norm);
+  });
   applySort('susp',rows);updateSortHeaders('susp');
 
-  const withSim=rows.filter(r=>r.similar).length;
+  const multiN=rows.filter(r=>r.tipo==='multi_ean').length;
+  const withSim=rows.filter(r=>r.tipo!=='multi_ean'&&r.similar).length;
+  const wmsOnlyN=rows.filter(r=>r.tipo!=='multi_ean').length;
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows);
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows);
   const validadosKpi=suspValidadosOcultos>0?`<div class="kpi"><div class="kl">Validados</div><div class="kv" style="color:var(--green)">${fmtKvNum(suspValidadosOcultos)}</div><div class="ks">ocultos da lista</div></div>`:'';
   document.getElementById('suspKpis').innerHTML=`
     <div class="kpi"><div class="kl">Lotes suspeitos</div><div class="kv r">${fmtKvNum(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Múltiplos EANs</div><div class="kv r">${fmtKvNum(multiN)}</div><div class="ks">mesmo lote, EANs distintos</div></div>
     <div class="kpi"><div class="kl">Com similar SAP</div><div class="kv y">${fmtKvNum(withSim)}</div><div class="ks">provável erro digitação</div></div>
-    <div class="kpi"><div class="kl">Sem correspondência</div><div class="kv">${fmtKvNum(rows.length-withSim)}</div></div>
+    <div class="kpi"><div class="kl">Só no WMS</div><div class="kv">${fmtKvNum(wmsOnlyN)}</div></div>
     ${validadosKpi}
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
   `;
@@ -3743,39 +3841,57 @@ function _renderSusp(){
   const body=document.getElementById('suspBody');body.innerHTML='';
   document.getElementById('suspEmpty').style.display=rows.length===0?'block':'none';
   for(const r of rows){
-    const depotHtml=(r.depots||[]).map(d=>`<span class="badge binfo" style="margin-right:2px">${d}</span>`).join('');
-    let simHtml='<span style="color:var(--muted);font-size:11px">Sem similar</span>';
-    if(r.similar){
-      const pct=Math.round(r.similar.ratio*100);
-      const col=pct>=90?'var(--red)':pct>=80?'var(--yellow)':'var(--blue)';
-      simHtml=`<div class="sb"><span class="badge bwarn">Lote SAP: <strong>${r.similar.lote}</strong></span><div class="pw" style="width:50px"><div class="pf" style="width:${pct}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono)">${pct}%</span><span style="font-size:10px;color:var(--muted)">Qt:${fmt(r.similar.qt)}</span></div>`;
-    }
-    const param=occParams.find(p=>p.ean===r.EAN_norm);
-    let recHtml='';
-    if(param&&param.lote_obrigatorio===false){
-      recHtml='<span class="badge bwarn" style="background:#fde68a;color:#92400e">⚠ Produto sem lote obrigatório — retirar lote do WMS</span>';
-    } else if(r.similar){
-      recHtml=`<span class="badge binfo">Corrigir lote: <strong>${r.similar.lote}</strong></span>`;
+    const tipoCls=r.tipo==='multi_ean'?'berr':'bwarn';
+    const tipoHtml=`<span class="badge ${tipoCls}">${r.tipoLabel||'Lote só no WMS'}</span>`;
+    let eanHtml='',sapHtml='',detHtml='',recHtml='',acaoHtml='—',catHtml='—';
+    if(r.tipo==='multi_ean'){
+      eanHtml=(r.eans||[]).map(e=>`<span class="badge bneu" style="margin:1px" title="${esc(e.desc||'')}">${e.EAN_norm}</span>`).join('');
+      sapHtml=(r.eans||[]).map(e=>getSapCode(e.EAN_norm)).filter(Boolean).map(c=>`<span class="badge bgray" style="margin:1px">${c}</span>`).join('')||'—';
+      detHtml=(r.eans||[]).map(e=>{
+        const parts=[];
+        if(e.qtSap)parts.push(`SAP:${fmt(e.qtSap)}`);
+        if(e.qtWms)parts.push(`WMS:${fmt(e.qtWms)}`);
+        return `<div style="font-size:11px;margin-bottom:2px"><strong>${e.EAN_norm}</strong> ${parts.join(' · ')}</div>`;
+      }).join('');
+      recHtml='<span class="badge berr">Verificar cadastro — mesmo lote em produtos diferentes</span>';
     } else {
-      const sapSemLote=sapData&&sapData.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm==='');
-      if(sapSemLote){
-        recHtml='<span class="badge bwarn">Corrigir lote no WMS (SAP sem lote)</span>';
+      const param=occParams.find(p=>p.ean===r.EAN_norm);
+      catHtml=param?.cat||(autoCat(r.desc).cat||'—');
+      eanHtml=`<span class="badge bneu">${r.EAN_norm}</span>`;
+      sapHtml=sapCodeHtml(r.EAN_norm);
+      const depotHtml=(r.depots||[]).map(d=>`<span class="badge binfo" style="margin-right:2px">${d}</span>`).join('');
+      if(r.similar){
+        const pct=Math.round(r.similar.ratio*100);
+        const col=pct>=90?'var(--red)':pct>=80?'var(--yellow)':'var(--blue)';
+        detHtml=`<div class="sb"><span class="badge bwarn">Lote SAP: <strong>${r.similar.lote}</strong></span><div class="pw" style="width:50px"><div class="pf" style="width:${pct}%;background:${col}"></div></div><span style="font-size:10px;color:${col};font-family:var(--mono)">${pct}%</span><span style="font-size:10px;color:var(--muted)">Qt:${fmt(r.similar.qt)}</span></div>${depotHtml?'<div style="margin-top:4px">'+depotHtml+'</div>':''}`;
       } else {
-        recHtml='<span style="color:var(--muted);font-size:11px">Investigar</span>';
+        detHtml=depotHtml||'<span style="color:var(--muted);font-size:11px">Sem similar</span>';
       }
+      if(param&&param.lote_obrigatorio===false){
+        recHtml='<span class="badge bwarn" style="background:#fde68a;color:#92400e">⚠ Produto sem lote obrigatório — retirar lote do WMS</span>';
+      } else if(r.similar){
+        recHtml=`<span class="badge binfo">Corrigir lote: <strong>${r.similar.lote}</strong></span>`;
+      } else {
+        const sapSemLote=sapData&&sapData.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm==='');
+        recHtml=sapSemLote?'<span class="badge bwarn">Corrigir lote no WMS (SAP sem lote)</span>':'<span style="color:var(--muted);font-size:11px">Investigar</span>';
+      }
+      acaoHtml=`<button class="btn bg bs" title="Marcar como OK — desaparece da lista" onclick="validateSusp('${jsq(r.EAN_norm)}','${jsq(r.Lote_norm)}')">✓ Validar</button>`;
     }
+    const sisCls=r.sistema==='SAP'?'berr':r.sistema==='WMS'?'bwarn':r.sistema==='Ambos'?'bpurple':'bgray';
+    const sisHtml=r.sistema?`<span class="badge ${sisCls}">${r.sistema}</span>`:'—';
     const tr=document.createElement('tr');
     tr.innerHTML=`
-      <td style="font-size:11px">${param?.cat||(autoCat(r.desc).cat||'—')}</td>
-      <td>${sapCodeHtml(r.EAN_norm)}</td>
-      <td><span class="badge bneu">${r.EAN_norm}</span></td>
+      <td>${tipoHtml}</td>
+      <td style="font-size:11px">${catHtml}</td>
+      <td>${sapHtml}</td>
+      <td>${eanHtml}</td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc)}">${r.desc||'—'}</td>
       <td><span class="badge berr">${r.Lote_norm}</span></td>
       <td class="num">${fmt(r.qt)}</td>
-      <td>${depotHtml||'—'}</td>
-      <td>${simHtml}</td>
+      <td>${sisHtml}</td>
+      <td>${detHtml}</td>
       <td>${recHtml}</td>
-      <td><button class="btn bg bs" title="Marcar como OK — desaparece da lista" onclick="validateSusp('${jsq(r.EAN_norm)}','${jsq(r.Lote_norm)}')">✓ Validar</button></td>
+      <td>${acaoHtml}</td>
     `;
     body.appendChild(tr);
   }
@@ -4024,19 +4140,53 @@ function exportSuspXlsx(){
   const fltVals2=msGetVals('suspFlt');
   const catFActive=msGet('suspCat');
   const minQt=parseInt(document.getElementById('suspMinQt').value)||0;
-  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.desc,r.Lote_norm));
-  if(fltVals2.has('similar'))rows=rows.filter(r=>r.similar);
-  else if(fltVals2.has('no_sim'))rows=rows.filter(r=>!r.similar);
-  if(catFActive.size)rows=rows.filter(r=>catFActive.has(occParams.find(p=>p.ean===r.EAN_norm)?.cat||''));
+  if(srch)rows=rows.filter(r=>{
+    const eanHit=matchProdSrch(srch,r.EAN_norm,r.desc,r.Lote_norm);
+    const multiHit=r.tipo==='multi_ean'&&(r.eansStr||'').toLowerCase().includes(srch)||(r.eans||[]).some(e=>matchProdSrch(srch,e.EAN_norm,e.desc,r.Lote_norm));
+    return eanHit||multiHit;
+  });
+  if(fltVals2.has('multi_ean'))rows=rows.filter(r=>r.tipo==='multi_ean');
+  else if(fltVals2.has('wms_only'))rows=rows.filter(r=>r.tipo!=='multi_ean');
+  else if(fltVals2.has('similar'))rows=rows.filter(r=>r.tipo!=='multi_ean'&&r.similar);
+  else if(fltVals2.has('no_sim'))rows=rows.filter(r=>r.tipo!=='multi_ean'&&!r.similar);
+  if(catFActive.size)rows=rows.filter(r=>{
+    if(r.tipo==='multi_ean')return(r.eans||[]).some(e=>catFActive.has(occParams.find(p=>p.ean===e.EAN_norm)?.cat||''));
+    return catFActive.has(occParams.find(p=>p.ean===r.EAN_norm)?.cat||'');
+  });
   if(minQt>0)rows=rows.filter(r=>r.qt>=minQt);
   if(!rows.length){toast('Sem dados','error');return;}
   const data=rows.map(r=>{
+    if(r.tipo==='multi_ean'){
+      return{
+        Tipo:'Lote em múltiplos EANs',
+        Lote:r.Lote_norm,
+        EANs:r.eansStr||'',
+        EANs_Detalhe:(r.eans||[]).map(e=>`${e.EAN_norm}(SAP:${e.qtSap||0}/WMS:${e.qtWms||0})`).join(' | '),
+        Quantidade_Total:r.qt,
+        Sistema:r.sistema||'',
+        Recomendacao:'Verificar cadastro — mesmo lote em produtos diferentes'
+      };
+    }
     const p=occParams.find(x=>x.ean===r.EAN_norm);
     let rec='';
     if(p&&p.lote_obrigatorio===false)rec='Produto sem lote obrigatório — retirar lote do WMS';
     else if(r.similar)rec='Corrigir lote: '+r.similar.lote;
     else{const ss=sapData&&sapData.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm==='');rec=ss?'Corrigir lote no WMS (SAP sem lote)':'Investigar';}
-    return{Categoria:p?.cat||'',Cod_SAP:getSapCode(r.EAN_norm),EAN:r.EAN_norm,Descricao:r.desc,LoteUnilog:r.Lote_norm,QtUnilog:r.qt,DepositoClasse:(r.depots||[]).join(' | '),LoteSAPSimilar:r.similar?.lote||'',Similaridade:r.similar?Math.round(r.similar.ratio*100)+'%':'',QtSAP:r.similar?.qt||'',Recomendacao:rec};
+    return{
+      Tipo:'Lote só no WMS',
+      Categoria:p?.cat||'',
+      Cod_SAP:getSapCode(r.EAN_norm),
+      EAN:r.EAN_norm,
+      Descricao:r.desc,
+      Lote:r.Lote_norm,
+      Quantidade:r.qt,
+      Sistema:r.sistema||'WMS',
+      DepositoClasse:(r.depots||[]).join(' | '),
+      LoteSAPSimilar:r.similar?.lote||'',
+      Similaridade:r.similar?Math.round(r.similar.ratio*100)+'%':'',
+      QtSAP:r.similar?.qt||'',
+      Recomendacao:rec
+    };
   });
   const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Lotes Suspeitos');
   XLSX.writeFile(wb,`lotes_suspeitos_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
