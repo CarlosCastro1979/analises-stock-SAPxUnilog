@@ -606,8 +606,8 @@ select.cad-inp{cursor:pointer;}
         <th onclick="doSort('valconfl','produto')">Descrição</th>
         <th onclick="doSort('valconfl','Lote_norm')">Lote</th>
         <th onclick="doSort('valconfl','sistema')">Sistema</th>
-        <th onclick="doSort('valconfl','validadesSap')">Validades SAP</th>
-        <th onclick="doSort('valconfl','validadesWms')">Validades WMS</th>
+        <th onclick="doSort('valconfl','validadesSapStr')">Validades SAP</th>
+        <th onclick="doSort('valconfl','validadesWmsStr')">Validades WMS</th>
         <th onclick="doSort('valconfl','qtSap')" class="num">Qtd SAP</th>
         <th onclick="doSort('valconfl','qtWms')" class="num">Qtd WMS</th>
         <th onclick="doSort('valconfl','deposito')">Depósito SAP</th>
@@ -1250,7 +1250,7 @@ let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','Total',''];
 
-let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={},suspValidados=new Set(),suspValidadosOcultos=0;
+let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,valConflData=[],valConflStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={},suspValidados=new Set(),suspValidadosOcultos=0;
 let showAll=false,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
@@ -1657,6 +1657,30 @@ function parseValidadeDate(v){
   }
   const d2=new Date(s);if(!isNaN(d2.getTime())){d2.setHours(0,0,0,0);return d2;}
   return null;
+}
+function canonicalValidadeKey(v){
+  if(v===null||v===undefined||v==='')return null;
+  if(isValidadeSentinel(v))return null;
+  const d=parseValidadeDate(v);
+  if(d)return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const n=normValidadeField(v);
+  return n?n.toLowerCase().replace(/\s/g,''):null;
+}
+function displayValidadeCanon(v){
+  const d=parseValidadeDate(v);
+  if(d)return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+d.getFullYear();
+  const n=normValidadeField(v);
+  return n||String(v).trim();
+}
+function addRowValidadeToMap(map,v){
+  if(v===null||v===undefined||v===''||isValidadeSentinel(v))return;
+  const ck=canonicalValidadeKey(v);
+  if(ck)map.set(ck,displayValidadeCanon(v));
+}
+function uniClasseLabel(cl){
+  const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));
+  const lbl=dk?DEPOT_MAP[dk].label.split('—')[1]?.trim():'';
+  return lbl?`${lbl}/Cl.${cl}`:`Cl.${cl}`;
 }
 
 // ── SAP CODE / PRICE HELPERS ──
@@ -2226,10 +2250,12 @@ function alertTab(name,el){
   document.getElementById('alert-posclasse').style.display=name==='posclasse'?'':'none';
   document.getElementById('alert-vencforadep').style.display=name==='vencforadep'?'':'none';
   document.getElementById('alert-semvalidade').style.display=name==='semvalidade'?'':'none';
+  document.getElementById('alert-valconfl').style.display=name==='valconfl'?'':'none';
   if(name==='suspeitos')renderSusp();
   else if(name==='somunilog')renderSoUnilog();
   else if(name==='vencforadep')renderVencidoForaDep();
   else if(name==='semvalidade')renderSemValidade();
+  else if(name==='valconfl')renderValConfl();
   else renderPosClasse();
   scheduleColResize();
 }
@@ -2240,13 +2266,14 @@ function renderAlertPage(){
   else if(tab==='somunilog')renderSoUnilog();
   else if(tab==='vencforadep')renderVencidoForaDep();
   else if(tab==='semvalidade')renderSemValidade();
+  else if(tab==='valconfl')renderValConfl();
   else renderPosClasse();
   scheduleColResize();
 }
 function updateAlertBadge(){
   const badge=document.getElementById('alertBadge');
   if(!badge)return;
-  const n=(suspData?.length||0)+(posClasseData?.length||0)+(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0)+(semValidadeData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
+  const n=(suspData?.length||0)+(posClasseData?.length||0)+(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0)+(semValidadeData?.length||0)+(valConflData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
   badge.textContent=n;
   badge.style.display=n>0?'':'none';
 }
@@ -2429,6 +2456,7 @@ function buildVencidoForaDep(){
   buildVencidoForaDepWms();
   buildVencidoForaDepSap();
   buildSemValidade();
+  buildValConfl();
   const total=(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0);
   const badge=document.getElementById('vencForaDepBadge');
   if(badge){badge.textContent=total;badge.style.display=total>0?'':'none';}
@@ -2878,6 +2906,167 @@ function exportSemValidadeXlsx(){
   XLSX.writeFile(wb,`sem_validade_cafe_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
+// ── VALIDADES CONFLITUOSAS (2+ datas distintas por EAN+Lote) ──
+function buildValConfl(){
+  valConflData=[];
+  valConflStats={sap:0,wms:0,ambos:0,total:0};
+  const sapGroups=new Map();
+  if(sapData){
+    sapData.forEach(r=>{
+      if(!r.EAN_norm||r.qt<=0)return;
+      const key=`${r.EAN_norm}\0${r.Lote_norm||''}`;
+      let g=sapGroups.get(key);
+      if(!g){
+        g={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm||'',validades:new Map(),qt:0,produto:r.desc||'',sapCode:r.material||getSapCode(r.EAN_norm),depositos:new Set()};
+        sapGroups.set(key,g);
+      }
+      g.qt+=r.qt;
+      if(r.deposito)g.depositos.add(r.deposito);
+      if(r.desc)g.produto=r.desc;
+      addRowValidadeToMap(g.validades,r.validade);
+    });
+  }
+  const dm={};
+  if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
+  const uniGroups=new Map();
+  if(uniData){
+    uniData.forEach(r=>{
+      if(!r.EAN_norm||r.qt<=0)return;
+      const key=`${r.EAN_norm}\0${r.Lote_norm||''}`;
+      let g=uniGroups.get(key);
+      if(!g){
+        g={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm||'',validades:new Map(),qt:0,produto:r.produto||dm[r.EAN_norm]||'',classes:new Set()};
+        uniGroups.set(key,g);
+      }
+      g.qt+=r.qt;
+      if(r.classe)g.classes.add(r.classe);
+      if(r.produto)g.produto=r.produto;
+      for(const f of['validadeLote','validadeHeader','validade'])addRowValidadeToMap(g.validades,r[f]);
+    });
+  }
+  const allKeys=new Set([...sapGroups.keys(),...uniGroups.keys()]);
+  for(const key of allKeys){
+    const sg=sapGroups.get(key);
+    const ug=uniGroups.get(key);
+    const sapConflict=!!(sg&&sg.validades.size>=2);
+    const wmsConflict=!!(ug&&ug.validades.size>=2);
+    if(!sapConflict&&!wmsConflict)continue;
+    const parts=key.split('\0');
+    const EAN_norm=parts[0],Lote_norm=parts[1]||'';
+    const validadesSap=sg?[...sg.validades.values()].sort():[];
+    const validadesWms=ug?[...ug.validades.values()].sort():[];
+    let sistema='WMS';
+    if(sapConflict&&wmsConflict){sistema='Ambos';valConflStats.ambos++;}
+    else if(sapConflict){sistema='SAP';valConflStats.sap++;}
+    else valConflStats.wms++;
+    valConflData.push({
+      EAN_norm,Lote_norm,
+      sapCode:sg?.sapCode||getSapCode(EAN_norm),
+      produto:sg?.produto||ug?.produto||'',
+      sistema,
+      validadesSap,
+      validadesWms,
+      validadesSapStr:validadesSap.join(' · '),
+      validadesWmsStr:validadesWms.join(' · '),
+      nValidadesSap:validadesSap.length,
+      nValidadesWms:validadesWms.length,
+      qtSap:sg?.qt||0,
+      qtWms:ug?.qt||0,
+      deposito:sg?sapDepLabels(sg.depositos):'',
+      depClasseWms:ug?[...ug.classes].sort().map(uniClasseLabel).join(', '):''
+    });
+  }
+  valConflStats.total=valConflData.length;
+  valConflData.sort((a,b)=>String(a.produto||'').localeCompare(String(b.produto||''))||a.EAN_norm.localeCompare(b.EAN_norm)||String(a.Lote_norm||'').localeCompare(String(b.Lote_norm||'')));
+  console.log('[buildValConfl]',valConflStats,'first5:',valConflData.slice(0,5));
+  const badge=document.getElementById('valConflBadge');
+  if(badge){badge.textContent=valConflData.length;badge.style.display=valConflData.length>0?'':'none';}
+  updateAlertBadge();
+}
+let _renderValConflBusy=false;
+function renderValConfl(){if(_renderValConflBusy)return;_renderValConflBusy=true;try{_renderValConfl();}finally{_renderValConflBusy=false;}}
+function _renderValConfl(){
+  const body=document.getElementById('valConflBody');
+  const empty=document.getElementById('valConflEmpty');
+  const ok=document.getElementById('valConflOk');
+  if(!sapData&&!uniData){
+    if(body)body.innerHTML='';
+    if(empty)empty.style.display='block';
+    if(ok)ok.style.display='none';
+    return;
+  }
+  if(empty)empty.style.display='none';
+  let rows=[...valConflData];
+  const srch=document.getElementById('valConflSrch')?.value.toLowerCase()||'';
+  const sistema=document.getElementById('valConflSistema')?.value||'';
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm)||String(r.validadesSapStr||'').toLowerCase().includes(srch)||String(r.validadesWmsStr||'').toLowerCase().includes(srch));
+  if(sistema)rows=rows.filter(r=>r.sistema===sistema);
+  applySort('valconfl',rows);updateSortHeaders('valconfl');
+  const st=valConflStats||{};
+  const sapN=rows.filter(r=>r.sistema==='SAP'||r.sistema==='Ambos').length;
+  const wmsN=rows.filter(r=>r.sistema==='WMS'||r.sistema==='Ambos').length;
+  const totalQtSap=rows.reduce((s,r)=>s+(r.qtSap||0),0);
+  const totalQtWms=rows.reduce((s,r)=>s+(r.qtWms||0),0);
+  document.getElementById('valConflKpis').innerHTML=`
+    <div class="kpi"><div class="kl">Combos EAN+lote</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.total??valConflData.length)} conflitos no total</div></div>
+    <div class="kpi"><div class="kl">Conflitos SAP</div><div class="kv b">${fmtKvNum(st.sap??0)}</div><div class="ks">${fmt(sapN)} visíveis (incl. Ambos)</div></div>
+    <div class="kpi"><div class="kl">Conflitos WMS</div><div class="kv y">${fmtKvNum(st.wms??0)}</div><div class="ks">${fmt(wmsN)} visíveis (incl. Ambos)</div></div>
+    <div class="kpi"><div class="kl">Qtd SAP / WMS</div><div class="kv">${fmtKvNum(totalQtSap)} / ${fmtKvNum(totalQtWms)}</div></div>
+  `;
+  body.innerHTML='';
+  document.getElementById('valConflOk').style.display=rows.length===0?'block':'none';
+  for(const r of rows){
+    const sisCls=r.sistema==='SAP'?'berr':r.sistema==='WMS'?'bwarn':'bpurple';
+    const sapHtml=r.validadesSap.length?r.validadesSap.map(v=>`<span class="badge berr" style="margin:1px">${esc(v)}</span>`).join(''):'—';
+    const wmsHtml=r.validadesWms.length?r.validadesWms.map(v=>`<span class="badge bwarn" style="margin:1px">${esc(v)}</span>`).join(''):'—';
+    const tr=document.createElement('tr');tr.className='dr';
+    tr.innerHTML=`
+      <td>${sapCodeHtml(r.EAN_norm)}</td>
+      <td><span class="badge bneu">${r.EAN_norm}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.produto)}">${r.produto||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm||'—'}</span></td>
+      <td><span class="badge ${sisCls}">${r.sistema}</span></td>
+      <td>${sapHtml}</td>
+      <td>${wmsHtml}</td>
+      <td class="num">${r.qtSap?fmt(r.qtSap):'—'}</td>
+      <td class="num">${r.qtWms?fmt(r.qtWms):'—'}</td>
+      <td><span class="badge bneu">${r.deposito||'—'}</span></td>
+      <td style="font-size:11px">${r.depClasseWms||'—'}</td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!rows.length&&(sapData||uniData))document.getElementById('valConflOk').style.display='block';
+  setTimeout(applyResizable,0);
+}
+function exportValConflXlsx(){
+  if(!valConflData.length){toast('Sem dados','error');return;}
+  let rows=[...valConflData];
+  const srch=document.getElementById('valConflSrch')?.value.toLowerCase()||'';
+  const sistema=document.getElementById('valConflSistema')?.value||'';
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm)||String(r.validadesSapStr||'').toLowerCase().includes(srch)||String(r.validadesWmsStr||'').toLowerCase().includes(srch));
+  if(sistema)rows=rows.filter(r=>r.sistema===sistema);
+  applySort('valconfl',rows);
+  const data=rows.map(r=>({
+    Cod_SAP:r.sapCode||getSapCode(r.EAN_norm),
+    EAN:r.EAN_norm,
+    Descricao:r.produto||'',
+    Lote:r.Lote_norm,
+    Sistema:r.sistema,
+    Validades_SAP:r.validadesSapStr||'',
+    Validades_WMS:r.validadesWmsStr||'',
+    N_Validades_SAP:r.nValidadesSap,
+    N_Validades_WMS:r.nValidadesWms,
+    Qtd_SAP:r.qtSap||0,
+    Qtd_WMS:r.qtWms||0,
+    Deposito_SAP:r.deposito||'',
+    Classe_WMS:r.depClasseWms||''
+  }));
+  if(!data.length){toast('Sem dados','error');return;}
+  const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Validades Conflituosas');
+  XLSX.writeFile(wb,`validades_conflituosas_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 
 function simRatio(a,b){const la=a.length,lb=b.length;if(!la||!lb)return 0;const dp=Array.from({length:la+1},(_,i)=>Array.from({length:lb+1},(_,j)=>i===0?j:j===0?i:0));for(let i=1;i<=la;i++)for(let j=1;j<=lb;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return 1-dp[la][lb]/Math.max(la,lb);}
 
@@ -3051,7 +3240,7 @@ function switchCompany(){
   DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
   DKS=Object.keys(DEPOT_MAP);
   // Reset all data
-  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;vencForaDepStats=null;vencForaDepSapStats=null;suspValidados=new Set();suspValidadosOcultos=0;
+  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;valConflData=[];valConflStats=null;vencForaDepStats=null;vencForaDepSapStats=null;suspValidados=new Set();suspValidadosOcultos=0;
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
   renderUpKpis();
@@ -3063,6 +3252,7 @@ function switchCompany(){
   const posClasseBadge=document.getElementById('posClasseBadge');if(posClasseBadge){posClasseBadge.textContent='';posClasseBadge.style.display='none';}
   const vencForaDepBadge=document.getElementById('vencForaDepBadge');if(vencForaDepBadge){vencForaDepBadge.textContent='';vencForaDepBadge.style.display='none';}
   const semValidadeBadge=document.getElementById('semValidadeBadge');if(semValidadeBadge){semValidadeBadge.textContent='';semValidadeBadge.style.display='none';}
+  const valConflBadge=document.getElementById('valConflBadge');if(valConflBadge){valConflBadge.textContent='';valConflBadge.style.display='none';}
   const alertBadge=document.getElementById('alertBadge');if(alertBadge){alertBadge.textContent='';alertBadge.style.display='none';}
   // Try to load saved data for the new company
   loadFromDB(true);
@@ -4603,6 +4793,8 @@ function doSort(table,col){
   else if(table==='su')renderSoUnilog();
   else if(table==='poscl')renderPosClasse();
   else if(table==='vencforadep'||table==='vencforadepSap')renderVencidoForaDep();
+  else if(table==='semval')renderSemValidade();
+  else if(table==='valconfl')renderValConfl();
   else if(table==='occ')renderOccView();
   else if(table==='transEc')renderTrans('ecommerce');
   else if(table==='transQb')renderTrans('qbrasil');
