@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622360000 -->
+<!DOCTYPE html><!-- v20260622370000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -559,7 +559,7 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bg bs" onclick="exportSemValidadeXlsx()">⬇ Excel</button>
     </div>
     <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
-      Produtos SAP com validade 00.0000 ou vazia (cafés) — grão, moído e cápsulas cujo combo EAN+lote não tem validade real. Sentinel: <strong>00.0000</strong>, <strong>00.00.0000</strong>, 0, 00/00/0000 ou vazio. Excluídos se qualquer linha SAP do combo tiver data real em Validade Lote.
+      Produtos SAP com validade 00.0000 ou vazia — <strong>só café</strong> (grão, moído, cápsulas). Excluídos: xícaras, copos, caixas, acessórios, material marketing, equip. profissional e máquinas (sem controlo de validade). Sentinel: <strong>00.0000</strong>, <strong>00.00.0000</strong>, 0, 00/00/0000 ou vazio.
     </p>
     <div class="tb">
       <input class="inp is" id="semValSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderSemValidade()">
@@ -1659,12 +1659,43 @@ function hasRealValidade(validadeStr,ean,desc,cat){
   return !!parseValidadeDate(validadeStr);
 }
 function normCatLabel(s){return String(s||'').trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu,'');}
+function isSemValidadeExcluido(ean,desc,cat,subcat){
+  if(isMaquinaDomestica(ean,desc))return true;
+  if(isVinhoProduct(ean,desc,cat))return true;
+  if(isCaixasPapelao(ean,desc))return true;
+  if(isExcluidoDifStock(ean,null,desc))return true;
+  const param=occParams.find(p=>p.ean===ean);
+  const exclCatParts=['xicara','copo papel','acessor','material de','marketing','caixa','papelao','equipamento prof','maquina'];
+  for(const c of [cat,subcat,param?.cat,param?.subcat]){
+    const n=normCatLabel(c||'');
+    if(!n)continue;
+    if(exclCatParts.some(x=>n.includes(x)))return true;
+  }
+  const d=String(desc||'').toUpperCase();
+  if(/\b(BANDEJA|CHAVENA|CHÁVENA|XICARA|XÍCARA|COPO\s+PAPEL|COPOS\s+PAPEL|CONJUNTO\s+\d+\s+COPOS|CAIXA\s+VAZIA|PRATO|COLHER|ACESSOR|MATERIAL\s+DE)\b/.test(d))return true;
+  if(/\bCOPO\b/.test(d)&&!/\b(COFFEE|CAFE|CAFÉ)\b/.test(d))return true;
+  if(/\bCOPOS\b/.test(d)&&!/\b(COFFEE|CAFE|CAFÉ)\b/.test(d))return true;
+  return false;
+}
+function isDescricaoCafeStock(desc){
+  const d=String(desc||'').toUpperCase();
+  if(/\b(BANDEJA|CHAVENA|CHÁVENA|XICARA|XÍCARA|COPO\s+PAPEL|CAIXA\s+VAZIA|CONJUNTO\s+\d+\s+COPOS)\b/.test(d))return false;
+  if(/\b(COFFEE|CAFE|CAFÉ)\b/.test(d)&&/\b(GR\b|GRAO|GRÃO|MOIDO|MOÍDO|KG|CAP|CAPS|CAPSULAS|\d+\s*CAP)\b/.test(d))return true;
+  if(/\bBELLISSIMO\b/.test(d)&&/\b(COFFEE|GR\b|KG|MOIDO)\b/.test(d))return true;
+  if(/\bDELTA\s*Q\b/.test(d)&&/\b(COFFEE|CAP|CAPS|\d+\s*CAP)\b/.test(d))return true;
+  return false;
+}
 function isCafeProduct(ean,desc,cat,subcat){
+  if(isSemValidadeExcluido(ean,desc,cat,subcat))return false;
   const cafeCats=new Set(['cafe em grao','cafe moido','cafe em capsulas']);
   const param=occParams.find(p=>p.ean===ean);
-  const candidates=[cat,subcat,param?.cat,param?.subcat];
-  if(desc){const ac=autoCat(desc);candidates.push(ac.cat,ac.subcat);}
-  return candidates.some(c=>cafeCats.has(normCatLabel(c||'')));
+  const pCat=param?.cat||cat||'';
+  if(cafeCats.has(normCatLabel(pCat)))return true;
+  if(pCat)return false;
+  if(!desc)return false;
+  const ac=autoCat(desc);
+  if(!cafeCats.has(normCatLabel(ac.cat||'')))return false;
+  return isDescricaoCafeStock(desc);
 }
 function parseValidadeDate(v){
   if(v===null||v===undefined||v===''||v==='—'||v==='0000-00-00')return null;
