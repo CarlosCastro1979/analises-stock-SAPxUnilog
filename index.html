@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260621120000 -->
+<!DOCTYPE html><!-- v20260622120000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -437,6 +437,7 @@ select.cad-inp{cursor:pointer;}
         <th>Depósito / Classe</th>
         <th>Lote SAP Similar</th>
         <th>Recomendação</th>
+        <th>Acção</th>
       </tr></thead>
       <tbody id="suspBody"></tbody>
     </table></div>
@@ -1207,7 +1208,7 @@ let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','Total',''];
 
-let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={};
+let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={},suspValidados=new Set(),suspValidadosOcultos=0;
 let showAll=false,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
@@ -1260,7 +1261,7 @@ async function init(){
   try{
     const{error}=await db.from('logistica_stock').select('id').limit(1);
     setDB(!error);
-    if(!error){await loadFromDB(true);await loadOccParams();await loadReconNotas();await loadPecasData();}
+    if(!error){await loadSuspValidados();await loadFromDB(true);await loadOccParams();await loadReconNotas();await loadPecasData();}
   }catch(e){setDB(false);}
   scheduleColResize();
 }
@@ -1953,10 +1954,11 @@ function buildSusp(){
   const sapSet=new Set();sapData.forEach(r=>{if(r.Lote_norm)sapSet.add(r.EAN_norm+'|'+r.Lote_norm);});
   // SAP EANs set (any deposit)
   const sapEANs=new Set(sapData.map(r=>r.EAN_norm).filter(Boolean));
-  suspData=[];
+  suspData=[];suspValidadosOcultos=0;
   for(const[k,v]of Object.entries(uA)){
     if(sapSet.has(k))continue;
     const{EAN_norm,Lote_norm,qt,classes}=v;
+    if(suspValidados.has(k)){suspValidadosOcultos++;continue;}
     // Only include if EAN exists in SAP (wrong lote) — unknown EANs go to "Só Unilog"
     if(!sapEANs.has(EAN_norm))continue;
     const desc=dm[EAN_norm]||'';
@@ -2803,7 +2805,7 @@ async function processAll(){
   if(!sapData||!uniData)return;
   company=document.getElementById('coSel').value;
   document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
-  await loadOccParams();
+  await loadOccParams();await loadSuspValidados();
   logUniClasseCounts('processAll (antes build)');
   buildRecon();buildSusp();buildSoUnilog();buildPosClasse();buildVencidoForaDep();checkDuplicadosAlert();await autoSeedOcc();await processPecas();renderUpKpis();updateChip();
   logUniClasseCounts('processAll (após build)');
@@ -2968,7 +2970,7 @@ function switchCompany(){
   DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
   DKS=Object.keys(DEPOT_MAP);
   // Reset all data
-  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;vencForaDepStats=null;vencForaDepSapStats=null;
+  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;vencForaDepStats=null;vencForaDepSapStats=null;suspValidados=new Set();suspValidadosOcultos=0;
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
   renderUpKpis();
@@ -2997,7 +2999,7 @@ async function loadFromDB(silent=false){
     refreshUniClasseNorm();
     invalidateSapMaps();
     // Load occParams first so MUIM category filtering works in buildRecon
-    await loadOccParams();
+    await loadOccParams();await loadSuspValidados();
     buildRecon();buildSusp();buildSoUnilog();buildPosClasse();buildVencidoForaDep();checkDuplicadosAlert();await processPecas();await loadPecasData();renderUpKpis();updateChip();
     logUniClasseCounts('loadFromDB');
     // Re-render active page if it needs data
@@ -3012,6 +3014,47 @@ async function loadFromDB(silent=false){
     updateLoadBanner(data.uploaded_at);
     if(!silent)toast('Carregado: '+company,'success');
   }catch(e){if(!silent)toast('Erro: '+e.message,'error');}
+}
+
+// ── LOTES SUSPEITOS VALIDADOS ──
+// SQL Supabase (executar uma vez):
+// CREATE TABLE logistica_susp_validados (
+//   company text NOT NULL,
+//   EAN_norm text NOT NULL,
+//   Lote_norm text NOT NULL DEFAULT '',
+//   validated_at timestamptz NOT NULL DEFAULT now(),
+//   validated_by text,
+//   nota text,
+//   PRIMARY KEY (company, EAN_norm, Lote_norm)
+// );
+// ALTER TABLE logistica_susp_validados ENABLE ROW LEVEL SECURITY;
+// CREATE POLICY "anon_all" ON logistica_susp_validados FOR ALL TO anon USING (true) WITH CHECK (true);
+async function loadSuspValidados(){
+  try{
+    const{data,error}=await db.from('logistica_susp_validados').select('EAN_norm,Lote_norm').eq('company',company);
+    if(error){
+      if(/relation|does not exist|schema cache/i.test(error.message||''))toast('Tabela logistica_susp_validados em falta — ver SQL no código','error');
+      return;
+    }
+    suspValidados=new Set();
+    if(data)data.forEach(r=>suspValidados.add(r.EAN_norm+'|'+(r.Lote_norm||'')));
+  }catch(e){}
+}
+async function validateSusp(EAN_norm,Lote_norm){
+  const nota=window.prompt('Nota opcional (Enter para ignorar):','');
+  if(nota===null)return;
+  const key=EAN_norm+'|'+(Lote_norm||'');
+  try{
+    const{error}=await db.from('logistica_susp_validados').upsert({company,EAN_norm,Lote_norm:Lote_norm||'',validated_at:new Date().toISOString(),nota:nota||null},{onConflict:'company,EAN_norm,Lote_norm'});
+    if(error){
+      if(/relation|does not exist|schema cache/i.test(error.message||''))toast('Tabela logistica_susp_validados em falta — ver SQL no código','error');
+      else toast('Erro: '+error.message,'error');
+      return;
+    }
+    suspValidados.add(key);
+    buildSusp();renderSusp();updateChip();
+    toast('Lote validado — oculto da lista','success');
+  }catch(e){toast('Erro: '+e.message,'error');}
 }
 
 // ── NOTAS (inline recon) ──
@@ -3430,10 +3473,12 @@ function _renderSusp(){
   const withSim=rows.filter(r=>r.similar).length;
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows);
   const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows);
+  const validadosKpi=suspValidadosOcultos>0?`<div class="kpi"><div class="kl">Validados</div><div class="kv" style="color:var(--green)">${fmtKvNum(suspValidadosOcultos)}</div><div class="ks">ocultos da lista</div></div>`:'';
   document.getElementById('suspKpis').innerHTML=`
     <div class="kpi"><div class="kl">Lotes suspeitos</div><div class="kv r">${fmtKvNum(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com similar SAP</div><div class="kv y">${fmtKvNum(withSim)}</div><div class="ks">provável erro digitação</div></div>
     <div class="kpi"><div class="kl">Sem correspondência</div><div class="kv">${fmtKvNum(rows.length-withSim)}</div></div>
+    ${validadosKpi}
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
   `;
 
@@ -3472,6 +3517,7 @@ function _renderSusp(){
       <td>${depotHtml||'—'}</td>
       <td>${simHtml}</td>
       <td>${recHtml}</td>
+      <td><button class="btn bg bs" title="Marcar como OK — desaparece da lista" onclick="validateSusp(${JSON.stringify(r.EAN_norm)},${JSON.stringify(r.Lote_norm)})">✓ Validar</button></td>
     `;
     body.appendChild(tr);
   }
