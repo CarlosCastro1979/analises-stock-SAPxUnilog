@@ -3385,29 +3385,42 @@ async function loadFromDB(silent=false){
 // SQL Supabase (executar uma vez):
 // CREATE TABLE logistica_susp_validados (
 //   company text NOT NULL,
-//   EAN_norm text NOT NULL,
-//   Lote_norm text NOT NULL DEFAULT '',
+//   "EAN_norm" text NOT NULL,
+//   "Lote_norm" text NOT NULL DEFAULT '',
 //   validated_at timestamptz NOT NULL DEFAULT now(),
 //   validated_by text,
 //   nota text,
-//   PRIMARY KEY (company, EAN_norm, Lote_norm)
+//   PRIMARY KEY (company, "EAN_norm", "Lote_norm")
 // );
 // ALTER TABLE logistica_susp_validados ENABLE ROW LEVEL SECURITY;
 // CREATE POLICY "anon_all" ON logistica_susp_validados FOR ALL TO anon USING (true) WITH CHECK (true);
 function isSuspValidadosTableMissing(err){
-  return err&&/relation|does not exist|schema cache|PGRST205/i.test(err.message||'');
+  if(!err)return false;
+  if(err.code==='PGRST205')return true;
+  const m=err.message||'';
+  return /relation .+ does not exist/i.test(m)||/Could not find the table .+ in the schema cache/i.test(m);
+}
+function isSuspValidadosSchemaMismatch(err){
+  if(!err)return false;
+  if(err.code==='PGRST204')return true;
+  const m=err.message||'';
+  return /Could not find the '.+' column of 'logistica_susp_validados'/i.test(m);
+}
+function toastSuspValidadosSchemaMismatch(err){
+  toast('Colunas em falta ou com nome errado em logistica_susp_validados: '+(err.message||err.code||'erro desconhecido')+'. No SQL Editor: ALTER TABLE logistica_susp_validados RENAME COLUMN ean_norm TO "EAN_norm"; ALTER TABLE logistica_susp_validados RENAME COLUMN lote_norm TO "Lote_norm"; (ou recriar a tabela com "EAN_norm"/"Lote_norm" entre aspas — ver SQL no código).','error');
 }
 function toastSuspValidadosMissingTable(){
-  toast('Tabela logistica_susp_validados em falta. No Supabase SQL Editor: CREATE TABLE logistica_susp_validados (company text NOT NULL, EAN_norm text NOT NULL, Lote_norm text NOT NULL DEFAULT \'\', validated_at timestamptz DEFAULT now(), nota text, PRIMARY KEY (company,EAN_norm,Lote_norm)); depois ENABLE ROW LEVEL SECURITY + policy anon_all (ver SQL no código).','error');
+  toast('Tabela logistica_susp_validados em falta. No Supabase SQL Editor: CREATE TABLE logistica_susp_validados (company text NOT NULL, "EAN_norm" text NOT NULL, "Lote_norm" text NOT NULL DEFAULT \'\', validated_at timestamptz DEFAULT now(), nota text, PRIMARY KEY (company,"EAN_norm","Lote_norm")); depois ENABLE ROW LEVEL SECURITY + policy anon_all (ver SQL no código).','error');
+}
+function toastSuspValidadosError(prefix,err){
+  if(isSuspValidadosTableMissing(err))toastSuspValidadosMissingTable();
+  else if(isSuspValidadosSchemaMismatch(err))toastSuspValidadosSchemaMismatch(err);
+  else toast(prefix+(err.message||err.code||'erro desconhecido'),'error');
 }
 async function loadSuspValidados(){
   try{
     const{data,error}=await db.from('logistica_susp_validados').select('EAN_norm,Lote_norm').eq('company',company);
-    if(error){
-      if(isSuspValidadosTableMissing(error))toastSuspValidadosMissingTable();
-      else toast('Erro ao carregar validados: '+error.message,'error');
-      return;
-    }
+    if(error){toastSuspValidadosError('Erro ao carregar validados: ',error);return;}
     suspValidados=new Set();
     if(data)data.forEach(r=>suspValidados.add(r.EAN_norm+'|'+(r.Lote_norm||'')));
   }catch(e){toast('Erro ao carregar validados: '+e.message,'error');}
@@ -3417,11 +3430,7 @@ async function validateSusp(EAN_norm,Lote_norm){
   const key=EAN_norm+'|'+(Lote_norm||'');
   try{
     const{error}=await db.from('logistica_susp_validados').upsert({company,EAN_norm,Lote_norm:Lote_norm||'',validated_at:new Date().toISOString(),nota:null},{onConflict:'company,EAN_norm,Lote_norm'});
-    if(error){
-      if(isSuspValidadosTableMissing(error))toastSuspValidadosMissingTable();
-      else toast('Erro ao validar: '+error.message,'error');
-      return;
-    }
+    if(error){toastSuspValidadosError('Erro ao validar: ',error);return;}
     suspValidados.add(key);
     buildSusp();renderSusp();updateChip();
     toast('Lote validado — oculto da lista','success');
