@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622410000 -->
+<!DOCTYPE html><!-- v20260622420000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1760,19 +1760,17 @@ function addRowValidadeToMap(map,v){
   const ck=canonicalValidadeKey(v);
   if(ck)map.set(ck,displayValidadeCanon(v));
 }
-const VAL_CONFL_WMS_EXCL_CLASSES=['FI'];
-function addUniValConflValidade(meta,v,classe){
+function isClasseFI(classe){
+  return String(classe??'').trim().toUpperCase()==='FI';
+}
+function addUniValConflValidade(meta,v){
   if(v===null||v===undefined||v===''||isValidadeSentinel(v))return;
   const ck=canonicalValidadeKey(v);
   if(!ck)return;
-  let m=meta.get(ck);
-  if(!m)m={display:displayValidadeCanon(v),fi:false,nonFi:false};
-  if(VAL_CONFL_WMS_EXCL_CLASSES.includes(classe))m.fi=true;
-  else m.nonFi=true;
-  meta.set(ck,m);
+  if(!meta.has(ck))meta.set(ck,displayValidadeCanon(v));
 }
 function wmsValConflValidades(meta){
-  return[...meta.values()].filter(m=>m.nonFi).map(m=>m.display).sort();
+  return[...meta.values()].sort();
 }
 function uniClasseLabel(cl){
   const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(cl));
@@ -3193,7 +3191,9 @@ function buildValConfl(){
         else if(dm[r.EAN_norm])e.produto=dm[r.EAN_norm];
         g.eans.set(r.EAN_norm,e);
       }
-      for(const f of['validadeLote','validadeHeader','validade'])addUniValConflValidade(g.validadeMeta,r[f],r.classe);
+      if(!isClasseFI(r.classe)){
+        for(const f of['validadeLote','validadeHeader','validade'])addUniValConflValidade(g.validadeMeta,r[f]);
+      }
     });
   }
   const allLotes=new Set([...sapLotes.keys(),...uniLotes.keys()]);
