@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622340000 -->
+<!DOCTYPE html><!-- v20260622350000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -4705,8 +4705,9 @@ function exportOccXlsx(){
   if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN,r.Descricao));
   if(selCats.size)rows=rows.filter(r=>selCats.has(r.Categoria));
   if(selSubs.size)rows=rows.filter(r=>selSubs.has(r.Subcategoria));
-  if(alertF==='sub')rows=rows.filter(r=>r.PosALibertar>0);
+  if(alertF==='sub')rows=rows.filter(r=>r._row.underutil);
   else if(alertF==='sem')rows=rows.filter(r=>!r.UnPosicao);
+  rows=rows.map(({_row,...rest})=>rest);
   rows.sort((a,b)=>{const cc=String(a.Categoria||'zzz').localeCompare(String(b.Categoria||'zzz'));if(cc!==0)return cc;const sc=String(a.Subcategoria||'').localeCompare(String(b.Subcategoria||''));if(sc!==0)return sc;return String(a.Descricao||'').localeCompare(String(b.Descricao||''));});
   if(!rows.length){toast('Sem dados para exportar','error');return;}
   const ws=XLSX.utils.json_to_sheet(rows);
