@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622150000 -->
+<!DOCTYPE html><!-- v20260622250000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1315,7 +1315,7 @@ async function init(){
 function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok':'');document.getElementById('dbLbl').textContent=ok?'Supabase OK':'offline';}
 
 // ── FILES ──
-function loadSap(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
+function loadSap(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
 function loadUni(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{uniData=normUni(rows);logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
 function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast('Erro: '+err.message,'error');}};r.readAsArrayBuffer(file);}
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
@@ -1676,11 +1676,11 @@ function hasRealValidade(validadeStr,ean,desc,cat){
 }
 function normCatLabel(s){return String(s||'').trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu,'');}
 function isCafeProduct(ean,desc,cat,subcat){
+  const cafeCats=new Set(['cafe em grao','cafe moido','cafe em capsulas']);
   const param=occParams.find(p=>p.ean===ean);
-  let c=(cat||param?.cat||'').trim();
-  if(!c&&desc)c=autoCat(desc).cat||'';
-  const nc=normCatLabel(c);
-  return nc==='cafe em grao'||nc==='cafe moido'||nc==='cafe em capsulas';
+  const candidates=[cat,subcat,param?.cat,param?.subcat];
+  if(desc){const ac=autoCat(desc);candidates.push(ac.cat,ac.subcat);}
+  return candidates.some(c=>cafeCats.has(normCatLabel(c||'')));
 }
 function parseValidadeDate(v){
   if(v===null||v===undefined||v===''||v==='—'||v==='0000-00-00')return null;
@@ -2679,7 +2679,7 @@ function buildVencidoForaDepSap(){
     if(r.qt<=0){stats.qtZero++;return;}
     if(!validadeDate||validadeDate>=today)return;
     const dk=String(r.deposito||'').trim();
-    if(!Object.keys(DEPOT_MAP).includes(dk)){stats.depDesconhecido++;return;}
+    if(!Object.keys(DEPOT_MAP).includes(dk)||dk==='MUIM'){stats.depDesconhecido++;return;}
     if(dk===vencidosDk){stats.jaNoDepVencidos++;return;}
     if(isExcluidoDifStock(r.EAN_norm,dk,desc)){stats.equipProf++;return;}
     stats.foraDepVencidos++;
@@ -3238,7 +3238,8 @@ function simRatio(a,b){const la=a.length,lb=b.length;if(!la||!lb)return 0;const 
 // ── PROCESS ──
 async function processAll(){
   if(!sapData||!uniData)return;
-  company=document.getElementById('coSel').value;
+  syncCompanyDepotMap();
+  if(window._rawSapRows?.length)refreshSapFromRaw();
   document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
   await loadOccParams();await loadSuspValidados();
   logUniClasseCounts('processAll (antes build)');
@@ -3400,10 +3401,7 @@ function recalcBanner(){
 
 
 function switchCompany(){
-  company=document.getElementById('coSel').value;
-  // Update depot map for company
-  DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
-  DKS=Object.keys(DEPOT_MAP);
+  syncCompanyDepotMap();
   // Reset all data
   sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;valConflData=[];valConflStats=null;vencForaDepStats=null;vencForaDepSapStats=null;suspValidados=new Set();suspValidadosOcultos=0;
   transData={ecommerce:[],qbrasil:[]};
@@ -3426,11 +3424,11 @@ function switchCompany(){
 
 async function loadFromDB(silent=false){
   try{
-    company=document.getElementById('coSel').value;
+    syncCompanyDepotMap();
     const{data,error}=await db.from('logistica_stock').select('*').eq('id',company).single();
     if(error||!data){if(!silent)toast('Sem dados para '+company,'error');return;}
-    company=data.company;DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;DKS=Object.keys(DEPOT_MAP);
-    sapData=JSON.parse(data.sap_data).filter(r=>DKS.includes(r.deposito)||r.deposito==='11');
+    company=data.company;syncCompanyDepotMap();
+    sapData=JSON.parse(data.sap_data).filter(r=>isSapDepotMapped(sapDepotKey(r.deposito)));
     uniData=JSON.parse(data.unilog_data);
     refreshUniClasseNorm();
     invalidateSapMaps();
