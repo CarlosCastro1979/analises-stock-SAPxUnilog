@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622223000 -->
+<!DOCTYPE html><!-- v20260622240000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -68,7 +68,9 @@ header{background:var(--navy);border-bottom:none;padding:0 24px;display:flex;ali
 .bp{background:var(--red);color:#fff;}.bp:hover{background:var(--red-dark);}.bp:disabled{opacity:.4;cursor:not-allowed;}
 .bg{background:#fff;color:var(--text2);border:1px solid var(--border2);}.bg:hover{color:var(--text);border-color:#9aacb8;}
 .bb{background:var(--blue);color:#fff;}.bb:hover{background:#1d4ed8;}
+.bok{background:var(--green);color:#fff;border:none;}.bok:hover{background:#15803d;}
 .bs{padding:5px 11px;font-size:11px;}
+#suspTable td.susp-rec,#suspTable td.susp-act{white-space:normal;overflow:visible;}
 
 /* INPUTS */
 .inp{background:#fff;border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:12px;font-family:var(--sans);outline:none;transition:all .15s;}
@@ -605,6 +607,7 @@ select.cad-inp{cursor:pointer;}
     <div class="tw2"><table id="valConflTable">
       <thead><tr>
         <th onclick="doSort('valconfl','Lote_norm')">Lote</th>
+        <th onclick="doSort('valconfl','desc')">Descrição</th>
         <th onclick="doSort('valconfl','sistema')">Sistema</th>
         <th onclick="doSort('valconfl','validadesSapStr')">Validades SAP</th>
         <th onclick="doSort('valconfl','validadesWmsStr')">Validades WMS</th>
@@ -3049,8 +3052,14 @@ function buildValConfl(){
       eanInfo.set(e.EAN_norm,x);
     });
     const eansDetail=[...eanInfo.values()];
+    const firstEan=eans[0]||'';
+    let desc='';
+    if(firstEan){
+      desc=dm[firstEan]||occParams.find(p=>p.ean===firstEan)?.descricao||'';
+      if(!desc)desc=eansDetail.find(e=>e.EAN_norm===firstEan)?.produto||'';
+    }
     valConflData.push({
-      Lote_norm,sistema,
+      Lote_norm,sistema,desc,
       validadesSap,validadesWms,
       validadesSapStr:validadesSap.join(' · '),
       validadesWmsStr:validadesWms.join(' · '),
@@ -3088,7 +3097,7 @@ function _renderValConfl(){
   let rows=[...valConflData];
   const srch=document.getElementById('valConflSrch')?.value.toLowerCase()||'';
   const sistema=document.getElementById('valConflSistema')?.value||'';
-  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.Lote_norm,r.eansStr||'')||String(r.validadesSapStr||'').toLowerCase().includes(srch)||String(r.validadesWmsStr||'').toLowerCase().includes(srch)||(r.eans||[]).some(e=>matchProdSrch(srch,e,e))||(r.eansDetail||[]).some(e=>matchProdSrch(srch,e.EAN_norm,e.produto,r.Lote_norm)));
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.Lote_norm,r.desc||'')||matchProdSrch(srch,r.Lote_norm,r.eansStr||'')||String(r.validadesSapStr||'').toLowerCase().includes(srch)||String(r.validadesWmsStr||'').toLowerCase().includes(srch)||(r.eans||[]).some(e=>matchProdSrch(srch,e,e))||(r.eansDetail||[]).some(e=>matchProdSrch(srch,e.EAN_norm,e.produto,r.Lote_norm)));
   if(sistema)rows=rows.filter(r=>r.sistema===sistema);
   applySort('valconfl',rows);updateSortHeaders('valconfl');
   const st=valConflStats||{};
@@ -3117,6 +3126,7 @@ function _renderValConfl(){
     const tr=document.createElement('tr');tr.className='dr';
     tr.innerHTML=`
       <td><span style="font-family:var(--mono);font-size:11px;font-weight:600">${r.Lote_norm||'—'}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.desc||'')}">${r.desc||'—'}</td>
       <td><span class="badge ${sisCls}">${r.sistema}</span></td>
       <td>${sapHtml}</td>
       <td>${wmsHtml}</td>
@@ -3137,11 +3147,12 @@ function exportValConflXlsx(){
   let rows=[...valConflData];
   const srch=document.getElementById('valConflSrch')?.value.toLowerCase()||'';
   const sistema=document.getElementById('valConflSistema')?.value||'';
-  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.Lote_norm,r.eansStr||'')||String(r.validadesSapStr||'').toLowerCase().includes(srch)||String(r.validadesWmsStr||'').toLowerCase().includes(srch)||(r.eans||[]).some(e=>matchProdSrch(srch,e,e))||(r.eansDetail||[]).some(e=>matchProdSrch(srch,e.EAN_norm,e.produto,r.Lote_norm)));
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.Lote_norm,r.desc||'')||matchProdSrch(srch,r.Lote_norm,r.eansStr||'')||String(r.validadesSapStr||'').toLowerCase().includes(srch)||String(r.validadesWmsStr||'').toLowerCase().includes(srch)||(r.eans||[]).some(e=>matchProdSrch(srch,e,e))||(r.eansDetail||[]).some(e=>matchProdSrch(srch,e.EAN_norm,e.produto,r.Lote_norm)));
   if(sistema)rows=rows.filter(r=>r.sistema===sistema);
   applySort('valconfl',rows);
   const data=rows.map(r=>({
     Lote:r.Lote_norm,
+    Descricao:r.desc||'',
     Sistema:r.sistema,
     Validades_SAP:r.validadesSapStr||'',
     Validades_WMS:r.validadesWmsStr||'',
@@ -3382,15 +3393,15 @@ async function loadFromDB(silent=false){
 }
 
 // ── LOTES SUSPEITOS VALIDADOS ──
-// SQL Supabase (executar uma vez):
+// SQL Supabase (executar uma vez — colunas em minúsculas, idiomático PostgreSQL):
 // CREATE TABLE logistica_susp_validados (
 //   company text NOT NULL,
-//   "EAN_norm" text NOT NULL,
-//   "Lote_norm" text NOT NULL DEFAULT '',
+//   ean_norm text NOT NULL,
+//   lote_norm text NOT NULL DEFAULT '',
 //   validated_at timestamptz NOT NULL DEFAULT now(),
 //   validated_by text,
 //   nota text,
-//   PRIMARY KEY (company, "EAN_norm", "Lote_norm")
+//   PRIMARY KEY (company, ean_norm, lote_norm)
 // );
 // ALTER TABLE logistica_susp_validados ENABLE ROW LEVEL SECURITY;
 // CREATE POLICY "anon_all" ON logistica_susp_validados FOR ALL TO anon USING (true) WITH CHECK (true);
@@ -3404,13 +3415,15 @@ function isSuspValidadosSchemaMismatch(err){
   if(!err)return false;
   if(err.code==='PGRST204')return true;
   const m=err.message||'';
-  return /Could not find the '.+' column of 'logistica_susp_validados'/i.test(m);
+  return /Could not find the '.+' column of 'logistica_susp_validados'/i.test(m)
+    ||/column logistica_susp_validados\.\w+ does not exist/i.test(m);
 }
 function toastSuspValidadosSchemaMismatch(err){
-  toast('Colunas em falta ou com nome errado em logistica_susp_validados: '+(err.message||err.code||'erro desconhecido')+'. No SQL Editor: ALTER TABLE logistica_susp_validados RENAME COLUMN ean_norm TO "EAN_norm"; ALTER TABLE logistica_susp_validados RENAME COLUMN lote_norm TO "Lote_norm"; (ou recriar a tabela com "EAN_norm"/"Lote_norm" entre aspas — ver SQL no código).','error');
+  const detail=err.message||err.code||'erro desconhecido';
+  toast('Esquema incorreto em logistica_susp_validados: '+detail+'. As colunas devem ser ean_norm e lote_norm (minúsculas). Se criou com "EAN_norm"/"Lote_norm", execute: ALTER TABLE logistica_susp_validados RENAME COLUMN "EAN_norm" TO ean_norm; ALTER TABLE logistica_susp_validados RENAME COLUMN "Lote_norm" TO lote_norm; — ou recrie a tabela (ver SQL no código).','error');
 }
 function toastSuspValidadosMissingTable(){
-  toast('Tabela logistica_susp_validados em falta. No Supabase SQL Editor: CREATE TABLE logistica_susp_validados (company text NOT NULL, "EAN_norm" text NOT NULL, "Lote_norm" text NOT NULL DEFAULT \'\', validated_at timestamptz DEFAULT now(), nota text, PRIMARY KEY (company,"EAN_norm","Lote_norm")); depois ENABLE ROW LEVEL SECURITY + policy anon_all (ver SQL no código).','error');
+  toast('Tabela logistica_susp_validados em falta. No Supabase SQL Editor execute o CREATE TABLE com colunas ean_norm e lote_norm (ver bloco SQL no código, secção LOTES SUSPEITOS VALIDADOS), depois ENABLE ROW LEVEL SECURITY e policy anon_all.','error');
 }
 function toastSuspValidadosError(prefix,err){
   if(isSuspValidadosTableMissing(err))toastSuspValidadosMissingTable();
@@ -3419,22 +3432,22 @@ function toastSuspValidadosError(prefix,err){
 }
 async function loadSuspValidados(){
   try{
-    const{data,error}=await db.from('logistica_susp_validados').select('EAN_norm,Lote_norm').eq('company',company);
+    const{data,error}=await db.from('logistica_susp_validados').select('ean_norm,lote_norm').eq('company',company);
     if(error){toastSuspValidadosError('Erro ao carregar validados: ',error);return;}
     suspValidados=new Set();
-    if(data)data.forEach(r=>suspValidados.add(r.EAN_norm+'|'+(r.Lote_norm||'')));
-  }catch(e){toast('Erro ao carregar validados: '+e.message,'error');}
+    if(data)data.forEach(r=>suspValidados.add(r.ean_norm+'|'+(r.lote_norm||'')));
+  }catch(e){toastSuspValidadosError('Erro ao carregar validados: ',{message:e.message});}
 }
 async function validateSusp(EAN_norm,Lote_norm){
   if(!db){toast('Sem ligação à base de dados','error');return;}
   const key=EAN_norm+'|'+(Lote_norm||'');
   try{
-    const{error}=await db.from('logistica_susp_validados').upsert({company,EAN_norm,Lote_norm:Lote_norm||'',validated_at:new Date().toISOString(),nota:null},{onConflict:'company,EAN_norm,Lote_norm'});
+    const{error}=await db.from('logistica_susp_validados').upsert({company,ean_norm:EAN_norm,lote_norm:Lote_norm||'',validated_at:new Date().toISOString(),nota:null},{onConflict:'company,ean_norm,lote_norm'});
     if(error){toastSuspValidadosError('Erro ao validar: ',error);return;}
     suspValidados.add(key);
     buildSusp();renderSusp();updateChip();
     toast('Lote validado — oculto da lista','success');
-  }catch(e){toast('Erro ao validar: '+e.message,'error');}
+  }catch(e){toastSuspValidadosError('Erro ao validar: ',{message:e.message});}
 }
 
 // ── NOTAS (inline recon) ──
@@ -3885,7 +3898,9 @@ function _renderSusp(){
         const sapSemLote=sapData&&sapData.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm==='');
         recHtml=sapSemLote?'<span class="badge bwarn">Corrigir lote no WMS (SAP sem lote)</span>':'<span style="color:var(--muted);font-size:11px">Investigar</span>';
       }
-      acaoHtml=`<button class="btn bg bs" title="Marcar como OK — desaparece da lista" onclick="validateSusp('${jsq(r.EAN_norm)}','${jsq(r.Lote_norm)}')">✓ Validar</button>`;
+      const validarBtn=suspValidarBtn(r.EAN_norm,r.Lote_norm);
+      acaoHtml=validarBtn;
+      recHtml=`<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">${recHtml}${validarBtn}</div>`;
     }
     const sisCls=r.sistema==='SAP'?'berr':r.sistema==='WMS'?'bwarn':r.sistema==='Ambos'?'bpurple':'bgray';
     const sisHtml=r.sistema?`<span class="badge ${sisCls}">${r.sistema}</span>`:'—';
@@ -3900,8 +3915,8 @@ function _renderSusp(){
       <td class="num">${fmt(r.qt)}</td>
       <td>${sisHtml}</td>
       <td>${detHtml}</td>
-      <td>${recHtml}</td>
-      <td>${acaoHtml}</td>
+      <td class="susp-rec">${recHtml}</td>
+      <td class="susp-act">${acaoHtml}</td>
     `;
     body.appendChild(tr);
   }
@@ -4972,6 +4987,9 @@ function innerTab(name,el){el.closest('.page').querySelectorAll('.it').forEach(t
 function fmt(n){if(n===null||n===undefined)return'—';return Number(n).toLocaleString('pt-BR');}
 function esc(s){return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function jsq(s){return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
+function suspValidarBtn(EAN_norm,Lote_norm){
+  return `<button type="button" class="btn bok bs" title="Marcar como OK — desaparece da lista" onclick="validateSusp('${jsq(EAN_norm)}','${jsq(Lote_norm)}')">✓ Validar</button>`;
+}
 function updateChip(){
   const c=document.getElementById('coChip');
   if(c){c.textContent=company;c.style.display='';}
