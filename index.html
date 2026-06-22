@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622150000 -->
+<!DOCTYPE html><!-- v20260622184500 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -408,6 +408,7 @@ select.cad-inp{cursor:pointer;}
     <div class="it" data-tab="posclasse" onclick="alertTab('posclasse',this)">Posições + 1 Depósito<span id="posClasseBadge" class="bc" style="display:none"></span></div>
     <div class="it" data-tab="vencforadep" onclick="alertTab('vencforadep',this)">Vencidos fora dep.<span id="vencForaDepBadge" class="bc" style="display:none"></span></div>
     <div class="it" data-tab="semvalidade" onclick="alertTab('semvalidade',this)">Produtos sem validade<span id="semValidadeBadge" class="bc" style="display:none"></span></div>
+    <div class="it" data-tab="valconfl" onclick="alertTab('valconfl',this)">Validades conflituosas<span id="valConflBadge" class="bc" style="display:none"></span></div>
   </div>
 
   <div id="alert-suspeitos">
@@ -567,7 +568,8 @@ select.cad-inp{cursor:pointer;}
         <th onclick="doSort('semval','produto')">Descrição</th>
         <th onclick="doSort('semval','Lote_norm')">Lote</th>
         <th onclick="doSort('semval','qt')" class="num">Qtd Total</th>
-        <th onclick="doSort('semval','validade')">Validade</th>
+        <th onclick="doSort('semval','validade')">Validade SAP</th>
+        <th onclick="doSort('semval','validadeWms')">Validade WMS</th>
         <th onclick="doSort('semval','cat')">Categoria</th>
         <th onclick="doSort('semval','deposito')">Depósito SAP</th>
       </tr></thead>
@@ -577,6 +579,46 @@ select.cad-inp{cursor:pointer;}
     <div id="semValOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum café SAP com validade 00.0000 ou vazia</div></div>
   </div>
   </div><!-- /alert-semvalidade -->
+
+  <div id="alert-valconfl" style="display:none">
+  <div class="card">
+    <div class="ch">
+      <div class="ct">Lotes com validades conflituosas (2+ datas distintas)</div>
+      <button class="btn bg bs" onclick="exportValConflXlsx()">⬇ Excel</button>
+    </div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
+      Para cada combinação <strong>EAN + Lote</strong>, detecta quando existem <strong>2 ou mais validades reais distintas</strong> no mesmo sistema (SAP ou WMS). Excluídos: vazio, sentinel (<strong>00.0000</strong>, <strong>00.00.0000</strong>, 0, 00/00/0000).
+    </p>
+    <div class="tb">
+      <input class="inp is" id="valConflSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderValConfl()">
+      <select class="inp" id="valConflSistema" onchange="renderValConfl()">
+        <option value="">Todos os sistemas</option>
+        <option value="SAP">Só SAP</option>
+        <option value="WMS">Só WMS</option>
+        <option value="Ambos">SAP + WMS</option>
+      </select>
+    </div>
+    <div class="kr" id="valConflKpis"></div>
+    <div class="tw2"><table id="valConflTable">
+      <thead><tr>
+        <th onclick="doSort('valconfl','sapCode')">Cód. SAP</th>
+        <th onclick="doSort('valconfl','EAN_norm')">EAN</th>
+        <th onclick="doSort('valconfl','produto')">Descrição</th>
+        <th onclick="doSort('valconfl','Lote_norm')">Lote</th>
+        <th onclick="doSort('valconfl','sistema')">Sistema</th>
+        <th onclick="doSort('valconfl','validadesSap')">Validades SAP</th>
+        <th onclick="doSort('valconfl','validadesWms')">Validades WMS</th>
+        <th onclick="doSort('valconfl','qtSap')" class="num">Qtd SAP</th>
+        <th onclick="doSort('valconfl','qtWms')" class="num">Qtd WMS</th>
+        <th onclick="doSort('valconfl','deposito')">Depósito SAP</th>
+        <th onclick="doSort('valconfl','depClasseWms')">Classe WMS</th>
+      </tr></thead>
+      <tbody id="valConflBody"></tbody>
+    </table></div>
+    <div id="valConflEmpty" class="empty" style="display:none"><div class="empty-i">📅</div><div>Carrega os ficheiros SAP e Unilog para analisar validades</div></div>
+    <div id="valConflOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum lote com validades conflituosas</div></div>
+  </div>
+  </div><!-- /alert-valconfl -->
 </div>
 
 <!-- ══ CADASTRO ══ -->
@@ -1484,6 +1526,41 @@ function uniRowAllValidadeEmpty(r){
     if(v!==null&&v!==undefined&&String(v).trim()!=='')return false;
   }
   return true;
+}
+function pickUniRowValidadeDisplay(r){
+  if(uniRowHasRealValidade(r)){
+    for(const v of uniRowValidadeFields(r)){
+      if(parseValidadeDate(v))return v;
+    }
+  }
+  const sent=uniRowExplicitSentinel(r);
+  if(sent)return sent;
+  const fields=uniRowValidadeFields(r);
+  return fields[0]||'';
+}
+function mergeValidadeDisplayPreferReal(a,b){
+  if(!a)return b||'';
+  if(!b)return a;
+  const da=parseValidadeDate(a),db=parseValidadeDate(b);
+  if(da&&!db)return a;
+  if(db&&!da)return b;
+  return a;
+}
+function buildUniValidadeWmsMap(){
+  const map=new Map();
+  if(!uniData)return map;
+  for(const r of uniData){
+    if(!r.EAN_norm)continue;
+    const key=`${r.EAN_norm}\0${r.Lote_norm||''}`;
+    const disp=pickUniRowValidadeDisplay(r);
+    if(!disp)continue;
+    map.set(key,mergeValidadeDisplayPreferReal(map.get(key),disp));
+  }
+  return map;
+}
+function lookupUniValidadeWms(ean,lote,map){
+  const m=map||buildUniValidadeWmsMap();
+  return m.get(`${ean}\0${lote||''}`)||'';
 }
 function semValRowHasRealValidade(r){
   for(const f of['validadeLote','validadeHeader']){
@@ -2692,6 +2769,7 @@ function buildSemValidade(){
     }
     if(sapSemValRowLoteEmpty(r))loteEmptyRows++;
   });
+  const uniValMap=buildUniValidadeWmsMap();
   semValidadeData=[...groups.values()].filter(g=>{
     if(g.hasReal){excludedByReal++;return false;}
     if(!g.hasLoteSentinel&&!g.allLoteEmpty){excludedByLote++;return false;}
@@ -2702,6 +2780,7 @@ function buildSemValidade(){
     Lote_norm:g.Lote_norm,
     qt:g.qt,
     validade:g.loteValidade||(g.allLoteEmpty?'vazio':''),
+    validadeWms:lookupUniValidadeWms(g.EAN_norm,g.Lote_norm,uniValMap),
     cat:g.cat,
     subcat:g.subcat,
     sapCode:g.sapCode,
@@ -2765,6 +2844,7 @@ function _renderSemValidade(){
       <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm||'—'}</span></td>
       <td class="num">${fmt(r.qt)}</td>
       <td><span class="badge bwarn">${r.validade||'—'}</span></td>
+      <td><span class="badge ${r.validadeWms?'bok':'bneu'}">${r.validadeWms||'—'}</span></td>
       <td><span class="badge binfo">${catLbl||'—'}</span></td>
       <td><span class="badge bneu">${r.deposito||'—'}</span></td>
     `;
@@ -2787,7 +2867,8 @@ function exportSemValidadeXlsx(){
     Descricao:r.produto||'',
     Lote:r.Lote_norm,
     Qtd_Total:r.qt,
-    Validade:r.validade||'',
+    Validade_SAP:r.validade||'',
+    Validade_WMS:r.validadeWms||'',
     Categoria:r.cat||'',
     Deposito_SAP:r.deposito||''
   }));
