@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622430000 -->
+<!DOCTYPE html><!-- v20260622440000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -155,6 +155,16 @@ tr.dr td:first-child{border-left:3px solid var(--red);}
 
 /* RECOMENDACAO */
 .rec-auto{font-size:10px;padding:2px 7px;border-radius:3px;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;font-style:italic;}
+.occ-reco{display:flex;flex-direction:column;gap:6px;min-width:220px;}
+.occ-reco-block{border:1px solid var(--border);border-radius:6px;padding:6px 8px;background:#fafbfc;}
+.occ-reco-head{font-size:10px;font-weight:600;color:var(--text2);margin-bottom:4px;line-height:1.3;}
+.occ-reco-step{display:grid;grid-template-columns:16px 1fr;gap:4px 6px;align-items:start;margin-top:3px;}
+.occ-reco-step:first-of-type{margin-top:0;}
+.occ-reco-num{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--blue);line-height:1.5;}
+.occ-reco-body{font-size:11px;line-height:1.45;}
+.occ-reco-route{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;}
+.occ-reco-meta{font-size:10px;color:var(--muted);margin-top:2px;}
+.occ-reco-warn .occ-reco-block{background:#fffbeb;border-color:#fde68a;}
 
 /* PROGRESS */
 .pw{background:var(--bg4);border-radius:3px;height:6px;overflow:hidden;min-width:60px;}
@@ -717,6 +727,10 @@ select.cad-inp{cursor:pointer;}
     <div class="card">
       <div class="ch"><div class="ct">Stock vs Ocupação de Posições</div><button class="btn bg bs" onclick="exportOccXlsx()">⬇ Excel</button></div>
       <div class="tb">
+        <div class="tw" onclick="toggleShowAllOcc()">
+          <div class="tg" id="showAllOccTg"><div class="tk"></div></div>
+          <span id="tgOccLbl">Só otimizável</span>
+        </div>
         <input class="inp is" id="ovSrch" placeholder="EAN, código SAP ou descrição…" oninput="renderOccView()">
         <div class="ms-wrap" id="ms-ovCat" data-placeholder="Categorias" data-onchange="renderOccView"><div class="ms-btn" onclick="msTogOpen('ovCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('ovCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('ovCat')">Todas</button><button onclick="msClrAll('ovCat')">Limpar</button></div><div class="ms-list"></div></div></div>
         <div class="ms-wrap" id="ms-ovSub" data-placeholder="Subcategorias" data-onchange="renderOccView"><div class="ms-btn" onclick="msTogOpen('ovSub')"><span class="ms-btn-lbl">Todas as subcategorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('ovSub',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('ovSub')">Todas</button><button onclick="msClrAll('ovSub')">Limpar</button></div><div class="ms-list"></div></div></div>
@@ -731,15 +745,13 @@ select.cad-inp{cursor:pointer;}
           <option value="44">0044 — Avarias</option>
         </select>
         <select class="inp" id="ovAlerta" onchange="renderOccView()">
-          <option value="">Todos</option>
-          <option value="sub">Com oportunidade</option>
+          <option value="">Todos os parâmetros</option>
           <option value="sem">Sem parâmetro</option>
         </select>
       </div>
       <div class="kr" id="ovKpis"></div>
       <div class="tw2"><table id="ovTable">
         <thead><tr>
-          <th onclick="doSort('occ','sapCode')">Cód. SAP</th>
           <th onclick="doSort('occ','ean')">EAN</th>
           <th onclick="doSort('occ','cat')">Categoria</th>
           <th onclick="doSort('occ','subcat')">Subcategoria</th>
@@ -749,7 +761,7 @@ select.cad-inp{cursor:pointer;}
           <th class="num" onclick="doSort('occ','posReal')">Pos. Reais</th>
           <th class="num" onclick="doSort('occ','posOtimizadas')">Pos. Optimizadas</th>
           <th class="num" onclick="doSort('occ','poupanca')">Poupança</th>
-          <th>Depósito(s)</th><th>Recomendação</th>
+          <th>Recomendação</th>
         </tr></thead>
         <tbody id="ovBody"></tbody>
       </table></div>
@@ -1258,7 +1270,7 @@ let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','Total',''];
 
 let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,valConflData=[],valConflStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={},suspValidados=new Set(),suspValidadosOcultos=0;
-let showAll=false,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
+let showAll=false,showAllOcc=false,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
 async function init(){
@@ -4455,6 +4467,12 @@ function updateOccFilters(){
 function isOccPKEnd(end){return end&&String(end).includes('PK');}
 function isOccDCEnd(end){return end&&String(end).includes('DC');}
 function occEndChip(end,isPK){return`<span style="font-family:var(--mono);background:${isPK?'#dbeafe':'#dcfce7'};padding:1px 5px;border-radius:3px">${end}</span>`;}
+function occRecoStep(n,body,meta){
+  return`<div class="occ-reco-step"><span class="occ-reco-num">${n}</span><div class="occ-reco-body">${body}${meta?`<div class="occ-reco-meta">${meta}</div>`:''}</div></div>`;
+}
+function occRecoMoveBody(fromEnd,toEnd,qty){
+  return`<strong>${fmt(qty)} un</strong><div class="occ-reco-route">${occEndChip(fromEnd,isOccPKEnd(fromEnd))}<span style="color:var(--muted)">→</span>${occEndChip(toEnd,isOccPKEnd(toEnd))}</div>`;
+}
 function findOccConsolidationPairs(enderecos,qpp){
   if(!enderecos||enderecos.length<2||!qpp)return[];
   const items=enderecos.map((e,i)=>({end:e.end,qt:e.qt,i}));
@@ -4546,40 +4564,50 @@ function occExcessMoveHint(l,qpp){
 function occRecomendacaoHtml(r){
   const qpp=r.qpp||r.param?.qty_per_pos||0;
   if(r.param&&r.param.lote_obrigatorio===false&&r.nLotes>1){
-    return`<div><span class="badge bwarn" style="background:#fde68a;color:#92400e">⚠ Produto sem lote — ${r.nLotes} lotes no Unilog</span><div style="font-size:10px;color:var(--text2);margin-top:3px">▸ Solicitar à Unilog: remover lotes e unificar posições</div></div>`;
+    return`<div class="occ-reco occ-reco-warn"><div class="occ-reco-block">${occRecoStep(1,'<span class="badge bwarn">⚠ Produto sem lote</span>','Solicitar à Unilog: unificar '+r.nLotes+' lotes numa só posição')}</div></div>`;
   }
   if(!r.param)return'<span class="badge bgray">Sem parâm.</span>';
   if(r.nLotes===0)return'—';
   const blocks=[];
+  let stepN=0;
   const consol=r.loteDetail.filter(l=>l.consolidacao&&l.consolidacao.doadores?.length);
-  if(consol.length){
-    const consolHtml=consol.map(l=>{
-      const{doadores,posExcesso}=l.consolidacao;
-      const badgeColor=l.consolidacao.receptorIsPK?'#dbeafe':'#dcfce7';
-      const badgeLabel=l.consolidacao.receptorIsPK?'📦 PP→PK':'📦 Consolidar PP';
-      return`<div style="font-size:10px;margin-top:3px"><span class="badge binfo" style="background:${badgeColor}">${badgeLabel} — Lote ${l.lote||'—'} (${posExcesso} pos.)</span>${doadores.map(d=>`<div style="font-size:10px;color:var(--text2);margin-top:2px;padding-left:8px">▸ Mover <strong>${fmt(d.qt)}</strong> un de ${occEndChip(d.end,false)} → ${occEndChip(d.receptor,d.receptorIsPK)} <span style="color:var(--muted)">(liberta 1 pos., QPP ${fmt(qpp)})</span></div>`).join('')}</div>`;
+  consol.forEach(l=>{
+    const{posExcesso,receptorIsPK,doadores}=l.consolidacao;
+    const headLabel=receptorIsPK?'Consolidar PP → PK':'Consolidar posições PP';
+    const steps=doadores.map(d=>{
+      stepN++;
+      return occRecoStep(stepN,occRecoMoveBody(d.end,d.receptor,d.qt),'Liberta 1 pos. · QPP '+fmt(qpp));
     }).join('');
-    blocks.push(`<span class="badge binfo">🔧 ${consol.length} consolid.</span>${consolHtml}`);
-  }
+    blocks.push(`<div class="occ-reco-block"><div class="occ-reco-head">🔧 ${headLabel} · Lote ${l.lote||'—'} · ${posExcesso} pos.</div>${steps}</div>`);
+  });
   if(r.poupanca>0&&consol.length===0){
-    const excessHtml=r.loteDetail.map(l=>{
+    const excessSteps=[];
+    r.loteDetail.forEach(l=>{
       const hint=occExcessMoveHint(l,qpp);
-      if(!hint)return'';
-      const{excess,donor,target,cap}=hint;
-      if(target&&donor.qt<=cap){
-        return`<div style="font-size:10px;color:var(--text2);margin-top:2px;padding-left:8px">▸ Lote ${l.lote||'—'}: libertar <strong>${excess}</strong> pos. — mover <strong>${fmt(donor.qt)}</strong> un de ${occEndChip(donor.end,isOccPKEnd(donor.end))} → ${occEndChip(target.end,isOccPKEnd(target.end))} <span style="color:var(--muted)">(QPP ${fmt(qpp)}, cabem ${fmt(cap)} un)</span></div>`;
+      if(!hint)return;
+      const{excess,donor,target}=hint;
+      stepN++;
+      if(target&&donor.qt<=hint.cap){
+        excessSteps.push(occRecoStep(stepN,occRecoMoveBody(donor.end,target.end,donor.qt),'Lote '+(l.lote||'—')+' · liberta '+excess+' pos. · QPP '+fmt(qpp)));
+      }else{
+        excessSteps.push(occRecoStep(stepN,`<strong>${fmt(donor.qt)} un</strong> em ${occEndChip(donor.end,isOccPKEnd(donor.end))}${target?' → '+occEndChip(target.end,isOccPKEnd(target.end)):''}`,'Lote '+(l.lote||'—')+' · '+l.posReais+' pos. vs mín. '+l.posMinima+' · QPP '+fmt(qpp)));
       }
-      return`<div style="font-size:10px;color:var(--text2);margin-top:2px;padding-left:8px">▸ Lote ${l.lote||'—'}: <strong>${l.posReais}</strong> pos. vs mín. <strong>${l.posMinima}</strong> (QPP ${fmt(qpp)}) — consolidar ${occEndChip(donor.end,isOccPKEnd(donor.end))} (${fmt(donor.qt)} un)${target?` com ${occEndChip(target.end,isOccPKEnd(target.end))}`:' com outra posição parcial'}</div>`;
-    }).filter(Boolean).join('');
-    if(excessHtml)blocks.push(`<span class="badge binfo">🔧 Libertar ${r.poupanca} pos.</span>${excessHtml}`);
-    else blocks.push(`<span class="badge binfo">🔧 Libertar ${r.poupanca} pos.</span><div style="font-size:10px;color:var(--text2);margin-top:2px;padding-left:8px">▸ ${r.posReal} pos. reais vs ${r.posMinimaTotal} mín. teórico (QPP ${fmt(qpp)}) — consolidar posições parciais</div>`);
+    });
+    if(excessSteps.length){
+      blocks.push(`<div class="occ-reco-block"><div class="occ-reco-head">🔧 Libertar ${r.poupanca} pos.</div>${excessSteps.join('')}</div>`);
+    }else{
+      blocks.push(`<div class="occ-reco-block"><div class="occ-reco-head">🔧 Libertar ${r.poupanca} pos.</div>${occRecoStep(1,r.posReal+' pos. reais vs '+r.posMinimaTotal+' mín. teórico','Consolidar posições parciais · QPP '+fmt(qpp))}</div>`);
+    }
   }
   const dcLotes=r.loteDetail.filter(l=>l.qtDC>0);
   if(dcLotes.length){
-    const dcHtml=dcLotes.map(l=>`<div style="font-size:10px;color:var(--text2);margin-top:2px">▸ Lote ${l.lote||'—'}: <strong>${fmt(l.qtDC)}</strong> un em DOCA — armazenar</div>`).join('');
-    blocks.push(`<div><span class="badge bwarn">🚚 Stock em DOCA</span>${dcHtml}</div>`);
+    const dcSteps=dcLotes.map(l=>{
+      stepN++;
+      return occRecoStep(stepN,'<strong>'+fmt(l.qtDC)+' un</strong> em DOCA','Lote '+(l.lote||'—')+' · armazenar em posição');
+    }).join('');
+    blocks.push(`<div class="occ-reco-block"><div class="occ-reco-head">🚚 Stock em DOCA</div>${dcSteps}</div>`);
   }
-  if(blocks.length)return blocks.join('');
+  if(blocks.length)return`<div class="occ-reco">${blocks.join('')}</div>`;
   if(r.posReal>0&&qpp>0)return'<span class="badge bok">✓ Posições cheias</span>';
   return'—';
 }
@@ -4611,9 +4639,10 @@ function occRecomendacaoText(r){
 
 // ── RENDER OCC VIEW ──
 let _renderOccViewBusy=false;
+function toggleShowAllOcc(){showAllOcc=!showAllOcc;document.getElementById('showAllOccTg').classList.toggle('on',showAllOcc);document.getElementById('tgOccLbl').textContent=showAllOcc?'Mostrar tudo':'Só otimizável';renderOccView();}
 function renderOccView(){if(_renderOccViewBusy)return;_renderOccViewBusy=true;try{_renderOccView();}finally{_renderOccViewBusy=false;}}
 function _renderOccView(){
-  if(!uniData){document.getElementById('ovBody').innerHTML='<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros para ver a ocupação</td></tr>';return;}
+  if(!uniData){document.getElementById('ovBody').innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros para ver a ocupação</td></tr>';return;}
   const srch=document.getElementById('ovSrch').value.toLowerCase();
   const depF=[...msGetVals("ovDep")][0]||"";
   const alertF=[...msGetVals("ovAlerta")][0]||"";
@@ -4632,8 +4661,8 @@ function _renderOccView(){
   if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.ean,r.desc));
   if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
   if(selSubs.size)rows=rows.filter(r=>selSubs.has(r.subcat));
-  if(alertF==='sub')rows=rows.filter(r=>r.underutil);
-  else if(alertF==='sem')rows=rows.filter(r=>!r.param);
+  if(!showAllOcc)rows=rows.filter(r=>r.underutil);
+  if(alertF==='sem')rows=rows.filter(r=>!r.param);
   if(sorts['occ'])applySort('occ',rows);
   else rows.sort((a,b)=>{const cc=String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'));if(cc!==0)return cc;const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;return String(a.desc||'').localeCompare(String(b.desc||''));});
   updateSortHeaders('occ');
@@ -4651,11 +4680,8 @@ function _renderOccView(){
   const body=document.getElementById('ovBody');body.innerHTML='';
   for(const r of rows){
     const alert=occRecomendacaoHtml(r);
-    const deps=DKS.filter(dk=>(reconData[dk]||[]).some(x=>x.EAN_norm===r.ean));
-    const depHtml=deps.length?deps.map(dk=>`<span class="badge bgray" style="margin-right:2px">${DEPOT_MAP[dk].label.split('—')[1].trim()}</span>`).join(''):'—';
     const tr=document.createElement('tr');if(r.underutil)tr.style.background='#fffbeb';
     tr.innerHTML=`
-      <td>${sapCodeHtml(r.ean)}</td>
       <td><span class="badge bneu">${r.ean}</span></td>
       <td style="font-size:11px">${r.cat||'—'}</td>
       <td style="font-size:11px">${r.subcat||'—'}</td>
@@ -4665,12 +4691,11 @@ function _renderOccView(){
       <td class="num"><strong>${fmt(r.posReal)}</strong></td>
       <td class="num">${r.posOtimizadas!==null?fmt(r.posOtimizadas):'—'}</td>
       <td class="num">${r.poupanca>0?`<strong style="color:var(--red)">-${fmt(r.poupanca)}</strong>`:'—'}</td>
-      <td style="font-size:11px">${depHtml}</td>
       <td class="col-reco">${alert}</td>
     `;
     body.appendChild(tr);
   }
-  if(!rows.length)eRow(body,14,'Nenhum resultado');
+  if(!rows.length)eRow(body,10,'Nenhum resultado');
   scheduleColResize();
 }
 
@@ -4729,22 +4754,24 @@ function exportOccXlsx(){
   const filteredClasses=depF?(depClassMap[depF]||[]):null;
   const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
   const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
-  let rows=buildOccRows(uniFiltered,descMap).map(r=>{
-    const deps=DKS.filter(dk=>(reconData[dk]||[]).some(x=>x.EAN_norm===r.ean)).map(dk=>DEPOT_MAP[dk].label.split('—')[1].trim()).join(', ');
-    return{Categoria:r.cat||'',Subcategoria:r.subcat||'',Cod_SAP:getSapCode(r.ean),EAN:r.ean,Descricao:r.desc,Depositos:deps,StockUnilog:r.qt,UnPosicao:r.qpp||'',PosReais:r.posReal,PosOptimizadas:r.posOtimizadas,PosALibertar:r.poupanca||'',LoteObrigatorio:r.param?.lote_obrigatorio!==false?'Sim':'Não',Recomendacao:occRecomendacaoText(r),_row:r};
-  });
+  let rows=buildOccRows(uniFiltered,descMap).map(r=>({
+    Categoria:r.cat||'',Subcategoria:r.subcat||'',EAN:r.ean,Descricao:r.desc,
+    StockUnilog:r.qt,UnPosicao:r.qpp||'',PosReais:r.posReal,PosOptimizadas:r.posOtimizadas,
+    PosALibertar:r.poupanca||'',LoteObrigatorio:r.param?.lote_obrigatorio!==false?'Sim':'Não',
+    Recomendacao:occRecomendacaoText(r),_row:r
+  }));
   // Apply filters
   if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN,r.Descricao));
   if(selCats.size)rows=rows.filter(r=>selCats.has(r.Categoria));
   if(selSubs.size)rows=rows.filter(r=>selSubs.has(r.Subcategoria));
-  if(alertF==='sub')rows=rows.filter(r=>r._row.underutil);
-  else if(alertF==='sem')rows=rows.filter(r=>!r.UnPosicao);
+  if(!showAllOcc)rows=rows.filter(r=>r._row.underutil);
+  if(alertF==='sem')rows=rows.filter(r=>!r.UnPosicao);
   rows=rows.map(({_row,...rest})=>rest);
   rows.sort((a,b)=>{const cc=String(a.Categoria||'zzz').localeCompare(String(b.Categoria||'zzz'));if(cc!==0)return cc;const sc=String(a.Subcategoria||'').localeCompare(String(b.Subcategoria||''));if(sc!==0)return sc;return String(a.Descricao||'').localeCompare(String(b.Descricao||''));});
   if(!rows.length){toast('Sem dados para exportar','error');return;}
   const ws=XLSX.utils.json_to_sheet(rows);
   // Column widths
-  ws['!cols']=[{wch:20},{wch:20},{wch:16},{wch:35},{wch:25},{wch:12},{wch:8},{wch:10},{wch:12},{wch:12},{wch:14},{wch:60}];
+  ws['!cols']=[{wch:20},{wch:20},{wch:35},{wch:12},{wch:8},{wch:10},{wch:12},{wch:12},{wch:14},{wch:60}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Ocupação');
   XLSX.writeFile(wb,`ocupacao_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
@@ -6329,7 +6356,7 @@ const TABLE_COL_PROFILES={
   valConflTable:['lote','desc','sistema','validade','validade','flex','narrow','num','num','dep','dep'],
   cadTable:['cat','subcat','sap','ean','desc','flex','num','num','num','num','bool','bool','bool','notes'],
   dupTable:['ean','desc','narrow','flex','flex'],
-  ovTable:['sap','ean','cat','subcat','desc','num','num','num','num','num','flex','reco'],
+  ovTable:['ean','cat','subcat','desc','num','num','num','num','num','reco'],
   recTable:['narrow','date','estado','flex','desc','flex','estado','flex','date','action'],
   auditTable:['cat','sap','ean','desc','num','bool','action'],
   transEcTable:['cat','sap','ean','desc','num','num','num','num','numWide','num','flex','estado'],
