@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622350000 -->
+<!DOCTYPE html><!-- v20260622360000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1918,6 +1918,7 @@ function buildEanAgg({catFilter=null}={}){
     else if(!byEan[ean].desc&&desc)byEan[ean].desc=desc;
   }
   for(const dk of DKS){
+    if(DEPOT_MAP[dk]?.catOnly)continue;
     depQtSap[dk]={};depQtUni[dk]={};
     for(const r of sapRowsForDepot(dk)){
       const param=occParams.find(p=>p.ean===r.EAN_norm);
@@ -1937,6 +1938,7 @@ function buildEanAgg({catFilter=null}={}){
   for(const ean of Object.keys(byEan)){
     let difQt=0;const depDiffs=[];
     for(const dk of DKS){
+      if(DEPOT_MAP[dk]?.catOnly)continue;
       const sap=depQtSap[dk]?.[ean]||0,uni=depQtUni[dk]?.[ean]||0;
       const diff=sap-uni;
       difQt+=diff;
@@ -1953,6 +1955,7 @@ function auditEanCoverage(){
   const aggEans=new Set(Object.keys(agg));
   const uniEans=new Set(),sapEans=new Set();
   for(const dk of DKS){
+    if(DEPOT_MAP[dk]?.catOnly)continue;
     uniRowsForDepot(dk).forEach(r=>{if(r.EAN_norm)uniEans.add(r.EAN_norm);});
     sapRowsForDepot(dk).forEach(r=>{if(r.EAN_norm)sapEans.add(r.EAN_norm);});
   }

@@ -1,5 +1,5 @@
 # Servidor local para Performance Logística (SAP x Unilog)
-$port = 8080
+$port = 5500
 $root = $PSScriptRoot
 
 $mime = @{
