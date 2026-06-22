@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622420000 -->
+<!DOCTYPE html><!-- v20260622430000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2013,10 +2013,9 @@ function auditEanCoverage(){
 }
 function calcEanViewKpis(rows,precoMap){
   const eans=new Set(rows.map(r=>r.EAN_norm));
-  let difQt=0,difVlr=0,valorSap=0,valorUni=0,temPrecoWms=false;
+  let difVlr=0,valorSap=0,valorUni=0,temPrecoWms=false;
   for(const r of rows){
     const semValor=r.semValor||isExcluidoDifStock(r.EAN_norm,null,r.desc);
-    difQt+=r.qt_sap-r.qt_uni;
     if(semValor)continue;
     const preco=precoMap[r.EAN_norm]||0;
     difVlr+=(r.qt_sap-r.qt_uni)*preco;
@@ -2034,7 +2033,7 @@ function calcEanViewKpis(rows,precoMap){
     }
   }
   const temPreco=Object.values(precoMap).some(p=>p>0)||temPrecoWms;
-  return{difQt,difVlr,valorSap,valorUni,temPreco};
+  return{difVlr,valorSap,valorUni,temPreco};
 }
 function sumEanValorDiff(rows,precoMap){
   const pm=precoMap||buildSapPrecoMap();
@@ -2056,7 +2055,7 @@ function uniRowsForDepot(dk){
 }
 function calcReconTotals({catFilter=null,subcatFilter=null,depotFilter=null,diffOnly=false,rowPredicate=null}={}){
   const precoMap=buildSapPrecoMap();
-  let totalNetDiff=0,totalValorLiq=0,qtSap=0,qtUni=0,valorSap=0,valorUni=0;
+  let totalValorLiq=0,qtSap=0,qtUni=0,valorSap=0,valorUni=0;
   const sapPairs=new Set(),uniPairs=new Set();
   const dks=depotFilter?[depotFilter]:DKS;
   const wmsKeys=diffOnly||rowPredicate?new Set():null;
@@ -2069,7 +2068,6 @@ function calcReconTotals({catFilter=null,subcatFilter=null,depotFilter=null,diff
       if(diffOnly&&r.diff===0)continue;
       const exclValor=isExcluidoDifStock(r.EAN_norm,dk,r.desc);
       const preco=precoMap[r.EAN_norm]||0;
-      totalNetDiff+=r.diff;
       if(!exclValor)totalValorLiq+=r.diff*preco;
       qtSap+=r.qt_sap;
       qtUni+=r.qt_uni;
@@ -2096,7 +2094,7 @@ function calcReconTotals({catFilter=null,subcatFilter=null,depotFilter=null,diff
       }
     }
   }
-  return{totalNetDiff,totalValorLiq,difQt:totalNetDiff,difVlr:totalValorLiq,qtSap,qtUni,valorSap,valorUni,sapPairs,uniPairs,temPreco:Object.values(precoMap).some(p=>p>0)||temPrecoWms,precoMap};
+  return{totalValorLiq,difVlr:totalValorLiq,qtSap,qtUni,valorSap,valorUni,sapPairs,uniPairs,temPreco:Object.values(precoMap).some(p=>p>0)||temPrecoWms,precoMap};
 }
 
 function calcValorGapByEan({catFilter=null}={}){
@@ -3487,12 +3485,11 @@ function recalcBanner(){
   if(!kpisEl||!sapData)return;
   const selCats=msGet('bannerCat');
   const catFilter=selCats.size?selCats:null;
-  const recon=Object.keys(reconData).length?calcReconTotals({catFilter}):{sapPairs:new Set(),uniPairs:new Set(),qtSap:0,qtUni:0,difQt:0,difVlr:0,valorSap:0,valorUni:0,temPreco:false};
+  const recon=Object.keys(reconData).length?calcReconTotals({catFilter}):{sapPairs:new Set(),uniPairs:new Set(),qtSap:0,qtUni:0,difVlr:0,valorSap:0,valorUni:0,temPreco:false};
   const sapPairs=recon.sapPairs;
   const uniPairs=recon.uniPairs;
   const qtSap=recon.qtSap;
   const qtUni=recon.qtUni;
-  const difQt=recon.difQt;
   const difVlr=recon.difVlr;
   const temVlr=recon.temPreco;
   kpisEl.className='kr';
@@ -3502,7 +3499,6 @@ function recalcBanner(){
     <div class="kpi"><div class="kl">EAN+Lote WMS</div><div class="kv">${fmtKvNum(uniPairs.size)}</div></div>
     <div class="kpi"><div class="kl">Qtd SAP</div><div class="kv">${fmtKvNum(qtSap)}</div></div>
     <div class="kpi"><div class="kl">Qtd WMS</div><div class="kv">${fmtKvNum(qtUni)}</div></div>
-    <div class="kpi"><div class="kl">Dif. Qtd</div><div class="kv ${kvLiqCls(difQt)}">${fmtKvSigned(difQt)}</div></div>
     ${temVlr?`
     <div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fmtKvBrl(recon.valorSap)}</div><div class="ks">preço SAP × qtd · ${RECON_EXCL_KS}</div></div>
     <div class="kpi"><div class="kl">Valor WMS</div><div class="kv b">${fmtKvBrl(recon.valorUni)}</div><div class="ks">preço WMS × qtd · ${RECON_EXCL_KS}</div></div>
@@ -3746,7 +3742,6 @@ function _renderEanView(){
     <div class="kpi"><div class="kl">EANs</div><div class="kv">${fmtKvNum(rows.length)}</div><div class="ks">${srch?'com filtros':'na grelha'} · ${fmtKvNum(allRows.length)} total</div></div>
     <div class="kpi"><div class="kl">Com divergência</div><div class="kv r">${fmtKvNum(comDiff)}</div><div class="ks">${rows.length?Math.round(comDiff/rows.length*100):0}%</div></div>
     <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmtKvNum(rows.length-comDiff)}</div></div>
-    <div class="kpi"><div class="kl">Dif. Qtd</div><div class="kv ${kvLiqCls(recon.difQt)}">${fmtKvSigned(recon.difQt)}</div><div class="ks">unidades · ${RECON_EXCL_KS}</div></div>
     ${kpiValorTotCards(recon.valorSap,recon.valorUni,temPreco)}
     ${temPreco?`<div class="kpi"><div class="kl">Dif. Valor</div><div class="kv ${kvLiqCls(recon.difVlr)}">${fmtKvBrlLiq(recon.difVlr)}</div><div class="ks">preço SAP × dif qtd · ${RECON_EXCL_KS}</div></div>`:''}
   `;
@@ -3929,7 +3924,6 @@ function _renderRecon(){
   const comDiff=rows.filter(r=>r.diff!==0).length;
   const okCount=rows.length-comDiff;
   const pct=rows.length>0?Math.round(okCount/rows.length*100):0;
-  const totalNetDiff=rows.reduce((s,r)=>s+r.diff,0);
   const totalValorLiq=rows.reduce((s,r)=>s+reconRowValor(r,precoMap,activeDepot),0);
   const isMuimDepot=!!DEPOT_MAP[activeDepot]?.catOnly;
   const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{qtKey:'qt_sap',dk:activeDepot});
@@ -3945,7 +3939,6 @@ function _renderRecon(){
     <div class="kpi"><div class="kl">Com diferença</div><div class="kv r">${fmtKvNum(comDiff)}</div></div>
     <div class="kpi"><div class="kl">Qt SAP</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_sap,0))}</div></div>
     <div class="kpi"><div class="kl">Qt Unilog</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_uni,0))}</div>${invResumo?`<div class="ks">resumo Unilog: ${invResumo.qtd.toLocaleString('pt-BR')} un</div>`:''}</div>
-    <div class="kpi"><div class="kl">Dif. qtd (líquido)</div><div class="kv ${kvLiqCls(totalNetDiff)}">${fmtKvSigned(totalNetDiff)}</div><div class="ks">unidades</div></div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
     ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtKvBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · ${RECON_EXCL_KS}</div></div>`:''}
   `;
