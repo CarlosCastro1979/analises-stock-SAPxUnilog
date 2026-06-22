@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622120000 -->
+<!DOCTYPE html><!-- v20260622150000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -3029,32 +3029,38 @@ async function loadFromDB(silent=false){
 // );
 // ALTER TABLE logistica_susp_validados ENABLE ROW LEVEL SECURITY;
 // CREATE POLICY "anon_all" ON logistica_susp_validados FOR ALL TO anon USING (true) WITH CHECK (true);
+function isSuspValidadosTableMissing(err){
+  return err&&/relation|does not exist|schema cache|PGRST205/i.test(err.message||'');
+}
+function toastSuspValidadosMissingTable(){
+  toast('Tabela logistica_susp_validados em falta. No Supabase SQL Editor: CREATE TABLE logistica_susp_validados (company text NOT NULL, EAN_norm text NOT NULL, Lote_norm text NOT NULL DEFAULT \'\', validated_at timestamptz DEFAULT now(), nota text, PRIMARY KEY (company,EAN_norm,Lote_norm)); depois ENABLE ROW LEVEL SECURITY + policy anon_all (ver SQL no código).','error');
+}
 async function loadSuspValidados(){
   try{
     const{data,error}=await db.from('logistica_susp_validados').select('EAN_norm,Lote_norm').eq('company',company);
     if(error){
-      if(/relation|does not exist|schema cache/i.test(error.message||''))toast('Tabela logistica_susp_validados em falta — ver SQL no código','error');
+      if(isSuspValidadosTableMissing(error))toastSuspValidadosMissingTable();
+      else toast('Erro ao carregar validados: '+error.message,'error');
       return;
     }
     suspValidados=new Set();
     if(data)data.forEach(r=>suspValidados.add(r.EAN_norm+'|'+(r.Lote_norm||'')));
-  }catch(e){}
+  }catch(e){toast('Erro ao carregar validados: '+e.message,'error');}
 }
 async function validateSusp(EAN_norm,Lote_norm){
-  const nota=window.prompt('Nota opcional (Enter para ignorar):','');
-  if(nota===null)return;
+  if(!db){toast('Sem ligação à base de dados','error');return;}
   const key=EAN_norm+'|'+(Lote_norm||'');
   try{
-    const{error}=await db.from('logistica_susp_validados').upsert({company,EAN_norm,Lote_norm:Lote_norm||'',validated_at:new Date().toISOString(),nota:nota||null},{onConflict:'company,EAN_norm,Lote_norm'});
+    const{error}=await db.from('logistica_susp_validados').upsert({company,EAN_norm,Lote_norm:Lote_norm||'',validated_at:new Date().toISOString(),nota:null},{onConflict:'company,EAN_norm,Lote_norm'});
     if(error){
-      if(/relation|does not exist|schema cache/i.test(error.message||''))toast('Tabela logistica_susp_validados em falta — ver SQL no código','error');
-      else toast('Erro: '+error.message,'error');
+      if(isSuspValidadosTableMissing(error))toastSuspValidadosMissingTable();
+      else toast('Erro ao validar: '+error.message,'error');
       return;
     }
     suspValidados.add(key);
     buildSusp();renderSusp();updateChip();
     toast('Lote validado — oculto da lista','success');
-  }catch(e){toast('Erro: '+e.message,'error');}
+  }catch(e){toast('Erro ao validar: '+e.message,'error');}
 }
 
 // ── NOTAS (inline recon) ──
@@ -3517,7 +3523,7 @@ function _renderSusp(){
       <td>${depotHtml||'—'}</td>
       <td>${simHtml}</td>
       <td>${recHtml}</td>
-      <td><button class="btn bg bs" title="Marcar como OK — desaparece da lista" onclick="validateSusp(${JSON.stringify(r.EAN_norm)},${JSON.stringify(r.Lote_norm)})">✓ Validar</button></td>
+      <td><button class="btn bg bs" title="Marcar como OK — desaparece da lista" onclick="validateSusp('${jsq(r.EAN_norm)}','${jsq(r.Lote_norm)}')">✓ Validar</button></td>
     `;
     body.appendChild(tr);
   }
@@ -4551,6 +4557,7 @@ function innerTab(name,el){el.closest('.page').querySelectorAll('.it').forEach(t
 // ── UTILS ──
 function fmt(n){if(n===null||n===undefined)return'—';return Number(n).toLocaleString('pt-BR');}
 function esc(s){return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+function jsq(s){return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
 function updateChip(){
   const c=document.getElementById('coChip');
   if(c){c.textContent=company;c.style.display='';}
@@ -4559,7 +4566,7 @@ function updateChip(){
   if(sel&&sel.value!==company)sel.value=company;
 }
 function eRow(body,cols,msg){const tr=document.createElement('tr');tr.innerHTML=`<td colspan="${cols}" style="text-align:center;color:var(--muted);padding:28px">${msg}</td>`;body.appendChild(tr);}
-function toast(msg,type='info'){const el=document.getElementById('toast');el.textContent=msg;el.className='show '+type;clearTimeout(el._t);el._t=setTimeout(()=>el.className='',3500);}
+function toast(msg,type='info'){const el=document.getElementById('toast');el.textContent=msg;el.className='show '+type;clearTimeout(el._t);el._t=setTimeout(()=>el.className='',type==='error'?8000:3500);}
 
 // ═══════════════════════════════════════════
 // RECLAMAÇÕES
