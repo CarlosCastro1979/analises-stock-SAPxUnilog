@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622240000 -->
+<!DOCTYPE html><!-- v20260622150000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1321,25 +1321,85 @@ function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XL
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
 
 // ── NORMALIZE ──
-function nEAN(v){if(v===null||v===undefined||v==='')return'';const s=String(v).trim();if(s.includes('e')||s.includes('E')||(s.includes('.')&&s.length>5)){try{return String(Math.round(parseFloat(s)));}catch(e){}}return s.replace(/\.0+$/,'');}
+function nEAN(v){
+  if(v===null||v===undefined||v==='')return'';
+  if(typeof v==='number'&&Number.isFinite(v)&&Math.abs(v)>=1e8)return String(Math.trunc(v));
+  const s=String(v).trim();
+  if(s.includes('e')||s.includes('E')||(s.includes('.')&&s.length>5)){
+    try{const f=parseFloat(s.replace(',','.'));if(Number.isFinite(f)&&Math.abs(f)>=1e8)return String(Math.trunc(f));}catch(e){}
+  }
+  return s.replace(/\.0+$/,'');
+}
 function nLote(v){if(v===null||v===undefined)return'';const s=String(v).trim();return(s===''||s==='nan'||s==='None')?'':s;}
 function isLoteSemControle(lote){const s=nLote(lote);if(!s)return false;const n=parseFloat(String(s).replace(',','.'));return !isNaN(n)&&n===1;}
 function nQty(v){if(v===null||v===undefined||v==='')return 0;const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?0:n;}
+const SAP_EAN_COLS=['EAN11','EAN','EAN/UPC','GTIN','Código EAN','Codigo EAN'];
+const SAP_VALIDADE_COLS=['Validade Lote','Validade Lote.','Validade Lote ','Data Validade','Validade'];
+const SAP_CENTRO_COLS=['Centro','Centro.','Plant','Planta'];
+const SAP_DEPOSITO_COLS=['Depósito','Deposito','Depósito.','Deposito.'];
+const SAP_LOTE_COLS=['Lote.','Lote','Lote '];
+function pickSapField(r,cols){
+  for(const c of cols){const v=r[c];if(v===null||v===undefined)continue;const s=String(v).trim();if(s&&s!=='—')return v;}
+  return'';
+}
+function sapDepotKey(v){
+  const n=Math.round(nQty(v||0));
+  return Number.isFinite(n)&&n>0?String(n):String(v??'').trim();
+}
+function syncCompanyDepotMap(){
+  company=document.getElementById('coSel')?.value||company;
+  DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
+  DKS=Object.keys(DEPOT_MAP);
+}
+function isSapDepotMapped(dk){return!!dk&&dk!=='MUIM'&&Object.prototype.hasOwnProperty.call(DEPOT_MAP,dk);}
+function pickSapEanField(r){return pickSapField(r,SAP_EAN_COLS);}
+function pickSapValidadeField(r){
+  for(const c of SAP_VALIDADE_COLS){
+    const raw=r[c];
+    if(raw===null||raw===undefined||raw==='')continue;
+    const n=normValidadeField(raw);
+    if(n)return n;
+    if(isExplicitValidadeSentinel(raw))return displayExplicitSentinel(raw);
+  }
+  return'';
+}
+function pickSapLoteField(r){return pickSapField(r,SAP_LOTE_COLS);}
+function refreshSapFromRaw(){
+  if(!window._rawSapRows?.length)return false;
+  syncCompanyDepotMap();
+  sapData=normSap(window._rawSapRows);
+  invalidateSapMaps();
+  invalidateReconExclEANs();
+  return true;
+}
 // Only process deposits defined in DEPOT_MAP — all others ignored automatically
 function normSapPecas(rows){
   return rows
-    .filter(r=>r['Centro']&&String(Math.round(nQty(r['Depósito']||0)))==='33')
-    .map(r=>({material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),qt:nQty(r['Quantidade']),preco:nQty(r['Preço']||r['Preco']||0),lote:nLote(r['Lote.'])}))
+    .filter(r=>pickSapField(r,SAP_CENTRO_COLS)&&sapDepotKey(pickSapField(r,SAP_DEPOSITO_COLS)||r['Depósito'])==='33')
+    .map(r=>({material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),qt:nQty(r['Quantidade']),preco:nQty(r['Preço']||r['Preco']||0),lote:nLote(pickSapLoteField(r))}))
     .filter(r=>r.material);
 }
 function normSap(rows){
-  return rows
-    .filter(r=>r['Centro']&&r['Depósito']!==undefined&&r['Depósito']!=='')
-    .map(r=>{
-      const ean=nEAN(r['EAN11']);
-      return {deposito:String(Math.round(nQty(r['Depósito']))),EAN_norm:ean||String(r['Material']||'').trim(),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(r['Lote.']),qt:nQty(r['Quantidade']),validade:String(r['Validade Lote']||'').trim(),preco:nQty(r['Preço']||r['Preco']||r['Preço Unit.']||r['Preço Unitário']||r['Price']||r['Valor']||0)};
+  const skipped={noCentro:0,noDep:0,depUnmapped:0,noEan:0};
+  const out=rows
+    .filter(r=>{
+      if(!pickSapField(r,SAP_CENTRO_COLS)){skipped.noCentro++;return false;}
+      const depRaw=pickSapField(r,SAP_DEPOSITO_COLS)||r['Depósito'];
+      if(depRaw===undefined||depRaw===''){skipped.noDep++;return false;}
+      return true;
     })
-    .filter(r=>Object.keys(DEPOT_MAP).includes(r.deposito)&&r.EAN_norm);
+    .map(r=>{
+      const ean=nEAN(pickSapEanField(r));
+      const dep=sapDepotKey(pickSapField(r,SAP_DEPOSITO_COLS)||r['Depósito']);
+      return {deposito:dep,EAN_norm:ean||String(r['Material']||'').trim(),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(pickSapLoteField(r)),qt:nQty(r['Quantidade']),validade:pickSapValidadeField(r),preco:nQty(r['Preço']||r['Preco']||r['Preço Unit.']||r['Preço Unitário']||r['Price']||r['Valor']||0)};
+    })
+    .filter(r=>{
+      if(!isSapDepotMapped(r.deposito)){skipped.depUnmapped++;return false;}
+      if(!r.EAN_norm){skipped.noEan++;return false;}
+      return true;
+    });
+  if(skipped.depUnmapped||skipped.noCentro)console.log('[normSap]',{in:rows.length,out:out.length,skipped,depots:DKS});
+  return out;
 }
 const UNI_CLASSE_COLS=['Classe','Class','CLASSE','Classe ','Class '];
 const UNI_CLASSE_ALIASES={
@@ -3898,9 +3958,7 @@ function _renderSusp(){
         const sapSemLote=sapData&&sapData.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm==='');
         recHtml=sapSemLote?'<span class="badge bwarn">Corrigir lote no WMS (SAP sem lote)</span>':'<span style="color:var(--muted);font-size:11px">Investigar</span>';
       }
-      const validarBtn=suspValidarBtn(r.EAN_norm,r.Lote_norm);
-      acaoHtml=validarBtn;
-      recHtml=`<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">${recHtml}${validarBtn}</div>`;
+      acaoHtml=suspValidarBtn(r.EAN_norm,r.Lote_norm);
     }
     const sisCls=r.sistema==='SAP'?'berr':r.sistema==='WMS'?'bwarn':r.sistema==='Ambos'?'bpurple':'bgray';
     const sisHtml=r.sistema?`<span class="badge ${sisCls}">${r.sistema}</span>`:'—';
