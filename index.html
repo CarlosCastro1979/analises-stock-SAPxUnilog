@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622184500 -->
+<!DOCTYPE html><!-- v20260623143000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1362,7 +1362,7 @@ function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok'
 
 // ── FILES ──
 function loadSap(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
-function loadUni(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{uniData=normUni(rows);logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
+function loadUni(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
 function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast('Erro: '+err.message,'error');}};r.readAsArrayBuffer(file);}
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
 
@@ -1383,6 +1383,7 @@ const SAP_EAN_COLS=['EAN11','EAN','EAN/UPC','GTIN','Código EAN','Codigo EAN'];
 const VALIDADE_LOTE_COLS=['Dt Venc','Dt. Venc','Dt Venc ','Data Venc','Data Vencimento','Validade Lote','Validade Lote.','Validade Lote ','Data Validade'];
 const SAP_VALIDADE_COLS=[...VALIDADE_LOTE_COLS,'Validade'];
 const SAP_CENTRO_COLS=['Centro','Centro.','Plant','Planta'];
+const SAP_CENTRO_BY_CO={DFB:'DFSP',QB:'QBSP'};
 const SAP_DEPOSITO_COLS=['Depósito','Deposito','Depósito.','Deposito.'];
 const SAP_LOTE_COLS=['Lote.','Lote','Lote '];
 function pickSapField(r,cols){
@@ -1393,12 +1394,35 @@ function sapDepotKey(v){
   const n=Math.round(nQty(v||0));
   return Number.isFinite(n)&&n>0?String(n):String(v??'').trim();
 }
+function normSapCentro(v){return String(v??'').trim().toUpperCase();}
+function getSapCentroForCo(co){return SAP_CENTRO_BY_CO[co||company]||'';}
+function pickSapCentroField(r){return normSapCentro(pickSapField(r,SAP_CENTRO_COLS));}
+function sapRowCentro(r){return normSapCentro(r?.centro||r?.Centro||'');}
+function sapRowMatchesCentro(r,co){
+  const expected=getSapCentroForCo(co);
+  if(!expected)return true;
+  return sapRowCentro(r)===normSapCentro(expected);
+}
+function getDepotMapForCo(co){return co==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;}
+function isSapDepotMappedForCo(dk,co){const m=getDepotMapForCo(co);return!!dk&&dk!=='MUIM'&&Object.prototype.hasOwnProperty.call(m,dk);}
+function filterSapRowsForCompany(rows,co){
+  return(rows||[]).filter(r=>isSapDepotMappedForCo(sapDepotKey(r.deposito),co)&&sapRowMatchesCentro(r,co));
+}
 function syncCompanyDepotMap(){
   company=document.getElementById('coSel')?.value||company;
   DEPOT_MAP=company==='QB'?DEPOT_MAP_QB:DEPOT_MAP_DFB;
   DKS=Object.keys(DEPOT_MAP);
 }
 function isSapDepotMapped(dk){return!!dk&&dk!=='MUIM'&&Object.prototype.hasOwnProperty.call(DEPOT_MAP,dk);}
+function getUniMappedClasses(){
+  const classes=new Set();
+  for(const dk of DKS)(DEPOT_MAP[dk]?.classes||[]).forEach(c=>classes.add(c));
+  return classes;
+}
+function filterUniForCompany(rows){
+  const classes=getUniMappedClasses();
+  return(rows||[]).filter(r=>classes.has(r.classe));
+}
 function pickSapEanField(r){return pickSapField(r,SAP_EAN_COLS);}
 function pickSapValidadeField(r){return pickValidadeFromCols(r,SAP_VALIDADE_COLS);}
 function pickSapLoteField(r){return pickSapField(r,SAP_LOTE_COLS);}
@@ -1418,10 +1442,13 @@ function normSapPecas(rows){
     .filter(r=>r.material);
 }
 function normSap(rows){
-  const skipped={noCentro:0,noDep:0,depUnmapped:0,noEan:0};
+  const expectedCentro=getSapCentroForCo();
+  const skipped={noCentro:0,centroMismatch:0,noDep:0,depUnmapped:0,noEan:0};
   const out=rows
     .filter(r=>{
-      if(!pickSapField(r,SAP_CENTRO_COLS)){skipped.noCentro++;return false;}
+      const centro=pickSapCentroField(r);
+      if(!centro){skipped.noCentro++;return false;}
+      if(expectedCentro&&centro!==normSapCentro(expectedCentro)){skipped.centroMismatch++;return false;}
       const depRaw=pickSapField(r,SAP_DEPOSITO_COLS)||r['Depósito'];
       if(depRaw===undefined||depRaw===''){skipped.noDep++;return false;}
       return true;
@@ -1429,14 +1456,14 @@ function normSap(rows){
     .map(r=>{
       const ean=nEAN(pickSapEanField(r));
       const dep=sapDepotKey(pickSapField(r,SAP_DEPOSITO_COLS)||r['Depósito']);
-      return {deposito:dep,EAN_norm:ean||String(r['Material']||'').trim(),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(pickSapLoteField(r)),qt:nQty(r['Quantidade']),validade:pickSapValidadeField(r),preco:nQty(r['Preço']||r['Preco']||r['Preço Unit.']||r['Preço Unitário']||r['Price']||r['Valor']||0)};
+      return {centro:pickSapCentroField(r),deposito:dep,EAN_norm:ean||String(r['Material']||'').trim(),material:String(r['Material']||'').trim(),desc:String(r['Descrição']||'').trim(),Lote_norm:nLote(pickSapLoteField(r)),qt:nQty(r['Quantidade']),validade:pickSapValidadeField(r),preco:nQty(r['Preço']||r['Preco']||r['Preço Unit.']||r['Preço Unitário']||r['Price']||r['Valor']||0)};
     })
     .filter(r=>{
       if(!isSapDepotMapped(r.deposito)){skipped.depUnmapped++;return false;}
       if(!r.EAN_norm){skipped.noEan++;return false;}
       return true;
     });
-  if(skipped.depUnmapped||skipped.noCentro)console.log('[normSap]',{in:rows.length,out:out.length,skipped,depots:DKS});
+  if(skipped.depUnmapped||skipped.noCentro||skipped.centroMismatch)console.log('[normSap]',{company,centro:expectedCentro,in:rows.length,out:out.length,skipped,depots:DKS});
   return out;
 }
 const UNI_CLASSE_COLS=['Classe','Class','CLASSE','Classe ','Class '];
@@ -3580,9 +3607,10 @@ async function loadFromDB(silent=false){
     const{data,error}=await db.from('logistica_stock').select('*').eq('id',company).single();
     if(error||!data){if(!silent)toast('Sem dados para '+company,'error');return;}
     company=data.company;syncCompanyDepotMap();
-    sapData=JSON.parse(data.sap_data).filter(r=>isSapDepotMapped(sapDepotKey(r.deposito)));
+    sapData=filterSapRowsForCompany(JSON.parse(data.sap_data),company);
     uniData=JSON.parse(data.unilog_data);
     refreshUniClasseNorm();
+    uniData=filterUniForCompany(uniData);
     invalidateSapMaps();
     // Load occParams first so MUIM category filtering works in buildRecon
     await loadOccParams();await loadSuspValidados();
@@ -5746,8 +5774,7 @@ async function renderAuditoria(){
   try{
     const{data:rec}=await db.from('logistica_stock').select('sap_data').eq('id','DFB').single();
     if(rec){
-      const allData=JSON.parse(rec.sap_data);
-      dfbData=allData;
+      dfbData=filterSapRowsForCompany(JSON.parse(rec.sap_data),'DFB');
     }
   }catch(e){}
   if(!dfbData&&company==='DFB'&&sapData)dfbData=sapData;
@@ -5930,7 +5957,7 @@ async function buildTransData(){
     } else {
       const{data:dfbRec}=await db.from('logistica_stock').select('sap_data').eq('id','DFB').single();
       if(!dfbRec){toast('Sem dados DFB — carrega o SAP DFB primeiro','error');return;}
-      dfbSapData=JSON.parse(dfbRec.sap_data).filter(r=>Object.keys(DEPOT_MAP_DFB).includes(r.deposito));
+      dfbSapData=filterSapRowsForCompany(JSON.parse(dfbRec.sap_data),'DFB');
     }
     // QB stock
     let qbSapData=null;
@@ -5938,7 +5965,7 @@ async function buildTransData(){
       qbSapData=sapData;
     } else {
       const{data:qbRec}=await db.from('logistica_stock').select('sap_data').eq('id','QB').single();
-      if(qbRec)qbSapData=JSON.parse(qbRec.sap_data).filter(r=>Object.keys(DEPOT_MAP_QB).includes(r.deposito));
+      if(qbRec)qbSapData=filterSapRowsForCompany(JSON.parse(qbRec.sap_data),'QB');
     }
     // Load sales from Supabase
     const{data:vendas,error}=await db.from('logistica_vendas').select('*').order('mes',{ascending:false});
