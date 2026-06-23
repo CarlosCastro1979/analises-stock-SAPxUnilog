@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622163000 -->
+<!DOCTYPE html><!-- v20260622184500 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -176,7 +176,9 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 .occ-moves-tbl col:nth-child(3){width:76px;}
 .occ-moves-tbl col:nth-child(4){width:60px;}
 .occ-moves-tbl th,.occ-moves-tbl td{padding:2px 4px;text-align:left;border-bottom:1px solid var(--border);line-height:1.3;}
-.occ-moves-tbl th{font-size:10px;color:var(--muted);font-weight:600;background:transparent;border-bottom:1px solid var(--border2);}
+.occ-moves-tbl thead tr{background:var(--navy3);border-bottom:1px solid var(--navy3);}
+.occ-moves-tbl th{font-size:10px;color:#fff;font-weight:600;background:var(--navy3);border-bottom:1px solid var(--border2);text-transform:none;letter-spacing:normal;font-family:inherit;cursor:default;}
+.occ-moves-tbl th:hover{color:#fff;}
 .occ-moves-tbl td.num{text-align:right;font-family:var(--mono);font-size:11px;}
 .occ-moves-tbl td:nth-child(4){font-size:10px;color:var(--text2);white-space:nowrap;}
 .occ-end-chip{font-family:var(--mono);font-size:10px;padding:1px 4px;border-radius:3px;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;line-height:1.35;}
@@ -186,12 +188,12 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 .occ-moves-alert-warn{color:var(--yellow);}
 #ovTable{table-layout:fixed;}
 #ovTable col.ov-col-ean{width:128px;}
-#ovTable col.ov-col-cat{width:88px;}
-#ovTable col.ov-col-subcat{width:88px;}
-#ovTable col.ov-col-desc{width:auto;}
+#ovTable col.ov-col-cat{width:72px;}
+#ovTable col.ov-col-subcat{width:72px;}
+#ovTable col.ov-col-desc{width:240px;}
 #ovTable col.ov-col-num{width:72px;}
 #ovTable col.ov-col-poup{width:56px;}
-#ovTable td.col-desc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;}
+#ovTable th.col-desc,#ovTable td.col-desc{max-width:240px;width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
 /* PROGRESS */
 .pw{background:var(--bg4);border-radius:3px;height:6px;overflow:hidden;min-width:60px;}
