@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622150000 -->
+<!DOCTYPE html><!-- v20260622163000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -169,15 +169,19 @@ tr.dr td:first-child{border-left:3px solid var(--red);}
 .occ-product-row--opt td{background:#fffbeb;}
 .occ-moves-sub td{padding:0 10px 8px 22px;border-top:none;background:transparent;}
 tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
-.occ-moves-wrap{padding:2px 0 4px 12px;margin-left:8px;border-left:2px solid var(--border2);}
-.occ-moves-tbl{border-collapse:collapse;font-size:11px;table-layout:fixed;width:380px;}
-.occ-moves-tbl col:nth-child(1){width:72px;}
-.occ-moves-tbl col:nth-child(2){width:112px;}
-.occ-moves-tbl col:nth-child(3){width:112px;}
-.occ-moves-tbl col:nth-child(4){width:84px;}
-.occ-moves-tbl th,.occ-moves-tbl td{padding:4px 8px;text-align:left;border-bottom:1px solid var(--border);}
+.occ-moves-wrap{padding:2px 0 3px 8px;margin-left:6px;border-left:2px solid var(--border2);max-width:280px;}
+.occ-moves-tbl{border-collapse:collapse;font-size:11px;table-layout:fixed;width:100%;max-width:280px;}
+.occ-moves-tbl col:nth-child(1){width:52px;}
+.occ-moves-tbl col:nth-child(2){width:76px;}
+.occ-moves-tbl col:nth-child(3){width:76px;}
+.occ-moves-tbl col:nth-child(4){width:60px;}
+.occ-moves-tbl th,.occ-moves-tbl td{padding:2px 4px;text-align:left;border-bottom:1px solid var(--border);line-height:1.3;}
 .occ-moves-tbl th{font-size:10px;color:var(--muted);font-weight:600;background:transparent;border-bottom:1px solid var(--border2);}
-.occ-moves-tbl td.num{text-align:right;font-family:var(--mono);}
+.occ-moves-tbl td.num{text-align:right;font-family:var(--mono);font-size:11px;}
+.occ-moves-tbl td:nth-child(4){font-size:10px;color:var(--text2);white-space:nowrap;}
+.occ-end-chip{font-family:var(--mono);font-size:10px;padding:1px 4px;border-radius:3px;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;line-height:1.35;}
+.occ-end-chip--de{background:#dcfce7;color:#166534;border:1px solid #bbf7d0;}
+.occ-end-chip--para{background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;}
 .occ-moves-alert{font-size:11px;padding:4px 0;}
 .occ-moves-alert-warn{color:var(--yellow);}
 #ovTable{table-layout:fixed;}
@@ -4492,12 +4496,12 @@ function updateOccFilters(){
 // ── OCC VIEW HELPERS ──
 function isOccPKEnd(end){return end&&String(end).includes('PK');}
 function isOccDCEnd(end){return end&&String(end).includes('DC');}
-function occEndChip(end,isPK){return`<span style="font-family:var(--mono);background:${isPK?'#dbeafe':'#dcfce7'};padding:1px 5px;border-radius:3px">${end}</span>`;}
+function occEndChip(end,role){const cls=role==='para'?'occ-end-chip occ-end-chip--para':'occ-end-chip occ-end-chip--de';return`<span class="${cls}" title="${end}">${end}</span>`;}
 function occRecoStep(n,body,meta){
   return`<div class="occ-reco-step"><span class="occ-reco-num">${n}</span><div class="occ-reco-body">${body}${meta?`<div class="occ-reco-meta">${meta}</div>`:''}</div></div>`;
 }
 function occRecoMoveBody(fromEnd,toEnd,qty){
-  return`<strong>${fmt(qty)} un</strong><div class="occ-reco-route">${occEndChip(fromEnd,isOccPKEnd(fromEnd))}<span style="color:var(--muted)">→</span>${occEndChip(toEnd,isOccPKEnd(toEnd))}</div>`;
+  return`<strong>${fmt(qty)} un</strong><div class="occ-reco-route">${occEndChip(fromEnd,'de')}<span style="color:var(--muted)">→</span>${occEndChip(toEnd,'para')}</div>`;
 }
 function findOccConsolidationPairs(enderecos,qpp){
   if(!enderecos||enderecos.length<2||!qpp)return[];
@@ -4627,8 +4631,8 @@ function occMovesSubRowHtml(r){
     return'';
   }
   const rows=info.moves.map(m=>{
-    const deCell=m.doca?`<span style="font-family:var(--mono);color:var(--yellow)">${m.de}</span>`:occEndChip(m.de,isOccPKEnd(m.de));
-    const paraCell=m.para&&m.para!=='—'?occEndChip(m.para,isOccPKEnd(m.para)):'—';
+    const deCell=m.doca?`<span style="font-family:var(--mono);color:var(--yellow)">${m.de}</span>`:occEndChip(m.de,'de');
+    const paraCell=m.para&&m.para!=='—'?occEndChip(m.para,'para'):'—';
     return`<tr><td class="num">${fmt(m.qt)}</td><td>${deCell}</td><td>${paraCell}</td><td>${m.liberta}</td></tr>`;
   }).join('');
   return`<div class="occ-moves-wrap"><table class="occ-moves-tbl"><colgroup><col><col><col><col></colgroup><thead><tr><th>Qt</th><th>De</th><th>Para</th><th>Liberta</th></tr></thead><tbody>${rows}</tbody></table></div>`;
