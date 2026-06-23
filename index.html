@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260622120000 -->
+<!DOCTYPE html><!-- v20260622150000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -165,14 +165,29 @@ tr.dr td:first-child{border-left:3px solid var(--red);}
 .occ-reco-route{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;}
 .occ-reco-meta{font-size:10px;color:var(--muted);margin-top:2px;}
 .occ-reco-warn .occ-reco-block{background:#fffbeb;border-color:#fde68a;}
-.occ-moves-sub td{padding:0 8px 10px 32px;border-top:none;background:#fafbfc;}
-tr.occ-moves-sub td:first-child{border-top:none;}
-.occ-moves-tbl{border-collapse:collapse;font-size:11px;}
-.occ-moves-tbl th,.occ-moves-tbl td{padding:4px 12px;text-align:left;border:1px solid var(--border);}
-.occ-moves-tbl th{font-size:10px;color:var(--muted);font-weight:600;background:var(--bg3);}
+.occ-product-row td{padding:7px 10px;font-size:12px;border-bottom:none;}
+.occ-product-row--opt td{background:#fffbeb;}
+.occ-moves-sub td{padding:0 10px 8px 22px;border-top:none;background:transparent;}
+tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
+.occ-moves-wrap{padding:2px 0 4px 12px;margin-left:8px;border-left:2px solid var(--border2);}
+.occ-moves-tbl{border-collapse:collapse;font-size:11px;table-layout:fixed;width:380px;}
+.occ-moves-tbl col:nth-child(1){width:72px;}
+.occ-moves-tbl col:nth-child(2){width:112px;}
+.occ-moves-tbl col:nth-child(3){width:112px;}
+.occ-moves-tbl col:nth-child(4){width:84px;}
+.occ-moves-tbl th,.occ-moves-tbl td{padding:4px 8px;text-align:left;border-bottom:1px solid var(--border);}
+.occ-moves-tbl th{font-size:10px;color:var(--muted);font-weight:600;background:transparent;border-bottom:1px solid var(--border2);}
 .occ-moves-tbl td.num{text-align:right;font-family:var(--mono);}
 .occ-moves-alert{font-size:11px;padding:4px 0;}
 .occ-moves-alert-warn{color:var(--yellow);}
+#ovTable{table-layout:fixed;}
+#ovTable col.ov-col-ean{width:128px;}
+#ovTable col.ov-col-cat{width:88px;}
+#ovTable col.ov-col-subcat{width:88px;}
+#ovTable col.ov-col-desc{width:auto;}
+#ovTable col.ov-col-num{width:72px;}
+#ovTable col.ov-col-poup{width:56px;}
+#ovTable td.col-desc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;}
 
 /* PROGRESS */
 .pw{background:var(--bg4);border-radius:3px;height:6px;overflow:hidden;min-width:60px;}
@@ -758,16 +773,20 @@ select.cad-inp{cursor:pointer;}
         </select>
       </div>
       <div class="kr" id="ovKpis"></div>
-      <div class="tw2"><table id="ovTable">
+      <div class="tw2"><table id="ovTable" data-fixed-cols="1">
+        <colgroup>
+          <col class="ov-col-ean"><col class="ov-col-cat"><col class="ov-col-subcat"><col class="ov-col-desc">
+          <col class="ov-col-num"><col class="ov-col-num"><col class="ov-col-num"><col class="ov-col-num"><col class="ov-col-poup">
+        </colgroup>
         <thead><tr>
-          <th onclick="doSort('occ','ean')">EAN</th>
+          <th class="col-ean" onclick="doSort('occ','ean')">EAN</th>
           <th onclick="doSort('occ','cat')">Categoria</th>
           <th onclick="doSort('occ','subcat')">Subcategoria</th>
-          <th onclick="doSort('occ','desc')">Descrição</th>
-          <th class="num" onclick="doSort('occ','qt')">Stock Unilog</th>
+          <th class="col-desc" onclick="doSort('occ','desc')">Descrição</th>
+          <th class="num" onclick="doSort('occ','qt')">Stock</th>
           <th class="num" onclick="doSort('occ','qpp')">Un/Pos</th>
           <th class="num" onclick="doSort('occ','posReal')">Pos. Reais</th>
-          <th class="num" onclick="doSort('occ','posOtimizadas')">Pos. Optimizadas</th>
+          <th class="num" onclick="doSort('occ','posOtimizadas')">Pos. Opt.</th>
           <th class="num" onclick="doSort('occ','poupanca')">Poupança</th>
         </tr></thead>
         <tbody id="ovBody"></tbody>
@@ -4612,7 +4631,7 @@ function occMovesSubRowHtml(r){
     const paraCell=m.para&&m.para!=='—'?occEndChip(m.para,isOccPKEnd(m.para)):'—';
     return`<tr><td class="num">${fmt(m.qt)}</td><td>${deCell}</td><td>${paraCell}</td><td>${m.liberta}</td></tr>`;
   }).join('');
-  return`<table class="occ-moves-tbl"><thead><tr><th>Qt</th><th>De</th><th>Para</th><th>Liberta</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return`<div class="occ-moves-wrap"><table class="occ-moves-tbl"><colgroup><col><col><col><col></colgroup><thead><tr><th>Qt</th><th>De</th><th>Para</th><th>Liberta</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function occRecomendacaoHtml(r){return occMovesSubRowHtml(r);}
 function occRecomendacaoText(r){
@@ -4668,11 +4687,12 @@ function _renderOccView(){
   `;
   const body=document.getElementById('ovBody');body.innerHTML='';
   for(const r of rows){
-    const tr=document.createElement('tr');if(r.underutil)tr.style.background='#fffbeb';
+    const tr=document.createElement('tr');
+    tr.className=r.underutil?'occ-product-row occ-product-row--opt':'occ-product-row';
     tr.innerHTML=`
       <td><span class="badge bneu">${r.ean}</span></td>
-      <td style="font-size:11px">${r.cat||'—'}</td>
-      <td style="font-size:11px">${r.subcat||'—'}</td>
+      <td style="font-size:11px;color:var(--text2)">${r.cat||'—'}</td>
+      <td style="font-size:11px;color:var(--text2)">${r.subcat||'—'}</td>
       <td class="col-desc" title="${esc(r.desc)}">${r.desc}</td>
       <td class="num">${fmt(r.qt)}</td>
       <td class="num">${r.param?fmt(r.param.qty_per_pos):'—'}</td>
@@ -4689,7 +4709,6 @@ function _renderOccView(){
     }
   }
   if(!rows.length)eRow(body,9,'Nenhum resultado');
-  scheduleColResize();
 }
 
 // ── OCC BASE ──
@@ -6349,7 +6368,7 @@ const TABLE_COL_PROFILES={
   valConflTable:['lote','desc','sistema','validade','validade','flex','narrow','num','num','dep','dep'],
   cadTable:['cat','subcat','sap','ean','desc','flex','num','num','num','num','bool','bool','bool','notes'],
   dupTable:['ean','desc','narrow','flex','flex'],
-  ovTable:['ean','cat','subcat','desc','num','num','num','num','num','reco'],
+  ovTable:['ean','cat','subcat','desc','num','num','num','num','num'],
   recTable:['narrow','date','estado','flex','desc','flex','estado','flex','date','action'],
   auditTable:['cat','sap','ean','desc','num','bool','action'],
   transEcTable:['cat','sap','ean','desc','num','num','num','num','numWide','num','flex','estado'],
@@ -6449,7 +6468,7 @@ function autoFitColumn(table,colIdx){
   saveColWidths(key,ths.map((t,j)=>parseInt(cg.children[j].style.width,10)||t.offsetWidth));
 }
 function initColResize(table){
-  if(!table||table.dataset.colResizeInit)return;
+  if(!table||table.dataset.colResizeInit||table.dataset.fixedCols)return;
   const ths=[...table.querySelectorAll('thead th')];
   if(!ths.length)return;
   table.dataset.colResizeInit='1';
