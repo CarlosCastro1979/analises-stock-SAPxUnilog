@@ -207,6 +207,67 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 .uz.loaded{border-color:var(--green);background:#f0fdf4;}
 .uz input{display:none;}
 
+/* FRETES CT-e × NF */
+#page-fretes .fte-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px;}
+#page-fretes .fte-tab{padding:10px 16px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
+#page-fretes .fte-tab.active{color:var(--red);border-bottom-color:var(--red);}
+#page-fretes .kpis,#page-fretes .fte-kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:16px 0;}
+@media(max-width:1100px){#page-fretes .kpis,#page-fretes .fte-kpis{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:640px){#page-fretes .kpis,#page-fretes .fte-kpis{grid-template-columns:repeat(2,1fr);}}
+#page-fretes .kpi{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;}
+#page-fretes .kpi .label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;font-weight:600;}
+#page-fretes .kpi .value{font-size:20px;font-weight:700;font-family:var(--mono);}
+#page-fretes .kpi .sub{font-size:11px;color:var(--muted);margin-top:2px;}
+#page-fretes .kpi.flag .value{color:var(--red);}
+#page-fretes .breakdown{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;}
+@media(max-width:900px){#page-fretes .breakdown{grid-template-columns:repeat(2,1fr);}}
+#page-fretes .bd-card{border-radius:8px;padding:12px 14px;border:1px solid var(--border);cursor:pointer;transition:.15s;}
+#page-fretes .bd-card:hover,#page-fretes .bd-card.active{box-shadow:0 0 0 2px var(--red);border-color:var(--red);}
+#page-fretes .bd-ok{background:#f0fdf4;}#page-fretes .bd-ok .n{color:var(--green);}
+#page-fretes .bd-min{background:#fffbeb;}#page-fretes .bd-min .n{color:var(--yellow);}
+#page-fretes .bd-dev{background:#eff6ff;}#page-fretes .bd-dev .n{color:var(--blue);}
+#page-fretes .bd-flag{background:#fef2f2;}#page-fretes .bd-flag .n{color:var(--red);}
+#page-fretes .bd-low{background:#f3f4f6;}#page-fretes .bd-low .n{color:#555;}
+#page-fretes .bd-card .n{font-size:16px;font-weight:700;}
+#page-fretes .bd-card .t{font-size:11px;margin-top:4px;line-height:1.4;color:var(--text2);}
+#page-fretes .reconcile{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:0 0 16px;font-size:12px;line-height:1.6;}
+#page-fretes .reconcile .eq{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;margin-top:8px;}
+#page-fretes .reconcile .chip{background:var(--bg4);border-radius:6px;padding:5px 9px;font-size:11px;}
+#page-fretes .reconcile .chip.pos{color:var(--red);}#page-fretes .reconcile .chip.neg{color:#555;}#page-fretes .reconcile .chip.ok{color:var(--green);}
+#page-fretes .filters{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
+#page-fretes .filters select,#page-fretes .filters input{padding:7px 10px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:#fff;}
+#page-fretes .filters input[type=text]{flex:1;min-width:160px;}
+#page-fretes .tbl-wrap{max-height:520px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
+#page-fretes .tbl-wrap table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;}
+#page-fretes .tbl-wrap th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;position:sticky;top:0;background:#fff;z-index:1;}
+#page-fretes .tbl-wrap td{padding:8px 10px;border-bottom:1px solid var(--bg4);vertical-align:top;}
+#page-fretes .tbl-wrap tr.row-clickable{cursor:pointer;}#page-fretes .tbl-wrap tr.row-clickable:hover{background:var(--bg3);}
+#page-fretes .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;}
+#page-fretes .b-ok{background:#dcfce7;color:var(--green);}#page-fretes .b-min{background:#fef3c7;color:var(--yellow);}
+#page-fretes .b-dev{background:#dbeafe;color:var(--blue);}#page-fretes .b-flag{background:#fee2e2;color:var(--red);}
+#page-fretes .b-low{background:#eee;color:#555;}
+#page-fretes .section-title{font-size:12px;font-weight:700;margin:20px 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+#page-fretes .sub-panel{display:none;margin:-4px 0 16px;}#page-fretes .sub-panel.open{display:block;}
+#page-fretes .sub-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg3);}
+#page-fretes .sub-head h4{margin:0;font-size:13px;}
+#page-fretes .history-list{display:flex;flex-direction:column;gap:8px;}
+#page-fretes .hist-item{background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;}
+#page-fretes .hist-item:hover{border-color:var(--red);}#page-fretes .hist-item.active-hist{border-color:var(--green);background:#f0fdf4;}
+#page-fretes .hist-item .meta{font-size:11px;color:var(--muted);margin-top:2px;}
+#page-fretes .data-warn{background:#fffbeb;border:1px solid #fcd34d;color:#92400e;border-radius:6px;padding:10px 12px;margin:0 0 12px;font-size:12px;}
+#page-fretes .loadbar{font-size:12px;color:var(--muted);margin:10px 0;}
+#page-fretes .uz.drag{border-color:var(--red);background:#fff5f5;}
+#page-fretes th.sortable{cursor:pointer;user-select:none;}#page-fretes th.sortable .sort-ind{font-size:9px;margin-left:3px;opacity:.35;}
+#page-fretes th.sortable.sorted-asc .sort-ind,#page-fretes th.sortable.sorted-desc .sort-ind{opacity:1;color:var(--red);}
+#page-fretes .right{text-align:right;}#page-fretes .detail-row td{background:var(--bg3);padding:0;}
+#page-fretes .detail-inner{padding:10px 14px;font-size:11px;}
+#page-fretes tr.month-row-high td{background:#fff5f5;}#page-fretes tr.active-month{background:#fff5f5;box-shadow:inset 3px 0 0 var(--red);}
+#page-fretes .hist-item .nums{display:flex;gap:20px;text-align:right;}
+#page-fretes .hist-item .nums .v{font-weight:700;font-size:13px;font-family:var(--mono);}
+#page-fretes .hist-item .nums .l{font-size:9px;color:var(--muted);text-transform:uppercase;}
+#page-fretes .muted{color:var(--muted);}
+#page-fretes .empty{text-align:center;padding:40px 16px;color:var(--muted);}
+
 /* CADASTRO TABLE */
 .cad-table td{padding:6px 8px;}
 .cad-inp{background:#fff;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;color:var(--text);font-family:var(--sans);outline:none;width:100%;}
@@ -286,6 +347,7 @@ select.cad-inp{cursor:pointer;}
   <div class="nt" data-page="reclamacoes">🚨 Reclamações<span id="recBadge" class="bc" style="display:none;background:#f59e0b;color:#fff"></span></div>
   <div class="nt" data-page="transferencias">🔄 Transferências</div>
   <div class="nt" data-page="pecas">🔧 Peças AT</div>
+  <div class="nt" data-page="fretes">🚚 Fretes CT-e</div>
   <div class="nt" data-page="history">📋 Histórico</div>
 </div>
 
@@ -1245,6 +1307,100 @@ select.cad-inp{cursor:pointer;}
 </div>
 
 
+<!-- ══ FRETES CT-e × NF ══ -->
+<div class="page" id="page-fretes">
+  <div class="card">
+    <div class="ch"><div class="ct">Conciliação CT-e × Nota Fiscal</div></div>
+    <p style="font-size:12px;color:var(--muted);margin:-8px 0 14px;">Validação da cobrança de frete (6% do valor da NF). Carrega o Excel CT-e/NF e, opcionalmente, o Excel SAP com datas de emissão e nomes de clientes.</p>
+
+    <div class="fte-tabs">
+      <div class="fte-tab active" data-tab="analise">Análise atual</div>
+      <div class="fte-tab" data-tab="mensal">Por mês</div>
+      <div class="fte-tab" data-tab="historico">Histórico</div>
+    </div>
+
+    <div id="fte-tab-analise">
+      <div id="fte-uploadSection">
+        <div class="upload-grid">
+          <div>
+            <div class="sl">Excel CT-e / NF</div>
+            <div class="uz" id="fte-uploadZone">
+              <div style="font-size:24px;margin-bottom:6px">📊</div>
+              <div style="font-size:12px;font-weight:600">Relatório CT-e × NF</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px">Folha Export com Nota Fiscal, CT-e, valores…</div>
+            </div>
+            <input type="file" id="fte-fileInput" accept=".xlsx,.xls">
+          </div>
+          <div>
+            <div class="sl">Excel SAP (opcional)</div>
+            <div class="uz" id="fte-sapUploadZone">
+              <div style="font-size:24px;margin-bottom:6px">🗄️</div>
+              <div style="font-size:12px;font-weight:600">Notas fiscais SAP</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px">NF + data emissão + nome cliente</div>
+              <div id="fte-sapLoadStatus" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+            </div>
+            <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
+          </div>
+        </div>
+      </div>
+      <div id="fte-loadbar" class="loadbar" style="display:none;"></div>
+
+      <div id="fte-results" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px;flex-wrap:wrap;gap:8px;">
+          <div id="fte-periodoLabel" style="font-size:12px;color:var(--muted);"></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <span id="fte-saveStatus" style="font-size:11px;color:var(--muted);"></span>
+            <button class="btn bg bs" id="fte-exportBtn" type="button">Exportar Excel</button>
+            <button class="btn bg bs" id="fte-newFileBtn" type="button">Carregar outro</button>
+          </div>
+        </div>
+        <div id="fte-dataWarning" style="display:none;"></div>
+        <div class="kpis" id="fte-kpis"></div>
+        <div id="fte-reconcileBox"></div>
+        <div class="section-title">Decomposição por categoria — clica para ver detalhe</div>
+        <div class="breakdown" id="fte-breakdown"></div>
+        <div id="fte-subPanels"></div>
+        <div class="section-title">Detalhe por Nota Fiscal <button class="btn bg bs" id="fte-exportFilteredBtn" type="button" style="margin-left:auto">Exportar vista filtrada</button></div>
+        <div class="filters">
+          <select id="fte-filterStatus">
+            <option value="">Todos os estados</option>
+            <option value="ok">Conforme (~6%)</option>
+            <option value="min">Tarifa mínima</option>
+            <option value="dev">Múltiplos CT-e — com devolução</option>
+            <option value="flag">Múltiplos CT-e — SEM devolução ⚠️</option>
+            <option value="low">Abaixo do esperado</option>
+          </select>
+          <select id="fte-filterTransp"><option value="">Todos os transportadores</option></select>
+          <select id="fte-filterMes"><option value="">Todos os meses</option></select>
+          <input type="text" id="fte-searchNF" placeholder="Procurar NF ou cliente…">
+        </div>
+        <div class="tbl-wrap">
+          <table id="fte-nfTable">
+            <thead><tr id="fte-nfTableHead"></tr></thead>
+            <tbody id="fte-nfTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="fte-tab-mensal" style="display:none;">
+      <div class="section-title" style="margin-top:0;">Resumo mês a mês <button class="btn bg bs" id="fte-exportMensalBtn" type="button" style="margin-left:auto">Exportar por mês</button></div>
+      <p style="font-size:11px;color:var(--muted);margin:-4px 0 12px;">Usa data de emissão SAP quando disponível. Clica num mês para filtrar na análise.</p>
+      <div class="tbl-wrap">
+        <table id="fte-monthTable">
+          <thead><tr id="fte-monthTableHead"></tr></thead>
+          <tbody id="fte-monthTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="fte-tab-historico" style="display:none;">
+      <div class="section-title" style="margin-top:0;">Histórico de análises <button class="btn bg bs" id="fte-exportHistoryBtn" type="button" style="margin-left:auto">Exportar histórico</button></div>
+      <div id="fte-historyList" class="history-list"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ══ HISTÓRICO ══ -->
 <div class="page" id="page-history">
   <div class="card">
@@ -1348,6 +1504,7 @@ async function init(){
         }
       }
       if(t.dataset.page==='history')renderHistory();
+      if(t.dataset.page==='fretes')initFretes();
       scheduleColResize();
     };
   });
@@ -6568,9 +6725,11 @@ function scheduleColResize(){
 }
 function applyResizable(){scheduleColResize();}
 
+</script>
+<script src="fretes.js"></script>
+<script>
 init();
 initMultiselects();
-
 </script>
 </body>
 </html>

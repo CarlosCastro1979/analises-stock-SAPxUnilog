@@ -1,0 +1,1303 @@
+const sb = db;
+
+const $ = id => document.getElementById('fte-' + id);
+
+let fteInited = false;
+let sapNfMap = {};
+let lastCtePack = null;
+
+let currentNFs = [];
+let currentSummary = null;
+let activeSubPanel = null;
+let currentUploadId = null;
+let isSaving = false;
+let tableSort = { col: 'diff', dir: -1 };
+let subTableSort = { col: 'diff', dir: -1 };
+let monthSort = { col: 'excesso', dir: -1 };
+let selectedMonth = '';
+let monthlyRows = [];
+let historyCache = [];
+
+const NF_COLUMNS = [
+  { key: 'nf', label: 'Nota Fiscal', type: 'string' },
+  { key: 'cliente', label: 'Cliente', type: 'string' },
+  { key: 'transportador', label: 'Transportador', type: 'string' },
+  { key: 'modalidade', label: 'Modal.', type: 'string' },
+  { key: 'valorNF', label: 'Valor NF', type: 'number', right: true },
+  { key: 'nCte', label: 'Nº CT-e', type: 'number', right: true },
+  { key: 'pago', label: 'Pago', type: 'number', right: true },
+  { key: 'esperado', label: 'Esperado (6%)', type: 'number', right: true },
+  { key: 'diff', label: 'Diferença', type: 'number', right: true },
+  { key: 'pct', label: '% pago', type: 'number', right: true },
+  { key: 'status', label: 'Estado', type: 'status' }
+];
+
+const SUB_COLUMNS = [
+  { key: 'nf', label: 'NF', type: 'string' },
+  { key: 'cliente', label: 'Cliente', type: 'string' },
+  { key: 'transportador', label: 'Transportador', type: 'string' },
+  { key: 'nCte', label: 'CT-e', type: 'number' },
+  { key: 'valorNF', label: 'Valor NF', type: 'number', right: true },
+  { key: 'pago', label: 'Pago', type: 'number', right: true },
+  { key: 'esperado', label: 'Esperado', type: 'number', right: true },
+  { key: 'diff', label: 'Diferença', type: 'number', right: true },
+  { key: 'pct', label: '% pago', type: 'number', right: true }
+];
+
+const MONTH_COLUMNS = [
+  { key: 'mesLabel', label: 'Mês', type: 'string' },
+  { key: 'totalNF', label: 'NFs', type: 'number', right: true },
+  { key: 'totalValorNF', label: 'Faturação', type: 'number', right: true },
+  { key: 'totalPago', label: 'Pago', type: 'number', right: true },
+  { key: 'totalEsperado', label: 'Esperado (6%)', type: 'number', right: true },
+  { key: 'excesso', label: 'Excesso', type: 'number', right: true },
+  { key: 'pctPagoSobreNF', label: '% pago/NF', type: 'number', right: true },
+  { key: 'qtd_min', label: 'Tarifa mín.', type: 'number', right: true },
+  { key: 'qtd_flag', label: 'Investigar', type: 'number', right: true }
+];
+
+const MESES_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+const FIELD_ALIASES = {
+  nf: ['nota fiscal', 'nf', 'n nota fiscal', 'num nota fiscal', 'num. nota fiscal', 'nota fiscal numero', 'notafiscal'],
+  valorNF: ['valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf', 'valor nf r$'],
+  transportador: ['transportador', 'transportadora', 'nome transportador', 'transp'],
+  modalidade: ['modalidade', 'modal', 'mod'],
+  dtNF: ['dt nf', 'data nf', 'data nota fiscal', 'dt nota fiscal'],
+  numCte: ['num. cte', 'num cte', 'n cte', 'numero cte', 'n cte-e', 'num cte-e', 'ct-e', 'cte', 'numero do cte'],
+  dtCte: ['dt cte', 'data cte', 'dt cte-e', 'data cte-e', 'data do cte'],
+  pago: ['total fatura rev.', 'total fatura rev', 'total fatura', 'valor fatura', 'valor pago', 'total pago', 'vl pago', 'frete pago', 'valor cte', 'valor do frete'],
+  devolucao: ['devolucao', 'devolução', 'e devolucao', 'retorno'],
+  tipoOp: ['tipo operacao', 'tipo operação', 'tipo op', 'operacao'],
+  peso: ['peso', 'peso kg', 'peso (kg)']
+};
+
+const SAP_ALIASES = {
+  nf: ['nota fiscal', 'nf', 'n nota fiscal', 'num nota fiscal', 'num. nota fiscal', 'notafiscal', 'nº nf', 'numero nf', 'docnum', 'documento'],
+  dtEmissao: ['dt emissao', 'data emissao', 'dt emissão', 'data emissão', 'emissao', 'emissão', 'data doc', 'data documento', 'dt nf', 'data nf'],
+  cliente: ['cliente', 'nome cliente', 'razao social', 'razão social', 'destinatario', 'destinatário', 'cardname', 'nome do cliente'],
+  valorNF: ['valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf', 'valor total', 'total nf', 'valor documento', 'montante', 'valor']
+};
+
+function fteToast(msg) {
+  if (typeof toast === 'function') toast(msg, 'success');
+}
+
+function updateSaveStatus(msg, ok) {
+  const el = $('saveStatus');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = ok === false ? 'var(--redflag)' : 'var(--gray)';
+}
+
+function showResultsView() {
+  $('loadbar').style.display = 'none';
+  const us = $('uploadSection');
+  if (us) us.style.display = 'none';
+  else $('uploadZone').style.display = 'none';
+  $('results').style.display = 'block';
+}
+
+function fmtMoney(v) { return 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtPct(v) { return (v * 100).toFixed(1) + '%'; }
+
+function normCol(s) {
+  return String(s || '').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+function normNFKey(nf) {
+  const s = String(nf || '').trim();
+  const digits = s.replace(/\D/g, '');
+  return digits || s;
+}
+
+function findField(row, field) {
+  const aliases = FIELD_ALIASES[field];
+  const entries = Object.entries(row);
+  for (const alias of aliases) {
+    const hit = entries.find(([k]) => normCol(k) === alias);
+    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[1];
+  }
+  for (const alias of aliases) {
+    const hit = entries.find(([k]) => {
+      const nk = normCol(k);
+      return nk.includes(alias) || alias.includes(nk);
+    });
+    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[1];
+  }
+  return null;
+}
+
+function findSapField(row, field) {
+  const aliases = SAP_ALIASES[field];
+  const entries = Object.entries(row);
+  for (const alias of aliases) {
+    const hit = entries.find(([k]) => normCol(k) === alias);
+    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[1];
+  }
+  for (const alias of aliases) {
+    const hit = entries.find(([k]) => {
+      const nk = normCol(k);
+      return nk.includes(alias) || alias.includes(nk);
+    });
+    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[1];
+  }
+  return null;
+}
+
+function normalizeRow(row) {
+  return {
+    nf: findField(row, 'nf'),
+    valorNF: findField(row, 'valorNF'),
+    transportador: findField(row, 'transportador'),
+    modalidade: findField(row, 'modalidade'),
+    dtNF: findField(row, 'dtNF'),
+    numCte: findField(row, 'numCte'),
+    dtCte: findField(row, 'dtCte'),
+    pago: findField(row, 'pago'),
+    devolucao: findField(row, 'devolucao'),
+    tipoOp: findField(row, 'tipoOp'),
+    peso: findField(row, 'peso')
+  };
+}
+
+function normalizeSapRow(row) {
+  return {
+    nf: findSapField(row, 'nf'),
+    dtEmissao: findSapField(row, 'dtEmissao'),
+    cliente: findSapField(row, 'cliente'),
+    valorNF: findSapField(row, 'valorNF')
+  };
+}
+
+function isHeaderRow(cells) {
+  const normalized = cells.map(c => normCol(c));
+  return FIELD_ALIASES.nf.some(alias => normalized.some(c => c === alias || c.includes(alias) || alias.includes(c)));
+}
+
+function isSapHeaderRow(cells) {
+  const normalized = cells.map(c => normCol(c));
+  return SAP_ALIASES.nf.some(alias => normalized.some(c => c === alias || c.includes(alias) || alias.includes(c)));
+}
+
+function parseSheetRows(sheet, normalizeFn, headerFn) {
+  const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+  if (!raw.length) return { rows: [], headers: [] };
+
+  let headerIdx = raw.findIndex(row => Array.isArray(row) && headerFn(row));
+  if (headerIdx < 0) headerIdx = 0;
+
+  const headers = (raw[headerIdx] || []).map(h => String(h || '').trim()).filter(Boolean);
+  const rows = [];
+  for (let i = headerIdx + 1; i < raw.length; i++) {
+    const line = raw[i];
+    if (!Array.isArray(line) || line.every(c => c === null || c === undefined || c === '')) continue;
+    const obj = {};
+    headers.forEach((h, j) => { if (h) obj[h] = line[j] ?? null; });
+    rows.push(normalizeFn(obj));
+  }
+  return { rows, headers };
+}
+
+function countValidRows(rows) {
+  return rows.filter(r => r.nf !== null && r.nf !== undefined && String(r.nf).trim() !== '').length;
+}
+
+function loadRowsFromWorkbook(wb) {
+  const preferred = ['Export', 'Dados', 'Data', 'Conciliacao', 'Conciliação', 'Board'];
+  const names = [...new Set([...preferred.filter(n => wb.SheetNames.includes(n)), ...wb.SheetNames])];
+  let best = { rows: [], sheetName: names[0], headers: [], valid: 0 };
+
+  for (const name of names) {
+    const parsed = parseSheetRows(wb.Sheets[name], normalizeRow, isHeaderRow);
+    const valid = countValidRows(parsed.rows);
+    if (valid > best.valid) best = { rows: parsed.rows, sheetName: name, headers: parsed.headers, valid };
+  }
+  return best;
+}
+
+function loadSapRowsFromWorkbook(wb) {
+  const preferred = ['SAP', 'Notas', 'NFs', 'Export', 'Dados', 'Data'];
+  const names = [...new Set([...preferred.filter(n => wb.SheetNames.includes(n)), ...wb.SheetNames])];
+  let best = { rows: [], sheetName: names[0], headers: [], valid: 0 };
+
+  for (const name of names) {
+    const parsed = parseSheetRows(wb.Sheets[name], normalizeSapRow, isSapHeaderRow);
+    const valid = countValidRows(parsed.rows);
+    if (valid > best.valid) best = { rows: parsed.rows, sheetName: name, headers: parsed.headers, valid };
+  }
+  return best;
+}
+
+function buildSapNfMap(rows) {
+  const map = {};
+  rows.forEach(r => {
+    const nf = r.nf;
+    if (nf === null || nf === undefined || String(nf).trim() === '') return;
+    const entry = {
+      nf,
+      cliente: r.cliente ? String(r.cliente).trim() : '',
+      dtEmissao: r.dtEmissao,
+      valorNF: num(r.valorNF)
+    };
+    const key = normNFKey(nf);
+    map[key] = entry;
+    const raw = String(nf).trim();
+    if (raw !== key) map[raw] = entry;
+  });
+  return map;
+}
+
+function applySapToNf(nf) {
+  const key = normNFKey(nf.nf);
+  const sap = sapNfMap[key] || sapNfMap[String(nf.nf).trim()];
+  if (!sap) return nf;
+
+  if (!nf.cliente && sap.cliente) nf.cliente = sap.cliente;
+
+  if (sap.dtEmissao && !nf.dtNF) {
+    nf.dtNF = sap.dtEmissao;
+    delete nf.mesRef;
+    delete nf.dtRef;
+  }
+
+  if ((!nf.valorNF || nf.valorNF === 0) && sap.valorNF) {
+    nf.valorNF = sap.valorNF;
+    nf.esperado = nf.valorNF * 0.06;
+    nf.diff = nf.pago - nf.esperado;
+    nf.pct = nf.valorNF > 0 ? nf.pago / nf.valorNF : 0;
+  }
+
+  return nf;
+}
+
+function applySapToList(list) {
+  return list.map(nf => {
+    applySapToNf(nf);
+    return enrichNF(nf);
+  });
+}
+
+function handleFile(file) {
+  $('loadbar').style.display = 'block';
+  $('loadbar').textContent = 'A ler ' + file.name + ' ...';
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const { rows, sheetName, headers } = loadRowsFromWorkbook(wb);
+      if (!rows.length) {
+        $('loadbar').textContent =
+          'Nenhuma linha de dados encontrada. Folhas: ' + wb.SheetNames.join(', ');
+        return;
+      }
+      processRows(rows, file.name, sheetName, headers);
+    } catch (err) {
+      console.error(err);
+      $('loadbar').textContent = 'Erro a ler o ficheiro: ' + err.message;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function handleSapFile(file) {
+  const statusEl = $('sapLoadStatus');
+  if (statusEl) statusEl.textContent = 'A ler ' + file.name + ' ...';
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const { rows, sheetName } = loadSapRowsFromWorkbook(wb);
+      if (!rows.length) {
+        if (statusEl) statusEl.textContent = 'Nenhuma linha SAP encontrada na folha "' + sheetName + '".';
+        return;
+      }
+      sapNfMap = buildSapNfMap(rows);
+      const nKeys = new Set(Object.values(sapNfMap).map(x => x.nf)).size;
+      if (statusEl) statusEl.textContent = rows.length + ' linhas SAP · ' + nKeys + ' NFs mapeadas';
+      fteToast('Dados SAP carregados.');
+
+      if (lastCtePack) {
+        processRows(lastCtePack.rows, lastCtePack.fileName, lastCtePack.sheetName, lastCtePack.headers);
+      } else if (currentNFs.length) {
+        currentNFs = applySapToList(currentNFs.map(nf => {
+          delete nf.mesRef;
+          delete nf.dtRef;
+          return nf;
+        }));
+        currentSummary = computeSummary(currentNFs, currentSummary?.fileName || 'SAP enrich');
+        renderAll();
+      }
+    } catch (err) {
+      console.error(err);
+      if (statusEl) statusEl.textContent = 'Erro a ler SAP: ' + err.message;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function num(v) { return (v === null || v === undefined || v === '') ? 0 : Number(v); }
+
+function processRows(rows, fileName, sheetName, headers) {
+  lastCtePack = { rows, fileName, sheetName, headers };
+
+  $('loadbar').textContent =
+    'A processar ' + rows.length + ' linhas (folha "' + sheetName + '")...';
+
+  const byNF = {};
+  rows.forEach(r => {
+    const nf = r.nf;
+    if (nf === null || nf === undefined || String(nf).trim() === '') return;
+    if (!byNF[nf]) byNF[nf] = {
+      nf, valorNF: num(r.valorNF), transportador: r.transportador || '-',
+      modalidade: r.modalidade || '-', ctes: [], temDevolucao: false, dtNF: r.dtNF,
+      cliente: ''
+    };
+    byNF[nf].ctes.push({
+      numCte: r.numCte, dtCte: r.dtCte, pago: num(r.pago),
+      devolucao: (r.devolucao || '').toString().toLowerCase() === 'sim',
+      tipoOp: r.tipoOp, peso: num(r.peso)
+    });
+    if ((r.devolucao || '').toString().toLowerCase() === 'sim') byNF[nf].temDevolucao = true;
+  });
+
+  let nfList = Object.values(byNF).map(g => {
+    const nCte = new Set(g.ctes.map(c => c.numCte)).size;
+    const pago = g.ctes.reduce((s, c) => s + c.pago, 0);
+    const esperado = g.valorNF * 0.06;
+    const diff = pago - esperado;
+    const pct = g.valorNF > 0 ? pago / g.valorNF : 0;
+
+    let status, motivo;
+    if (nCte === 1) {
+      if (pct < 0.059) { status = 'low'; motivo = 'Pagou menos que os 6% esperados — confirmar se há desconto ou erro no CT-e.'; }
+      else if (pct <= 0.061) { status = 'ok'; motivo = 'Dentro do esperado (6%).'; }
+      else { status = 'min'; motivo = 'Acima de 6%, provavelmente por tarifa mínima do transportador (valor da NF é baixo para o frete cobrado).'; }
+    } else {
+      if (g.temDevolucao) { status = 'dev'; motivo = 'Mais de um CT-e, incluindo devolução (retorno de mercadoria) — frete de ida e volta cobrado separadamente.'; }
+      else { status = 'flag'; motivo = 'Mais de um CT-e sem devolução assinalada. Cada CT-e parece cobrar uma percentagem sobre o valor total da NF em vez de dividir os 6% entre eles — validar com o transportador.'; }
+    }
+
+    return {
+      nf: g.nf, cliente: g.cliente || '', transportador: g.transportador, modalidade: g.modalidade,
+      valorNF: g.valorNF, nCte, pago, esperado, diff, pct, status, motivo, ctes: g.ctes,
+      temDevolucao: g.temDevolucao, dtNF: g.dtNF
+    };
+  });
+
+  nfList = applySapToList(nfList);
+  nfList.sort((a, b) => b.diff - a.diff);
+  currentNFs = nfList;
+  currentSummary = computeSummary(nfList, fileName);
+  tableSort = { col: 'diff', dir: -1 };
+  selectedMonth = '';
+
+  if (!nfList.length) {
+    const cols = (headers && headers.length) ? headers.join(', ') : '(não detetadas)';
+    $('loadbar').style.display = 'block';
+    $('loadbar').textContent =
+      '0 notas fiscais encontradas na folha "' + sheetName + '". Colunas: ' + cols;
+    const us = $('uploadSection');
+    if (us) us.style.display = 'block';
+    else $('uploadZone').style.display = 'block';
+    $('results').style.display = 'none';
+    fteToast('Não foi possível ler notas fiscais — verifica se o ficheiro tem a coluna "Nota Fiscal".');
+    return;
+  }
+
+  renderAll();
+  showResultsView();
+  autosaveToCloud();
+}
+
+function computeSummary(list, fileName) {
+  const totalPago = list.reduce((s, x) => s + x.pago, 0);
+  const totalValorNF = list.reduce((s, x) => s + x.valorNF, 0);
+  const totalEsperado = list.reduce((s, x) => s + x.esperado, 0);
+  const excesso = totalPago - totalEsperado;
+  const dates = list.flatMap(x => x.ctes.map(c => c.dtCte)).filter(Boolean).map(d => new Date(d));
+  const periodoInicio = dates.length ? new Date(Math.min(...dates)) : null;
+  const periodoFim = dates.length ? new Date(Math.max(...dates)) : null;
+
+  const byStatus = { ok: 0, min: 0, dev: 0, flag: 0, low: 0 };
+  const excessoByStatus = { ok: 0, min: 0, dev: 0, flag: 0, low: 0 };
+  const pagoByStatus = { ok: 0, min: 0, dev: 0, flag: 0, low: 0 };
+  let nUnicoCte = 0, nMultiplosCte = 0;
+  let excessoPositivo = 0, deficit = 0;
+
+  list.forEach(x => {
+    byStatus[x.status]++;
+    excessoByStatus[x.status] += x.diff;
+    pagoByStatus[x.status] += x.pago;
+    if (x.nCte === 1) nUnicoCte++; else nMultiplosCte++;
+    if (x.diff > 0) excessoPositivo += x.diff;
+    else if (x.diff < 0) deficit += x.diff;
+  });
+
+  return {
+    fileName, totalNF: list.length, totalPago, totalValorNF, totalEsperado, excesso,
+    pctPagoSobreNF: totalValorNF ? totalPago / totalValorNF : 0,
+    excessoPositivo, deficit, excessoPct: totalEsperado ? excesso / totalEsperado : 0,
+    periodoInicio, periodoFim, byStatus, excessoByStatus, pagoByStatus,
+    nUnicoCte, nMultiplosCte
+  };
+}
+
+function fmtDate(d) { return d ? d.toLocaleDateString('pt-BR') : '-'; }
+
+function monthKey(d) {
+  const dt = d instanceof Date ? d : new Date(d);
+  if (isNaN(dt)) return 'sem-data';
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function fmtMesLabel(key) {
+  if (key === 'sem-data') return 'Sem data';
+  const [y, m] = key.split('-');
+  return `${MESES_PT[Number(m) - 1]}/${y}`;
+}
+
+function enrichNF(nf) {
+  if (nf.mesRef) return nf;
+  let d = nf.dtNF ? new Date(nf.dtNF) : null;
+  if ((!d || isNaN(d)) && nf.ctes?.length) {
+    const dates = nf.ctes.map(c => c.dtCte).filter(Boolean).map(x => new Date(x)).filter(x => !isNaN(x));
+    if (dates.length) d = new Date(Math.min(...dates));
+  }
+  nf.dtRef = d && !isNaN(d) ? d : null;
+  nf.mesRef = d && !isNaN(d) ? monthKey(d) : 'sem-data';
+  return nf;
+}
+
+function computeMonthly(list) {
+  const byMes = {};
+  list.forEach(x => {
+    enrichNF(x);
+    const m = x.mesRef || 'sem-data';
+    if (!byMes[m]) byMes[m] = {
+      mesRef: m, mesLabel: fmtMesLabel(m), items: [],
+      totalNF: 0, totalValorNF: 0, totalPago: 0, totalEsperado: 0, excesso: 0,
+      qtd_ok: 0, qtd_min: 0, qtd_dev: 0, qtd_flag: 0, qtd_low: 0
+    };
+    const b = byMes[m];
+    b.items.push(x);
+    b.totalNF++;
+    b.totalValorNF += x.valorNF;
+    b.totalPago += x.pago;
+    b.totalEsperado += x.esperado;
+    b.excesso += x.diff;
+    b['qtd_' + x.status]++;
+  });
+  return Object.values(byMes).map(b => ({
+    ...b,
+    pctPagoSobreNF: b.totalValorNF ? b.totalPago / b.totalValorNF : 0,
+    excessoPct: b.totalEsperado ? b.excesso / b.totalEsperado : 0
+  })).sort((a, b) => a.mesRef.localeCompare(b.mesRef));
+}
+
+function sortValue(row, col, type) {
+  if (type === 'status') return (statusMeta[row.status] || {}).label || row.status || '';
+  if (type === 'number') return num(row[col]);
+  return String(row[col] ?? '').toLowerCase();
+}
+
+function sortRows(list, columns, sortState) {
+  const colDef = columns.find(c => c.key === sortState.col) || columns[0];
+  const dir = sortState.dir;
+  return [...list].sort((a, b) => {
+    const va = sortValue(a, colDef.key, colDef.type);
+    const vb = sortValue(b, colDef.key, colDef.type);
+    if (va < vb) return -1 * dir;
+    if (va > vb) return 1 * dir;
+    return 0;
+  });
+}
+
+function renderSortableHead(containerId, columns, sortState, onSort) {
+  const tr = $(containerId);
+  if (!tr) return;
+  tr.innerHTML = columns.map(c => {
+    const sorted = sortState.col === c.key;
+    const cls = ['sortable', c.right ? 'right' : '', sorted ? (sortState.dir === 1 ? 'sorted-asc' : 'sorted-desc') : ''].filter(Boolean).join(' ');
+    const ind = sorted ? (sortState.dir === 1 ? '▲' : '▼') : '↕';
+    return `<th class="${cls}" data-col="${c.key}">${c.label}<span class="sort-ind">${ind}</span></th>`;
+  }).join('');
+  tr.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', e => {
+      e.stopPropagation();
+      const col = th.dataset.col;
+      if (sortState.col === col) sortState.dir *= -1;
+      else { sortState.col = col; sortState.dir = 1; }
+      onSort();
+    });
+  });
+}
+
+function updateSortHeadIndicators(containerId, sortState) {
+  const tr = $(containerId);
+  if (!tr) return;
+  tr.querySelectorAll('th.sortable').forEach(th => {
+    const sorted = sortState.col === th.dataset.col;
+    th.classList.remove('sorted-asc', 'sorted-desc');
+    if (sorted) th.classList.add(sortState.dir === 1 ? 'sorted-asc' : 'sorted-desc');
+    const ind = th.querySelector('.sort-ind');
+    if (ind) ind.textContent = sorted ? (sortState.dir === 1 ? '▲' : '▼') : '↕';
+  });
+}
+
+function initMainTableHead() {
+  renderSortableHead('nfTableHead', NF_COLUMNS, tableSort, renderTable);
+}
+
+function nfExportRow(x) {
+  enrichNF(x);
+  return {
+    'Nota Fiscal': x.nf,
+    'Cliente': x.cliente || '',
+    'Mês': fmtMesLabel(x.mesRef),
+    'Transportador': x.transportador,
+    'Modalidade': x.modalidade,
+    'Valor NF': x.valorNF,
+    'Nº CT-e': x.nCte,
+    'Pago': x.pago,
+    'Esperado (6%)': x.esperado,
+    'Diferença': x.diff,
+    '% Pago': x.pct,
+    'Estado': (statusMeta[x.status] || {}).label || x.status,
+    'Motivo': x.motivo
+  };
+}
+
+function cteExportRows() {
+  const rows = [];
+  currentNFs.forEach(x => {
+    (x.ctes || []).forEach(c => {
+      rows.push({
+        'Nota Fiscal': x.nf,
+        'Cliente': x.cliente || '',
+        'Transportador': x.transportador,
+        'Nº CT-e': c.numCte,
+        'Data CT-e': c.dtCte ? new Date(c.dtCte) : '',
+        'Tipo Operação': c.tipoOp || '',
+        'Devolução': c.devolucao ? 'Sim' : 'Não',
+        'Peso (kg)': c.peso,
+        'Pago': c.pago,
+        'Estado NF': (statusMeta[x.status] || {}).label || x.status
+      });
+    });
+  });
+  return rows;
+}
+
+function downloadWorkbook(wb, filename) {
+  XLSX.writeFile(wb, filename);
+}
+
+function exportFullWorkbook() {
+  if (!currentNFs.length || !currentSummary) {
+    fteToast('Não há dados para exportar.');
+    return;
+  }
+  const s = currentSummary;
+  const wb = XLSX.utils.book_new();
+
+  const resumo = [
+    ['Conciliação CT-e × Nota Fiscal — Delta Foods Brasil'],
+    ['Ficheiro', s.fileName],
+    ['Período CT-e', `${fmtDate(s.periodoInicio)} a ${fmtDate(s.periodoFim)}`],
+    ['Total NFs', s.totalNF],
+    ['CT-e único / múltiplos', `${s.nUnicoCte} / ${s.nMultiplosCte}`],
+    [],
+    ['Indicador', 'Valor'],
+    ['Faturação (valor total NFs)', s.totalValorNF],
+    ['Total pago (frete)', s.totalPago],
+    ['% pago sobre NFs', s.pctPagoSobreNF],
+    ['Esperado (6%)', s.totalEsperado],
+    ['Excesso líquido', s.excesso],
+    ['Excesso positivo', s.excessoPositivo],
+    ['Déficit', s.deficit],
+    [],
+    ['Categoria', 'Nº NFs', 'Diferença', 'Pago'],
+    ['Conforme (~6%)', s.byStatus.ok, s.excessoByStatus.ok, s.pagoByStatus.ok],
+    ['Tarifa mínima', s.byStatus.min, s.excessoByStatus.min, s.pagoByStatus.min],
+    ['Com devolução', s.byStatus.dev, s.excessoByStatus.dev, s.pagoByStatus.dev],
+    ['Sem devolução — investigar', s.byStatus.flag, s.excessoByStatus.flag, s.pagoByStatus.flag],
+    ['Abaixo do esperado', s.byStatus.low, s.excessoByStatus.low, s.pagoByStatus.low],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumo), 'Resumo');
+
+  const byCat = [];
+  Object.keys(CATEGORY_META).forEach(key => {
+    currentNFs.filter(x => x.status === key).forEach(x => byCat.push({ ...nfExportRow(x), '_Categoria': CATEGORY_META[key].title }));
+  });
+  if (byCat.length) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(byCat), 'Por categoria');
+  }
+
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(currentNFs.map(nfExportRow)), 'Notas Fiscais');
+
+  const ctes = cteExportRows();
+  if (ctes.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ctes), 'CT-e');
+
+  const mensal = monthlyRows.map(m => ({
+    'Mês': m.mesLabel,
+    'NFs': m.totalNF,
+    'Faturação': m.totalValorNF,
+    'Pago': m.totalPago,
+    'Esperado (6%)': m.totalEsperado,
+    'Excesso': m.excesso,
+    '% pago/NF': m.pctPagoSobreNF,
+    'Tarifa mínima': m.qtd_min,
+    'A investigar': m.qtd_flag,
+    'Conformes': m.qtd_ok
+  }));
+  if (mensal.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mensal), 'Por mês');
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadWorkbook(wb, `Conciliacao_CTE_NF_${stamp}.xlsx`);
+  fteToast('Excel exportado com todas as folhas.');
+}
+
+function exportFilteredView() {
+  const list = getFilteredNFs();
+  if (!list.length) { fteToast('Nenhuma linha na vista actual.'); return; }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list.map(nfExportRow)), 'Vista filtrada');
+  const ctes = [];
+  list.forEach(x => (x.ctes || []).forEach(c => {
+    ctes.push({
+      'Nota Fiscal': x.nf, 'Cliente': x.cliente || '', 'Nº CT-e': c.numCte,
+      'Data CT-e': c.dtCte ? new Date(c.dtCte) : '',
+      'Devolução': c.devolucao ? 'Sim' : 'Não', 'Pago': c.pago
+    });
+  }));
+  if (ctes.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ctes), 'CT-e filtrados');
+  downloadWorkbook(wb, `Conciliacao_filtrada_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  fteToast('Vista filtrada exportada.');
+}
+
+function exportMonthlyWorkbook() {
+  if (!monthlyRows.length) { fteToast('Sem dados mensais.'); return; }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(monthlyRows.map(m => ({
+    'Mês': m.mesLabel,
+    'NFs': m.totalNF,
+    'Faturação': m.totalValorNF,
+    'Pago': m.totalPago,
+    'Esperado (6%)': m.totalEsperado,
+    'Excesso': m.excesso,
+    '% pago/NF': m.pctPagoSobreNF,
+    'Excesso % vs esperado': m.excessoPct,
+    'Conformes': m.qtd_ok,
+    'Tarifa mínima': m.qtd_min,
+    'Com devolução': m.qtd_dev,
+    'A investigar': m.qtd_flag,
+    'Abaixo': m.qtd_low
+  }))), 'Resumo mensal');
+  const det = [];
+  monthlyRows.forEach(m => {
+    m.items.forEach(x => det.push({ ...nfExportRow(x), 'Mês': m.mesLabel }));
+  });
+  if (det.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(det), 'Detalhe por mês');
+  downloadWorkbook(wb, `Conciliacao_mensal_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  fteToast('Exportação mensal concluída.');
+}
+
+async function exportHistoryWorkbook() {
+  if (!historyCache.length) {
+    const { data, error } = await sb.from('cte_nf_uploads').select('*').order('criado_em', { ascending: false }).limit(50);
+    if (error) { fteToast('Erro ao carregar histórico: ' + error.message); return; }
+    historyCache = data || [];
+  }
+  if (!historyCache.length) { fteToast('Histórico vazio.'); return; }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(historyCache.map(u => ({
+    'Ficheiro': u.ficheiro_nome,
+    'Data': new Date(u.criado_em),
+    'Período início': u.periodo_inicio ? new Date(u.periodo_inicio) : '',
+    'Período fim': u.periodo_fim ? new Date(u.periodo_fim) : '',
+    'Total NFs': u.total_nf,
+    'Total pago': u.total_pago,
+    'Esperado': u.total_esperado,
+    'Excesso': u.excesso,
+    'Conformes': u.qtd_ok,
+    'Tarifa mínima': u.qtd_min,
+    'Com devolução': u.qtd_dev,
+    'A investigar': u.qtd_flag,
+    'Abaixo': u.qtd_low
+  }))), 'Histórico');
+  downloadWorkbook(wb, `Historico_analises_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  fteToast('Histórico exportado.');
+}
+
+function getFilteredNFs() {
+  const statusF = $('filterStatus').value;
+  const transpF = $('filterTransp').value;
+  const mesF = $('filterMes').value;
+  const searchF = $('searchNF').value.trim().toLowerCase();
+  let list = currentNFs;
+  if (statusF) list = list.filter(x => x.status === statusF);
+  if (transpF) list = list.filter(x => x.transportador === transpF);
+  if (mesF) list = list.filter(x => x.mesRef === mesF);
+  if (searchF) list = list.filter(x =>
+    String(x.nf).includes(searchF) ||
+    String(x.cliente || '').toLowerCase().includes(searchF)
+  );
+  return sortRows(list, NF_COLUMNS, tableSort);
+}
+
+function renderMonthlyTable() {
+  if (!currentNFs.length) {
+    $('monthTableBody').innerHTML = '<tr><td colspan="9" class="empty">Carrega uma análise primeiro.</td></tr>';
+    return;
+  }
+  monthlyRows = computeMonthly(currentNFs);
+  renderSortableHead('monthTableHead', MONTH_COLUMNS, monthSort, renderMonthlyTable);
+  const sorted = sortRows(monthlyRows, MONTH_COLUMNS, monthSort);
+  const maxExcesso = Math.max(...sorted.map(m => m.excesso), 0);
+
+  const body = $('monthTableBody');
+  body.innerHTML = sorted.map(m => {
+    const high = m.excesso > 0 && m.excesso >= maxExcesso * 0.85;
+    const active = selectedMonth === m.mesRef;
+    return `<tr class="month-row-clickable${high ? ' month-row-high' : ''}${active ? ' active-month' : ''}" data-mes="${m.mesRef}">
+      <td><strong>${m.mesLabel}</strong></td>
+      <td class="right">${m.totalNF}</td>
+      <td class="right">${fmtMoney(m.totalValorNF)}</td>
+      <td class="right">${fmtMoney(m.totalPago)}</td>
+      <td class="right">${fmtMoney(m.totalEsperado)}</td>
+      <td class="right" style="color:${m.excesso > 0 ? '#b3261e' : 'inherit'}">${fmtMoney(m.excesso)}</td>
+      <td class="right">${fmtPct(m.pctPagoSobreNF)}</td>
+      <td class="right">${m.qtd_min}</td>
+      <td class="right" style="color:${m.qtd_flag ? '#b3261e' : 'inherit'}">${m.qtd_flag}</td>
+    </tr>`;
+  }).join('');
+
+  body.querySelectorAll('tr.month-row-clickable').forEach(tr => {
+    tr.addEventListener('click', () => {
+      selectedMonth = tr.dataset.mes;
+      $('filterMes').value = selectedMonth;
+      document.querySelectorAll('.fte-tab').forEach(x => x.classList.remove('active'));
+      document.querySelector('.fte-tab[data-tab="analise"]').classList.add('active');
+      $('tab-analise').style.display = 'block';
+      $('tab-mensal').style.display = 'none';
+      $('tab-historico').style.display = 'none';
+      renderTable();
+      $('nfTable').scrollIntoView({ behavior: 'smooth' });
+      fteToast('Filtrado por ' + fmtMesLabel(selectedMonth));
+    });
+  });
+}
+
+function renderAll() {
+  const s = currentSummary;
+  $('periodoLabel').textContent =
+    `Ficheiro: ${s.fileName} · Período CT-e: ${fmtDate(s.periodoInicio)} a ${fmtDate(s.periodoFim)} · ${s.totalNF} notas fiscais · ${s.nUnicoCte} com CT-e único · ${s.nMultiplosCte} com múltiplos CT-e`;
+
+  const warnEl = $('dataWarning');
+  if (s.loadWarning) {
+    warnEl.style.display = 'block';
+    warnEl.className = 'data-warn';
+    warnEl.innerHTML = s.loadWarning;
+  } else {
+    warnEl.style.display = 'none';
+    warnEl.innerHTML = '';
+  }
+
+  $('kpis').innerHTML = `
+    <div class="kpi"><div class="label">Faturação (valor NFs)</div><div class="value">${fmtMoney(s.totalValorNF)}</div><div class="sub">${s.totalNF} notas fiscais</div></div>
+    <div class="kpi"><div class="label">Total pago (frete)</div><div class="value">${fmtMoney(s.totalPago)}</div><div class="sub">${fmtPct(s.pctPagoSobreNF)} sobre faturação (meta: 6%)</div></div>
+    <div class="kpi"><div class="label">Esperado (6%)</div><div class="value">${fmtMoney(s.totalEsperado)}</div></div>
+    <div class="kpi flag"><div class="label">Excesso líquido</div><div class="value">${fmtMoney(s.excesso)}</div><div class="sub">+${fmtPct(s.excessoPct)} vs esperado</div></div>
+    <div class="kpi"><div class="label">NFs conformes</div><div class="value">${s.byStatus.ok}</div><div class="sub">${s.totalNF ? fmtPct(s.byStatus.ok / s.totalNF) : '0%'} do total</div></div>
+    <div class="kpi flag"><div class="label">NFs a investigar ⚠️</div><div class="value">${s.byStatus.flag}</div><div class="sub">múltiplos CT-e sem devolução</div></div>
+  `;
+
+  $('reconcileBox').innerHTML = `
+    <div class="reconcile">
+      <strong>Reconciliação:</strong> Faturação ${fmtMoney(s.totalValorNF)} · Pago ${fmtMoney(s.totalPago)} (${fmtPct(s.pctPagoSobreNF)}) = Esperado ${fmtMoney(s.totalEsperado)} + Excesso ${fmtMoney(s.excessoPositivo)} + Déficit ${fmtMoney(s.deficit)}
+      <div class="eq">
+        <span class="chip ok"><strong>${fmtMoney(s.totalPago)}</strong> pago</span>
+        <span>=</span>
+        <span class="chip">${fmtMoney(s.totalEsperado)} esperado</span>
+        <span>+</span>
+        <span class="chip pos">${fmtMoney(s.excessoPositivo)} excesso</span>
+        <span>+</span>
+        <span class="chip neg">${fmtMoney(s.deficit)} déficit</span>
+        <span style="color:var(--gray);font-size:12px;">(${Math.abs(s.totalPago - (s.totalEsperado + s.excessoPositivo + s.deficit)) < 0.02 ? '✓ bate certo' : 'verificar arredondamentos'})</span>
+      </div>
+    </div>`;
+
+  const bd = [
+    { key: 'ok', cls: 'bd-ok', title: 'Conforme (~6%)', desc: '1 CT-e, pago entre 5,9% e 6,1% do valor da NF.' },
+    { key: 'min', cls: 'bd-min', title: 'Tarifa mínima (provável)', desc: '1 CT-e acima de 6% — NF de baixo valor, frete mínimo do transportador.' },
+    { key: 'dev', cls: 'bd-dev', title: 'Com devolução', desc: 'Múltiplos CT-e com retorno assinalado (ida + volta).' },
+    { key: 'flag', cls: 'bd-flag', title: '⚠️ Sem devolução — investigar', desc: 'Múltiplos CT-e sem devolução — cada um pode cobrar % sobre a NF inteira.' },
+    { key: 'low', cls: 'bd-low', title: 'Abaixo do esperado', desc: '1 CT-e abaixo de 5,9% — pagou menos que os 6%.' },
+  ];
+  $('breakdown').innerHTML = bd.filter(b => b.key !== 'low' || s.byStatus.low).map(b => `
+    <div class="bd-card ${b.cls}${activeSubPanel === b.key ? ' active' : ''}" data-status="${b.key}" role="button" tabindex="0">
+      <div class="n">${s.byStatus[b.key]} NF · dif. ${fmtMoney(s.excessoByStatus[b.key])}</div>
+      <div class="t"><strong>${b.title}</strong><br>${b.desc}</div>
+      <div class="t muted" style="margin-top:6px;">Pago: ${fmtMoney(s.pagoByStatus[b.key])}</div>
+    </div>
+  `).join('');
+
+  document.querySelectorAll('.bd-card').forEach(card => {
+    card.addEventListener('click', () => toggleSubPanel(card.dataset.status));
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubPanel(card.dataset.status); } });
+  });
+
+  renderSubPanels();
+
+  const transpSet = [...new Set(currentNFs.map(x => x.transportador))].sort();
+  const tSel = $('filterTransp');
+  tSel.innerHTML = '<option value="">Todos os transportadores</option>' + transpSet.map(t => `<option value="${t}">${t}</option>`).join('');
+
+  monthlyRows = computeMonthly(currentNFs);
+  const mSel = $('filterMes');
+  mSel.innerHTML = '<option value="">Todos os meses</option>' + monthlyRows.map(m =>
+    `<option value="${m.mesRef}"${selectedMonth === m.mesRef ? ' selected' : ''}>${m.mesLabel} (${m.totalNF} NF)</option>`
+  ).join('');
+
+  initMainTableHead();
+  renderTable();
+  renderMonthlyTable();
+}
+
+const CATEGORY_META = {
+  ok: { title: 'Conforme (~6%)', cls: 'b-ok' },
+  min: { title: 'Tarifa mínima (provável)', cls: 'b-min' },
+  dev: { title: 'Com devolução', cls: 'b-dev' },
+  flag: { title: '⚠️ Sem devolução — investigar', cls: 'b-flag' },
+  low: { title: 'Abaixo do esperado', cls: 'b-low' }
+};
+
+function toggleSubPanel(status) {
+  activeSubPanel = activeSubPanel === status ? null : status;
+  if (activeSubPanel) subTableSort = { col: 'diff', dir: -1 };
+  $('filterStatus').value = activeSubPanel || '';
+  document.querySelectorAll('.bd-card').forEach(c => {
+    c.classList.toggle('active', c.dataset.status === activeSubPanel);
+  });
+  renderSubPanels();
+  renderTable();
+  if (activeSubPanel) {
+    const el = $('sub-' + activeSubPanel);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function renderSubPanels() {
+  const host = $('subPanels');
+  if (!activeSubPanel) { host.innerHTML = ''; return; }
+
+  const meta = CATEGORY_META[activeSubPanel];
+  let list = currentNFs.filter(x => x.status === activeSubPanel);
+  list = sortRows(list, SUB_COLUMNS, subTableSort);
+  const s = currentSummary;
+  const totalDif = s.excessoByStatus[activeSubPanel];
+  const totalPago = s.pagoByStatus[activeSubPanel];
+
+  const rows = list.map(x => {
+    const cteInfo = x.nCte > 1
+      ? `${x.nCte} CT-e${x.temDevolucao ? ' (com devolução)' : ''}`
+      : '1 CT-e';
+    return `<tr class="row-clickable" data-nf="${x.nf}">
+      <td>${x.nf}</td><td>${x.cliente || '-'}</td><td>${x.transportador}</td><td>${cteInfo}</td>
+      <td class="right">${fmtMoney(x.valorNF)}</td><td class="right">${fmtMoney(x.pago)}</td>
+      <td class="right">${fmtMoney(x.esperado)}</td>
+      <td class="right" style="color:${x.diff > 0.5 ? '#b3261e' : (x.diff < -0.5 ? '#555' : 'inherit')}">${fmtMoney(x.diff)}</td>
+      <td class="right">${fmtPct(x.pct)}</td>
+    </tr>`;
+  }).join('');
+
+  host.innerHTML = `
+    <div class="sub-panel open" id="sub-${activeSubPanel}">
+      <div class="card">
+        <div class="sub-head">
+          <h4>${meta.title} — ${list.length} NF · dif. ${fmtMoney(totalDif)} · pago ${fmtMoney(totalPago)}</h4>
+          <div style="display:flex;gap:8px;">
+            <button class="btn secondary sub-export" style="padding:6px 12px;font-size:12px;" type="button">Exportar categoria</button>
+            <button class="btn secondary sub-close" style="padding:6px 12px;font-size:12px;" type="button">Fechar</button>
+          </div>
+        </div>
+        <div class="tbl-wrap" style="max-height:360px;border:none;border-radius:0;">
+          <table>
+            <thead><tr id="subTableHead"></tr></thead>
+            <tbody>${rows || '<tr><td colspan="9" class="empty">Sem NFs nesta categoria.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  renderSortableHead('subTableHead', SUB_COLUMNS, subTableSort, () => renderSubPanels());
+
+  host.querySelectorAll('tr.row-clickable').forEach(tr => {
+    tr.addEventListener('click', () => {
+      $('searchNF').value = tr.dataset.nf;
+      renderTable();
+      $('nfTable').scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+  const closeBtn = host.querySelector('.sub-close');
+  if (closeBtn) closeBtn.addEventListener('click', () => toggleSubPanel(activeSubPanel));
+  const exportBtn = host.querySelector('.sub-export');
+  if (exportBtn) exportBtn.addEventListener('click', () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list.map(nfExportRow)), meta.title.slice(0, 31));
+    downloadWorkbook(wb, `Conciliacao_${activeSubPanel}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    fteToast('Categoria exportada.');
+  });
+}
+
+const statusMeta = {
+  ok: { cls: 'b-ok', label: 'Conforme' },
+  min: { cls: 'b-min', label: 'Tarifa mínima' },
+  dev: { cls: 'b-dev', label: 'Com devolução' },
+  flag: { cls: 'b-flag', label: '⚠️ Investigar' },
+  low: { cls: 'b-low', label: 'Abaixo' }
+};
+
+function renderTable() {
+  const list = getFilteredNFs();
+  updateSortHeadIndicators('nfTableHead', tableSort);
+
+  const body = $('nfTableBody');
+  body.innerHTML = '';
+  list.forEach((x) => {
+    const tr = document.createElement('tr');
+    tr.className = 'row-clickable';
+    const meta = statusMeta[x.status];
+    tr.innerHTML = `
+      <td>${x.nf}</td>
+      <td>${x.cliente || '-'}</td>
+      <td>${x.transportador}</td>
+      <td>${x.modalidade}</td>
+      <td class="right">${fmtMoney(x.valorNF)}</td>
+      <td class="right">${x.nCte}</td>
+      <td class="right">${fmtMoney(x.pago)}</td>
+      <td class="right">${fmtMoney(x.esperado)}</td>
+      <td class="right" style="color:${x.diff > 0.5 ? '#b3261e' : (x.diff < -0.5 ? '#555' : 'inherit')}">${fmtMoney(x.diff)}</td>
+      <td class="right">${fmtPct(x.pct)}</td>
+      <td><span class="badge ${meta.cls}">${meta.label}</span></td>
+    `;
+    tr.addEventListener('click', () => toggleDetail(tr, x));
+    body.appendChild(tr);
+  });
+  if (list.length === 0) {
+    body.innerHTML = `<tr><td colspan="11" class="empty">Sem resultados para este filtro.</td></tr>`;
+  }
+}
+
+function toggleDetail(tr, x) {
+  const next = tr.nextSibling;
+  if (next && next.classList && next.classList.contains('detail-row')) { next.remove(); return; }
+  document.querySelectorAll('.detail-row').forEach(d => d.remove());
+  const dr = document.createElement('tr');
+  dr.className = 'detail-row';
+  const ctesRows = x.ctes.map(c => `
+    <tr><td>${c.numCte}</td><td>${c.dtCte ? new Date(c.dtCte).toLocaleDateString('pt-BR') : '-'}</td>
+    <td>${c.tipoOp || '-'}</td><td>${c.devolucao ? 'Sim' : 'Não'}</td>
+    <td class="right">${fmtMoney(c.peso)} kg</td><td class="right">${fmtMoney(c.pago)}</td></tr>
+  `).join('');
+  dr.innerHTML = `<td colspan="11"><div class="detail-inner">
+    <p style="margin:0 0 10px;"><strong>Motivo:</strong> ${x.motivo}</p>
+    <table><thead><tr><th>Nº CT-e</th><th>Data CT-e</th><th>Tipo Op.</th><th>Devolução</th><th>Peso</th><th>Pago</th></tr></thead>
+    <tbody>${ctesRows}</tbody></table>
+  </div></td>`;
+  tr.parentNode.insertBefore(dr, tr.nextSibling);
+}
+
+function nfsFromDetalhe(rows) {
+  return rows.map(d => {
+    let ctes = [];
+    let cliente = '';
+    let dtNF = null;
+    if (d.ctes_json) {
+      try {
+        const parsed = JSON.parse(d.ctes_json);
+        if (Array.isArray(parsed)) {
+          ctes = parsed;
+        } else if (parsed && typeof parsed === 'object') {
+          ctes = parsed.ctes || [];
+          cliente = parsed.cliente || '';
+          dtNF = parsed.dtSAP || null;
+        }
+      } catch (e) { ctes = []; }
+    }
+    return enrichNF({
+      nf: d.nota_fiscal,
+      cliente,
+      transportador: d.transportador,
+      modalidade: d.modalidade,
+      valorNF: d.valor_nf,
+      nCte: d.n_cte,
+      pago: d.pago,
+      esperado: d.esperado,
+      diff: d.diferenca,
+      pct: d.pct_pago,
+      status: d.status,
+      motivo: d.motivo,
+      temDevolucao: d.status === 'dev',
+      dtNF,
+      ctes
+    });
+  }).sort((a, b) => b.diff - a.diff);
+}
+
+async function insertUploadAndDetails() {
+  const s = currentSummary;
+  const { data: upload, error: e1 } = await sb.from('cte_nf_uploads').insert({
+    ficheiro_nome: s.fileName,
+    periodo_inicio: s.periodoInicio ? s.periodoInicio.toISOString().slice(0, 10) : null,
+    periodo_fim: s.periodoFim ? s.periodoFim.toISOString().slice(0, 10) : null,
+    total_nf: s.totalNF,
+    total_pago: s.totalPago,
+    total_esperado: s.totalEsperado,
+    excesso: s.excesso,
+    excesso_pct: s.excessoPct,
+    qtd_ok: s.byStatus.ok, qtd_min: s.byStatus.min, qtd_dev: s.byStatus.dev,
+    qtd_flag: s.byStatus.flag, qtd_low: s.byStatus.low,
+    uploader_nome: null
+  }).select().single();
+  if (e1) throw e1;
+
+  const detalhes = currentNFs.map(x => ({
+    upload_id: upload.id, nota_fiscal: String(x.nf), transportador: x.transportador,
+    modalidade: x.modalidade, valor_nf: x.valorNF, n_cte: x.nCte, pago: x.pago,
+    esperado: x.esperado, diferenca: x.diff, pct_pago: x.pct, status: x.status, motivo: x.motivo,
+    ctes_json: JSON.stringify({ ctes: x.ctes || [], cliente: x.cliente || '', dtSAP: x.dtNF || null })
+  }));
+
+  const chunkSize = 500;
+  for (let i = 0; i < detalhes.length; i += chunkSize) {
+    const chunk = detalhes.slice(i, i + chunkSize);
+    let { error: e2 } = await sb.from('cte_nf_detalhe').insert(chunk);
+    if (e2 && /ctes_json|column/i.test(e2.message || '')) {
+      const slim = chunk.map(({ ctes_json, ...rest }) => rest);
+      ({ error: e2 } = await sb.from('cte_nf_detalhe').insert(slim));
+    }
+    if (e2) throw e2;
+  }
+  return upload;
+}
+
+async function autosaveToCloud() {
+  if (!currentNFs.length || !currentSummary || isSaving) return;
+  isSaving = true;
+  updateSaveStatus('A guardar na cloud...');
+  try {
+    const upload = await insertUploadAndDetails();
+    currentUploadId = upload.id;
+    const when = new Date(upload.criado_em || Date.now()).toLocaleString('pt-BR');
+    updateSaveStatus('Guardado · visível para todos · ' + when, true);
+    fteToast('Análise guardada automaticamente — visível para toda a equipa.');
+  } catch (err) {
+    console.error(err);
+    updateSaveStatus('Erro ao guardar na cloud', false);
+    fteToast('Erro ao guardar: ' + (err.message || err));
+  } finally {
+    isSaving = false;
+  }
+}
+
+async function fetchAllDetalhes(uploadId) {
+  const all = [];
+  const pageSize = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await sb.from('cte_nf_detalhe')
+      .select('*')
+      .eq('upload_id', uploadId)
+      .order('diferenca', { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data?.length) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+async function loadUploadById(id, uploadMeta) {
+  let upload = uploadMeta;
+  if (!upload) {
+    const { data, error } = await sb.from('cte_nf_uploads').select('*').eq('id', id).single();
+    if (error || !data) return false;
+    upload = data;
+  }
+
+  updateSaveStatus('A carregar todas as NFs...');
+  let detalhes;
+  try {
+    detalhes = await fetchAllDetalhes(id);
+  } catch (e2) {
+    updateSaveStatus('Erro ao carregar detalhe', false);
+    return false;
+  }
+  if (!detalhes.length) return false;
+
+  currentNFs = nfsFromDetalhe(detalhes);
+  if (Object.keys(sapNfMap).length) {
+    currentNFs = applySapToList(currentNFs.map(nf => {
+      delete nf.mesRef;
+      delete nf.dtRef;
+      return nf;
+    }));
+  }
+  currentSummary = computeSummary(currentNFs, upload.ficheiro_nome);
+
+  const savedNf = upload.total_nf || 0;
+  const savedPago = num(upload.total_pago);
+  const loadedNf = currentNFs.length;
+  const loadedPago = currentSummary.totalPago;
+  let loadWarning = '';
+
+  if (savedNf > loadedNf) {
+    loadWarning = `<strong>Dados incompletos na cloud:</strong> guardadas ${savedNf} NFs, carregadas ${loadedNf}. ` +
+      `Total pago guardado: ${fmtMoney(savedPago)} · calculado agora: ${fmtMoney(loadedPago)}. ` +
+      `Carrega o Excel de novo para actualizar.`;
+  } else if (Math.abs(savedPago - loadedPago) > 1) {
+    loadWarning = `<strong>Totais diferentes:</strong> total pago guardado ${fmtMoney(savedPago)} vs recalculado ${fmtMoney(loadedPago)}. ` +
+      `Pode haver linhas em falta — volta a carregar o ficheiro Excel.`;
+  }
+  currentSummary.loadWarning = loadWarning;
+
+  currentUploadId = upload.id;
+  activeSubPanel = null;
+  selectedMonth = '';
+  renderAll();
+  showResultsView();
+  const when = new Date(upload.criado_em).toLocaleString('pt-BR');
+  updateSaveStatus(`Análise partilhada · ${loadedNf} NFs · ${when}`, true);
+  if (loadWarning) fteToast('Atenção: dados possivelmente incompletos — ver aviso amarelo.');
+  return true;
+}
+
+async function loadLatestFromCloud() {
+  updateSaveStatus('A carregar análise partilhada...');
+  const { data, error } = await sb.from('cte_nf_uploads')
+    .select('*').order('criado_em', { ascending: false }).limit(1);
+  if (error) {
+    updateSaveStatus('Erro ao carregar', false);
+    return false;
+  }
+  if (!data?.length) {
+    updateSaveStatus('');
+    return false;
+  }
+  const ok = await loadUploadById(data[0].id, data[0]);
+  if (ok) fteToast('Análise partilhada carregada.');
+  return ok;
+}
+
+async function loadHistory() {
+  const el = $('historyList');
+  el.innerHTML = '<p class="muted">A carregar...</p>';
+  const { data, error } = await sb.from('cte_nf_uploads').select('*').order('criado_em', { ascending: false }).limit(50);
+  if (error) { el.innerHTML = '<p class="muted">Erro a carregar histórico: ' + error.message + '</p>'; return; }
+  historyCache = data || [];
+  if (!historyCache.length) { el.innerHTML = '<div class="empty">Ainda não há análises guardadas.</div>'; return; }
+  el.innerHTML = historyCache.map(u => `
+    <div class="hist-item${u.id === currentUploadId ? ' active-hist' : ''}" data-id="${u.id}">
+      <div>
+        <div><strong>${u.ficheiro_nome || '(sem nome)'}</strong>${u.id === currentUploadId ? ' · <span style="color:var(--green);">activa</span>' : ''}</div>
+        <div class="meta">${new Date(u.criado_em).toLocaleString('pt-BR')}
+        ${u.periodo_inicio ? ` · período ${new Date(u.periodo_inicio).toLocaleDateString('pt-BR')} a ${new Date(u.periodo_fim).toLocaleDateString('pt-BR')}` : ''}
+        · ${u.total_nf} NFs</div>
+      </div>
+      <div class="nums">
+        <div><div class="v">${fmtMoney(u.total_pago)}</div><div class="l">Pago</div></div>
+        <div><div class="v" style="color:#b3261e;">${fmtMoney(u.excesso)}</div><div class="l">Excesso</div></div>
+        <div><div class="v">${u.qtd_flag || 0}</div><div class="l">A investigar</div></div>
+      </div>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.hist-item').forEach(item => {
+    item.addEventListener('click', async () => {
+      const ok = await loadUploadById(item.dataset.id);
+      if (ok) {
+        document.querySelectorAll('.fte-tab').forEach(x => x.classList.remove('active'));
+        document.querySelector('.fte-tab[data-tab="analise"]').classList.add('active');
+        $('tab-analise').style.display = 'block';
+        $('tab-historico').style.display = 'none';
+        fteToast('Análise do histórico carregada.');
+      }
+    });
+  });
+}
+
+function initFretes() {
+  if (fteInited) return;
+  fteInited = true;
+
+  document.querySelectorAll('.fte-tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.fte-tab').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      $('tab-analise').style.display = t.dataset.tab === 'analise' ? 'block' : 'none';
+      $('tab-mensal').style.display = t.dataset.tab === 'mensal' ? 'block' : 'none';
+      $('tab-historico').style.display = t.dataset.tab === 'historico' ? 'block' : 'none';
+      if (t.dataset.tab === 'historico') loadHistory();
+      if (t.dataset.tab === 'mensal') renderMonthlyTable();
+    });
+  });
+
+  const uploadZone = $('uploadZone');
+  const fileInput = $('fileInput');
+  uploadZone.addEventListener('click', () => fileInput.click());
+  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault(); uploadZone.classList.remove('drag');
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+
+  const sapUploadZone = $('sapUploadZone');
+  const sapFileInput = $('sapFileInput');
+  if (sapUploadZone && sapFileInput) {
+    sapUploadZone.addEventListener('click', () => sapFileInput.click());
+    sapUploadZone.addEventListener('dragover', e => { e.preventDefault(); sapUploadZone.classList.add('drag'); });
+    sapUploadZone.addEventListener('dragleave', () => sapUploadZone.classList.remove('drag'));
+    sapUploadZone.addEventListener('drop', e => {
+      e.preventDefault(); sapUploadZone.classList.remove('drag');
+      if (e.dataTransfer.files.length) handleSapFile(e.dataTransfer.files[0]);
+    });
+    sapFileInput.addEventListener('change', e => { if (e.target.files.length) handleSapFile(e.target.files[0]); });
+  }
+
+  $('newFileBtn').addEventListener('click', () => {
+    $('results').style.display = 'none';
+    const us = $('uploadSection');
+    if (us) us.style.display = 'block';
+    else $('uploadZone').style.display = 'block';
+  });
+  $('exportBtn').addEventListener('click', () => exportFullWorkbook());
+  $('exportFilteredBtn').addEventListener('click', () => exportFilteredView());
+  $('exportHistoryBtn').addEventListener('click', () => exportHistoryWorkbook());
+  $('exportMensalBtn').addEventListener('click', () => exportMonthlyWorkbook());
+
+  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF'].forEach(id => {
+    $(id).addEventListener('input', () => {
+      if (id === 'filterStatus' && $('filterStatus').value !== activeSubPanel) {
+        activeSubPanel = $('filterStatus').value || null;
+        document.querySelectorAll('.bd-card').forEach(c => {
+          c.classList.toggle('active', c.dataset.status === activeSubPanel);
+        });
+        renderSubPanels();
+      }
+      if (id === 'filterMes') {
+        selectedMonth = $('filterMes').value || '';
+      }
+      renderTable();
+    });
+  });
+
+  loadLatestFromCloud();
+}
