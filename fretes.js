@@ -132,6 +132,36 @@ function readWorkbookFromArrayBuffer(data, opts) {
   return XLSX.read(data, { type: 'array', cellDates: true, ...opts });
 }
 
+/** SAP NF: raw serials/strings — avoid cellDates (SheetJS UTC Date → 1969/1970 display bugs). */
+function readSapWorkbookFromArrayBuffer(data) {
+  return XLSX.read(data, { type: 'array', cellDates: false });
+}
+
+const SAP_DATE_MIN_YEAR = 1990;
+const SAP_DATE_MAX_YEAR = 2100;
+
+function isPlausibleSapDate(d) {
+  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return false;
+  const y = d.getFullYear();
+  return y >= SAP_DATE_MIN_YEAR && y <= SAP_DATE_MAX_YEAR;
+}
+
+function sapDateFromParts(yr, mo, dd) {
+  if (yr < SAP_DATE_MIN_YEAR || yr > SAP_DATE_MAX_YEAR || mo < 1 || mo > 12 || dd < 1 || dd > 31) return null;
+  const d = new Date(yr, mo - 1, dd);
+  if (isNaN(d.getTime()) || d.getFullYear() !== yr || d.getMonth() !== mo - 1 || d.getDate() !== dd) return null;
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function sapDateFromExcelSerial(serial) {
+  if (typeof XLSX === 'undefined' || !XLSX.SSF) return null;
+  if (serial === null || serial === undefined || serial === '' || serial <= 0 || serial >= 1000000) return null;
+  const dc = XLSX.SSF.parse_date_code(serial);
+  if (!dc || dc.y < SAP_DATE_MIN_YEAR || dc.y > SAP_DATE_MAX_YEAR) return null;
+  return sapDateFromParts(dc.y, dc.m, dc.d);
+}
+
 function updateSaveStatus(msg, ok) {
   const el = $('saveStatus');
   if (!el) return;
@@ -218,64 +248,49 @@ function parseSapBrDate(v) {
   if (v instanceof Date && !isNaN(v.getTime())) {
     const d = new Date(v.getFullYear(), v.getMonth(), v.getDate());
     d.setHours(0, 0, 0, 0);
-    return d;
+    return isPlausibleSapDate(d) ? d : null;
   }
   if (typeof v === 'number' && !isNaN(v)) {
-    if (typeof XLSX !== 'undefined' && XLSX.SSF && v >= 1 && v < 1000000) {
-      const dc = XLSX.SSF.parse_date_code(v);
-      if (dc && dc.y >= 1990 && dc.y <= 2100) {
-        const d = new Date(dc.y, dc.m - 1, dc.d);
+    if (v <= 0) return null;
+    if (v >= 1e12) {
+      const d = new Date(v);
+      if (isPlausibleSapDate(d)) {
         d.setHours(0, 0, 0, 0);
         return d;
       }
+      return null;
     }
-    return null;
+    return sapDateFromExcelSerial(v);
   }
   const s = String(v).trim();
+  if (!s) return null;
   const dotParts = s.split('.');
-  if (dotParts.length === 3) {
+  if (dotParts.length === 3 && dotParts.every(p => /^\d+$/.test(p))) {
     const dd = parseInt(dotParts[0], 10), mo = parseInt(dotParts[1], 10), yr = parseInt(dotParts[2], 10);
-    if (yr >= 1990 && yr <= 2100 && mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31) {
-      const d = new Date(yr, mo - 1, dd);
-      if (!isNaN(d.getTime()) && d.getFullYear() === yr && d.getMonth() === mo - 1 && d.getDate() === dd) {
-        d.setHours(0, 0, 0, 0);
-        return d;
-      }
-    }
+    const d = sapDateFromParts(yr, mo, dd);
+    if (d) return d;
   }
   const slashParts = s.split('/');
   if (slashParts.length >= 3) {
     const yr = parseInt(String(slashParts[2]).trim(), 10);
     const mo = parseInt(slashParts[1], 10);
     const dd = parseInt(slashParts[0], 10);
-    if (yr >= 1990 && yr <= 2100 && mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31) {
-      const d = new Date(yr, mo - 1, dd);
-      if (!isNaN(d.getTime())) { d.setHours(0, 0, 0, 0); return d; }
-    }
+    const d = sapDateFromParts(yr, mo, dd);
+    if (d) return d;
   }
   const m = s.match(/^(\d{2})[.\-/](\d{2})[.\-/](\d{4})$/) || s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (m) {
     const yr = m[1].length === 4 ? parseInt(m[1], 10) : parseInt(m[3], 10);
     const mo = parseInt(m[2], 10);
     const dd = m[1].length === 4 ? parseInt(m[3], 10) : parseInt(m[1], 10);
-    if (yr >= 1990 && yr <= 2100 && mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31) {
-      const d = new Date(yr, mo - 1, dd);
-      if (!isNaN(d.getTime())) { d.setHours(0, 0, 0, 0); return d; }
-    }
+    const d = sapDateFromParts(yr, mo, dd);
+    if (d) return d;
   }
-  if (typeof XLSX !== 'undefined' && XLSX.SSF) {
-    const serial = parseFloat(s.replace(',', '.'));
-    if (!isNaN(serial) && serial >= 1 && serial < 1000000) {
-      const dc = XLSX.SSF.parse_date_code(serial);
-      if (dc && dc.y >= 1990 && dc.y <= 2100) {
-        const d = new Date(dc.y, dc.m - 1, dc.d);
-        d.setHours(0, 0, 0, 0);
-        return d;
-      }
-    }
+  const serial = parseFloat(s.replace(',', '.'));
+  if (!isNaN(serial) && serial >= 1 && serial < 1000000) {
+    const d = sapDateFromExcelSerial(serial);
+    if (d) return d;
   }
-  const d2 = new Date(s);
-  if (!isNaN(d2.getTime())) { d2.setHours(0, 0, 0, 0); return d2; }
   return null;
 }
 
@@ -293,10 +308,37 @@ function looksLikeSapNfCell(v) {
 
 function looksLikeSapDataRow(line) {
   if (!Array.isArray(line) || line.length <= SAP_COL_IDX.nf) return false;
-  const cliente = line[SAP_COL_IDX.cliente];
-  if (cliente === null || cliente === undefined || String(cliente).trim() === '') return false;
   if (!looksLikeSapNfCell(line[SAP_COL_IDX.nf])) return false;
-  return !!parseSapBrDate(line[SAP_COL_IDX.dtEmissao]);
+  const cliente = line[SAP_COL_IDX.cliente];
+  const dtRaw = line[SAP_COL_IDX.dtEmissao];
+  const hasCliente = cliente !== null && cliente !== undefined && String(cliente).trim() !== '';
+  const hasDate = !!parseSapBrDate(dtRaw);
+  return hasCliente || hasDate;
+}
+
+function hasSapPositionalCols(line) {
+  if (!Array.isArray(line) || line.length <= SAP_COL_IDX.nf) return false;
+  return looksLikeSapNfCell(line[SAP_COL_IDX.nf]);
+}
+
+function applySapColPositionalFallback(row, line, headerRow, standardLayout) {
+  if (!line || !hasSapPositionalCols(line)) return row;
+
+  const nf = line[SAP_COL_IDX.nf];
+  const cliente = line[SAP_COL_IDX.cliente];
+  const dtRaw = line[SAP_COL_IDX.dtEmissao];
+
+  if (nf !== null && nf !== undefined && String(nf).trim() !== '') row.nf = nf;
+  if (cliente !== null && cliente !== undefined && String(cliente).trim() !== '') {
+    row.cliente = String(cliente).trim();
+  }
+  const parsed = parseSapBrDate(dtRaw);
+  if (parsed) {
+    row.dtEmissao = parsed;
+    row._sapDateSource = 'colC';
+  }
+  row._sapPositionalLayout = true;
+  return row;
 }
 
 function isStandardSapNfLayout(headerRow, sampleRows) {
@@ -311,29 +353,12 @@ function isStandardSapNfLayout(headerRow, sampleRows) {
   return hits >= 2;
 }
 
-function applySapColPositionalFallback(row, line, headerRow, standardLayout) {
-  if (!line) return row;
-  const useLayout = standardLayout || isStandardSapNfLayout(headerRow) || looksLikeSapDataRow(line);
-  if (!useLayout) return row;
-
-  const nf = line[SAP_COL_IDX.nf];
-  const cliente = line[SAP_COL_IDX.cliente];
-  const dtRaw = line[SAP_COL_IDX.dtEmissao];
-
-  if (nf !== null && nf !== undefined && String(nf).trim() !== '') row.nf = nf;
-  if (cliente !== null && cliente !== undefined && String(cliente).trim() !== '') {
-    row.cliente = String(cliente).trim();
-  }
-  const parsed = parseSapBrDate(dtRaw);
-  if (parsed) {
-    row.dtEmissao = parsed;
-    row._sapDateSource = 'colC';
-  } else if (dtRaw !== null && dtRaw !== undefined && dtRaw !== '') {
-    row.dtEmissao = dtRaw;
-    row._sapDateSource = 'colC-raw';
-  }
-  row._sapPositionalLayout = true;
-  return row;
+function logSapRowDebug(line, row, idx) {
+  const b = line?.[SAP_COL_IDX.cliente];
+  const c = line?.[SAP_COL_IDX.dtEmissao];
+  const d = line?.[SAP_COL_IDX.nf];
+  console.debug(`[SAP NF] row ${idx + 1} raw B/C/D:`, b, c, d,
+    '→ parsed:', row?.cliente || '(vazio)', row?.dtEmissao || '(vazio)', row?.nf || '(vazio)');
 }
 
 function summarizeSapDateSources(rows) {
@@ -350,12 +375,21 @@ function parseSapSheetRows(sheet) {
   if (!raw.length) return { rows: [], headers: [] };
 
   let headerIdx = raw.findIndex(row => Array.isArray(row) && isSapHeaderRow(row));
-  if (headerIdx < 0) headerIdx = 0;
+  let dataStart = headerIdx >= 0 ? headerIdx + 1 : 0;
+  let headerRow = headerIdx >= 0 ? (raw[headerIdx] || []) : [];
 
-  const headerRow = raw[headerIdx] || [];
+  if (headerIdx < 0 && (looksLikeSapDataRow(raw[0]) || hasSapPositionalCols(raw[0]))) {
+    dataStart = 0;
+    headerRow = [];
+  } else if (headerIdx < 0) {
+    headerIdx = 0;
+    headerRow = raw[0] || [];
+    dataStart = 1;
+  }
+
   const headers = headerRow.map(h => String(h || '').trim()).filter(Boolean);
   const dataLines = [];
-  for (let i = headerIdx + 1; i < raw.length; i++) {
+  for (let i = dataStart; i < raw.length; i++) {
     const line = raw[i];
     if (!Array.isArray(line) || line.every(c => c === null || c === undefined || c === '')) continue;
     dataLines.push(line);
@@ -367,20 +401,23 @@ function parseSapSheetRows(sheet) {
   }
 
   const rows = [];
-  for (const line of dataLines) {
+  for (let i = 0; i < dataLines.length; i++) {
+    const line = dataLines[i];
     const obj = {};
     headerRow.forEach((h, j) => { if (h) obj[h] = line[j] ?? null; });
     let row = normalizeSapRow(obj);
     row = applySapColPositionalFallback(row, line, headerRow, standardLayout);
+    if (i < 3) logSapRowDebug(line, row, i);
     rows.push(row);
   }
   return { rows, headers };
 }
 
 function normalizeSapRow(row) {
+  const dtRaw = findSapField(row, 'dtEmissao');
   return {
     nf: findSapField(row, 'nf'),
-    dtEmissao: findSapField(row, 'dtEmissao'),
+    dtEmissao: parseSapBrDate(dtRaw),
     cliente: findSapField(row, 'cliente'),
     valorNF: findSapField(row, 'valorNF')
   };
@@ -474,7 +511,7 @@ function buildSapNfMap(rows) {
     const entry = {
       nf,
       cliente: r.cliente ? String(r.cliente).trim() : '',
-      dtEmissao: parseSapBrDate(r.dtEmissao) || r.dtEmissao,
+      dtEmissao: parseSapBrDate(r.dtEmissao),
       valorNF: num(r.valorNF)
     };
     const key = normNFKey(nf);
@@ -516,8 +553,9 @@ function applySapToNf(nf) {
 
   if (sap.cliente) nf.cliente = sap.cliente;
 
-  if (sap.dtEmissao) {
-    nf.dtNF = sap.dtEmissao;
+  const sapDt = parseSapBrDate(sap.dtEmissao);
+  if (sapDt) {
+    nf.dtNF = sapDt;
     delete nf.mesRef;
     delete nf.dtRef;
   }
@@ -572,7 +610,7 @@ function handleSapFile(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
-      const wb = readWorkbookFromArrayBuffer(e.target.result);
+      const wb = readSapWorkbookFromArrayBuffer(e.target.result);
       const { rows, sheetName } = loadSapRowsFromWorkbook(wb);
       if (!rows.length) {
         setSapLoadStatus('Nenhuma linha SAP encontrada na folha "' + sheetName + '".', false);
@@ -862,8 +900,9 @@ function computeSummary(list, fileName) {
 
 function fmtDate(d) {
   if (!d) return '-';
-  const dt = d instanceof Date ? d : new Date(d);
-  return isNaN(dt) ? '-' : dt.toLocaleDateString('pt-BR');
+  const dt = d instanceof Date ? d : (parseSapBrDate(d) || new Date(d));
+  if (isNaN(dt) || !isPlausibleSapDate(dt)) return '-';
+  return dt.toLocaleDateString('pt-BR');
 }
 
 function fmtValorDiff(v, mismatch) {
@@ -889,10 +928,10 @@ function fmtMesLabel(key) {
 
 function enrichNF(nf) {
   if (nf.mesRef) return nf;
-  let d = nf.dtNF ? new Date(nf.dtNF) : null;
+  let d = nf.dtNF ? (parseSapBrDate(nf.dtNF) || (nf.dtNF instanceof Date && isPlausibleSapDate(nf.dtNF) ? nf.dtNF : null)) : null;
   if ((!d || isNaN(d)) && nf.ctes?.length) {
-    const dates = nf.ctes.map(c => c.dtCte).filter(Boolean).map(x => new Date(x)).filter(x => !isNaN(x));
-    if (dates.length) d = new Date(Math.min(...dates));
+    const dates = nf.ctes.map(c => c.dtCte).filter(Boolean).map(x => parseSapBrDate(x) || new Date(x)).filter(x => x && !isNaN(x) && isPlausibleSapDate(x));
+    if (dates.length) d = new Date(Math.min(...dates.map(x => x.getTime())));
   }
   nf.dtRef = d && !isNaN(d) ? d : null;
   nf.mesRef = d && !isNaN(d) ? monthKey(d) : 'sem-data';
