@@ -87,7 +87,8 @@ const SAP_ALIASES = {
 };
 
 /** SAP NF export layout: col B=cliente, C=data emissão, D=NF (0-based indices). */
-const SAP_COL_IDX = { cliente: 1, dtEmissao: 2, nf: 3 };
+const SAP_COL_IDX_DEFAULT = { cliente: 1, dtEmissao: 2, nf: 3, valorNF: 4 };
+let activeSapColIdx = { ...SAP_COL_IDX_DEFAULT };
 
 function fteToast(msg) {
   if (typeof toast === 'function') toast(msg, 'success');
@@ -186,10 +187,38 @@ function normCol(s) {
     .replace(/\s+/g, ' ');
 }
 
+/** Canonical NF key: digits only, no leading zeros, handles Excel float 97723.0. */
 function normNFKey(nf) {
-  const s = String(nf || '').trim();
+  if (nf === null || nf === undefined || nf === '') return '';
+  if (typeof nf === 'number' && !isNaN(nf)) {
+    nf = Math.abs(nf - Math.round(nf)) < 1e-6 ? String(Math.round(nf)) : String(nf);
+  }
+  let s = String(nf).trim();
+  const floatMatch = s.match(/^(\d+)\.0+$/);
+  if (floatMatch) s = floatMatch[1];
   const digits = s.replace(/\D/g, '');
-  return digits || s;
+  if (!digits) return s;
+  return digits.replace(/^0+/, '') || '0';
+}
+
+function lookupSapEntry(nf) {
+  const key = normNFKey(nf);
+  if (!key) return null;
+  return sapNfMap[key] || null;
+}
+
+function countSapMatches(nfList) {
+  if (!nfList?.length || !Object.keys(sapNfMap).length) return 0;
+  return nfList.filter(nf => lookupSapEntry(nf.nf)).length;
+}
+
+function logSapKeyDebug(nfList) {
+  const uniSample = (nfList || []).slice(0, 5).map(n => ({
+    raw: n.nf,
+    key: normNFKey(n.nf)
+  }));
+  const sapSample = [...new Set(Object.keys(sapNfMap))].slice(0, 5);
+  console.debug('[SAP match] sample Unilog NF keys:', uniSample, 'sample SAP map keys:', sapSample);
 }
 
 function findField(row, field) {
@@ -306,27 +335,31 @@ function looksLikeSapNfCell(v) {
   return digits.length >= 4 && digits.length <= 12;
 }
 
-function looksLikeSapDataRow(line) {
-  if (!Array.isArray(line) || line.length <= SAP_COL_IDX.nf) return false;
-  if (!looksLikeSapNfCell(line[SAP_COL_IDX.nf])) return false;
-  const cliente = line[SAP_COL_IDX.cliente];
-  const dtRaw = line[SAP_COL_IDX.dtEmissao];
+function looksLikeSapDataRow(line, colIdx) {
+  const idx = colIdx || activeSapColIdx;
+  if (!Array.isArray(line) || line.length <= idx.nf) return false;
+  if (!looksLikeSapNfCell(line[idx.nf])) return false;
+  const cliente = line[idx.cliente];
+  const dtRaw = line[idx.dtEmissao];
   const hasCliente = cliente !== null && cliente !== undefined && String(cliente).trim() !== '';
   const hasDate = !!parseSapBrDate(dtRaw);
   return hasCliente || hasDate;
 }
 
-function hasSapPositionalCols(line) {
-  if (!Array.isArray(line) || line.length <= SAP_COL_IDX.nf) return false;
-  return looksLikeSapNfCell(line[SAP_COL_IDX.nf]);
+function hasSapPositionalCols(line, colIdx) {
+  const idx = colIdx || activeSapColIdx;
+  if (!Array.isArray(line) || line.length <= idx.nf) return false;
+  return looksLikeSapNfCell(line[idx.nf]);
 }
 
-function applySapColPositionalFallback(row, line, headerRow, standardLayout) {
-  if (!line || !hasSapPositionalCols(line)) return row;
+function applySapColPositionalFallback(row, line, headerRow, standardLayout, colIdx) {
+  const idx = colIdx || activeSapColIdx;
+  if (!line || !hasSapPositionalCols(line, idx)) return row;
 
-  const nf = line[SAP_COL_IDX.nf];
-  const cliente = line[SAP_COL_IDX.cliente];
-  const dtRaw = line[SAP_COL_IDX.dtEmissao];
+  const nf = line[idx.nf];
+  const cliente = line[idx.cliente];
+  const dtRaw = line[idx.dtEmissao];
+  const valorRaw = idx.valorNF != null ? line[idx.valorNF] : null;
 
   if (nf !== null && nf !== undefined && String(nf).trim() !== '') row.nf = nf;
   if (cliente !== null && cliente !== undefined && String(cliente).trim() !== '') {
@@ -337,27 +370,72 @@ function applySapColPositionalFallback(row, line, headerRow, standardLayout) {
     row.dtEmissao = parsed;
     row._sapDateSource = 'colC';
   }
+  if (valorRaw !== null && valorRaw !== undefined && valorRaw !== '' && !row.valorNF) {
+    row.valorNF = valorRaw;
+  }
   row._sapPositionalLayout = true;
   return row;
 }
 
-function isStandardSapNfLayout(headerRow, sampleRows) {
+function isStandardSapNfLayout(headerRow, sampleRows, colIdx) {
+  const idx = colIdx || activeSapColIdx;
   if (headerRow &&
-      isSapHeaderAtCol(headerRow, SAP_COL_IDX.cliente, 'cliente') &&
-      isSapHeaderAtCol(headerRow, SAP_COL_IDX.dtEmissao, 'dtEmissao') &&
-      isSapHeaderAtCol(headerRow, SAP_COL_IDX.nf, 'nf')) return true;
+      isSapHeaderAtCol(headerRow, idx.cliente, 'cliente') &&
+      isSapHeaderAtCol(headerRow, idx.dtEmissao, 'dtEmissao') &&
+      isSapHeaderAtCol(headerRow, idx.nf, 'nf')) return true;
   let hits = 0;
   for (const line of (sampleRows || []).slice(0, 5)) {
-    if (looksLikeSapDataRow(line)) hits++;
+    if (looksLikeSapDataRow(line, idx)) hits++;
   }
   return hits >= 2;
 }
 
-function logSapRowDebug(line, row, idx) {
-  const b = line?.[SAP_COL_IDX.cliente];
-  const c = line?.[SAP_COL_IDX.dtEmissao];
-  const d = line?.[SAP_COL_IDX.nf];
-  console.debug(`[SAP NF] row ${idx + 1} raw B/C/D:`, b, c, d,
+function scoreSapLayout(dataLines, colIdx) {
+  let hits = 0;
+  for (const line of (dataLines || []).slice(0, 15)) {
+    if (looksLikeSapDataRow(line, colIdx)) hits++;
+  }
+  return hits;
+}
+
+function resolveSapColIdx(headerRow, dataLines) {
+  const layouts = [
+    { cliente: 1, dtEmissao: 2, nf: 3, valorNF: 4, label: 'B/C/D/E' },
+    { cliente: 0, dtEmissao: 1, nf: 2, valorNF: 3, label: 'A/B/C/D' },
+    { cliente: 2, dtEmissao: 3, nf: 4, valorNF: 5, label: 'C/D/E/F' }
+  ];
+  for (const layout of layouts) {
+    if (headerRow &&
+        isSapHeaderAtCol(headerRow, layout.cliente, 'cliente') &&
+        isSapHeaderAtCol(headerRow, layout.dtEmissao, 'dtEmissao') &&
+        isSapHeaderAtCol(headerRow, layout.nf, 'nf')) {
+      console.debug('[SAP NF] Layout por cabeçalho:', layout.label);
+      return layout;
+    }
+  }
+  let best = layouts[0];
+  let bestScore = 0;
+  for (const layout of layouts) {
+    const s = scoreSapLayout(dataLines, layout);
+    if (s > bestScore) {
+      bestScore = s;
+      best = layout;
+    }
+  }
+  if (bestScore >= 2) {
+    console.debug('[SAP NF] Layout detectado por dados:', best.label, `(${bestScore} linhas)`);
+    return best;
+  }
+  console.debug('[SAP NF] Layout padrão B/C/D (fallback)');
+  return { ...SAP_COL_IDX_DEFAULT };
+}
+
+function logSapRowDebug(line, row, idx, colIdx) {
+  const c = colIdx || activeSapColIdx;
+  const b = line?.[c.cliente];
+  const dt = line?.[c.dtEmissao];
+  const d = line?.[c.nf];
+  console.debug(`[SAP NF] row ${idx + 1} raw B/C/D:`, b, dt, d,
     '→ parsed:', row?.cliente || '(vazio)', row?.dtEmissao || '(vazio)', row?.nf || '(vazio)');
 }
 
@@ -395,7 +473,8 @@ function parseSapSheetRows(sheet) {
     dataLines.push(line);
   }
 
-  const standardLayout = isStandardSapNfLayout(headerRow, dataLines);
+  activeSapColIdx = resolveSapColIdx(headerRow, dataLines);
+  const standardLayout = isStandardSapNfLayout(headerRow, dataLines, activeSapColIdx);
   if (standardLayout) {
     console.debug('[SAP NF] Layout padrão: col. B=cliente, C=data emissão, D=nota fiscal');
   }
@@ -406,8 +485,8 @@ function parseSapSheetRows(sheet) {
     const obj = {};
     headerRow.forEach((h, j) => { if (h) obj[h] = line[j] ?? null; });
     let row = normalizeSapRow(obj);
-    row = applySapColPositionalFallback(row, line, headerRow, standardLayout);
-    if (i < 3) logSapRowDebug(line, row, i);
+    row = applySapColPositionalFallback(row, line, headerRow, standardLayout, activeSapColIdx);
+    if (i < 3) logSapRowDebug(line, row, i, activeSapColIdx);
     rows.push(row);
   }
   return { rows, headers };
@@ -508,16 +587,15 @@ function buildSapNfMap(rows) {
   rows.forEach(r => {
     const nf = r.nf;
     if (nf === null || nf === undefined || String(nf).trim() === '') return;
+    const key = normNFKey(nf);
+    if (!key) return;
     const entry = {
       nf,
       cliente: r.cliente ? String(r.cliente).trim() : '',
       dtEmissao: parseSapBrDate(r.dtEmissao),
       valorNF: num(r.valorNF)
     };
-    const key = normNFKey(nf);
     map[key] = entry;
-    const raw = String(nf).trim();
-    if (raw !== key) map[raw] = entry;
   });
   return map;
 }
@@ -541,7 +619,7 @@ function applySapToNf(nf) {
   }
 
   const key = normNFKey(nf.nf);
-  const sap = sapNfMap[key] || sapNfMap[String(nf.nf).trim()];
+  const sap = lookupSapEntry(nf.nf);
   nf.sapFound = !!sap;
 
   if (!sap) {
@@ -605,6 +683,21 @@ function handleFile(file) {
   reader.readAsArrayBuffer(file);
 }
 
+function reEnrichAfterSapLoad() {
+  if (lastCtePack) {
+    processRows(lastCtePack.rows, lastCtePack.fileName, lastCtePack.sheetName, lastCtePack.headers);
+    return;
+  }
+  if (!currentNFs.length) return;
+  currentNFs = applySapToList(currentNFs.map(nf => {
+    delete nf.mesRef;
+    delete nf.dtRef;
+    return nf;
+  }));
+  currentSummary = computeSummary(currentNFs, currentSummary?.fileName || 'SAP enrich');
+  renderAll();
+}
+
 function handleSapFile(file) {
   setSapLoadStatus('A ler ' + file.name + ' ...', null);
   const reader = new FileReader();
@@ -617,25 +710,31 @@ function handleSapFile(file) {
         return;
       }
       sapNfMap = buildSapNfMap(rows);
-      const nKeys = new Set(Object.values(sapNfMap).map(x => x.nf)).size;
+      const nMapped = Object.keys(sapNfMap).length;
       const dateSources = summarizeSapDateSources(rows);
       console.log('[SAP] Data NF — fontes por coluna:', dateSources,
         dateSources.colC || dateSources['colC-raw'] ? '(col. C)' : '(alias cabeçalho)');
-      setSapLoadStatus(rows.length + ' linhas SAP · ' + nKeys + ' NFs mapeadas', true);
-      fteToast('Dados SAP carregados.');
+      console.log('[SAP] Map size:', nMapped, 'keys (canonical NF)');
 
-      if (lastCtePack) {
-        processRows(lastCtePack.rows, lastCtePack.fileName, lastCtePack.sheetName, lastCtePack.headers);
-      } else if (currentNFs.length) {
-        currentNFs = applySapToList(currentNFs.map(nf => {
-          delete nf.mesRef;
-          delete nf.dtRef;
-          return nf;
-        }));
-        currentSummary = computeSummary(currentNFs, currentSummary?.fileName || 'SAP enrich');
-        renderAll();
-        const nMismatch = currentSummary.nValorMismatch || 0;
+      reEnrichAfterSapLoad();
+
+      const nMatched = currentSummary?.nSapMatched ?? countSapMatches(currentNFs);
+      logSapKeyDebug(currentNFs);
+
+      setSapLoadStatus(
+        nMapped + ' NFs SAP mapeadas · ' + nMatched + ' matched com Unilog',
+        nMatched > 0 || !currentNFs.length
+      );
+
+      if (nMatched > 0) {
+        fteToast('Dados SAP carregados — ' + nMatched + ' NF(s) cruzadas com Unilog.');
+        const nMismatch = currentSummary?.nValorMismatch || 0;
         if (nMismatch) fteToast(nMismatch + ' NF(s) com diferença relevante de valor SAP vs Unilog.');
+      } else if (currentNFs.length) {
+        setSapLoadStatus(nMapped + ' NFs SAP mapeadas · 0 matched com Unilog', false);
+        fteToastError('SAP carregado mas nenhuma NF cruzou com Unilog — verifica formato/chaves.');
+      } else {
+        fteToast('Dados SAP carregados (' + nMapped + ' NFs). Carrega o Excel Unilog para cruzar.');
       }
     } catch (err) {
       console.error(err);
