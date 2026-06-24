@@ -187,7 +187,14 @@ function normCol(s) {
     .replace(/\s+/g, ' ');
 }
 
-/** Canonical NF key: digits only, no leading zeros, handles Excel float 97723.0. */
+/**
+ * Canonical NF key for Unilog ↔ SAP matching.
+ * Strips optional série suffix (-1, -2, -A…) and leading zeros from the numeric part.
+ * Same normalization on both sides.
+ *
+ * Unit samples (all → "97723"):
+ *   "97723", "00097723", "97723-1", "00097723-2", "0000097723-1", 97723, 97723.0
+ */
 function normNFKey(nf) {
   if (nf === null || nf === undefined || nf === '') return '';
   if (typeof nf === 'number' && !isNaN(nf)) {
@@ -196,10 +203,37 @@ function normNFKey(nf) {
   let s = String(nf).trim();
   const floatMatch = s.match(/^(\d+)\.0+$/);
   if (floatMatch) s = floatMatch[1];
-  const digits = s.replace(/\D/g, '');
-  if (!digits) return s;
+  const dashIdx = s.indexOf('-');
+  const base = dashIdx >= 0 ? s.slice(0, dashIdx) : s;
+  const digits = base.replace(/\D/g, '');
+  if (!digits) return '';
   return digits.replace(/^0+/, '') || '0';
 }
+
+/** Console self-check for normNFKey — run once at module load. */
+function _debugNormNFKeySamples() {
+  const samples = [
+    ['97723', '97723'],
+    ['00097723', '97723'],
+    ['97723-1', '97723'],
+    ['97723-2', '97723'],
+    ['00097723-2', '97723'],
+    ['0000097723-1', '97723'],
+    ['97723-A', '97723'],
+    [97723, '97723'],
+    [97723.0, '97723'],
+    ['97723.0', '97723']
+  ];
+  const mismatches = samples.filter(([raw, exp]) => normNFKey(raw) !== exp);
+  if (mismatches.length) {
+    console.warn('[normNFKey] sample mismatches:', mismatches.map(([raw, exp]) => ({
+      raw, got: normNFKey(raw), expected: exp
+    })));
+  } else {
+    console.debug('[normNFKey] samples OK:', samples.map(([raw]) => ({ raw, key: normNFKey(raw) })));
+  }
+}
+_debugNormNFKeySamples();
 
 function lookupSapEntry(nf) {
   const key = normNFKey(nf);
@@ -331,8 +365,8 @@ function isSapHeaderAtCol(headerRow, colIdx, field) {
 
 function looksLikeSapNfCell(v) {
   if (v === null || v === undefined || v === '') return false;
-  const digits = String(v).trim().replace(/\D/g, '');
-  return digits.length >= 4 && digits.length <= 12;
+  const key = normNFKey(v);
+  return key.length >= 4 && key.length <= 12;
 }
 
 function looksLikeSapDataRow(line, colIdx) {
