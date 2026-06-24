@@ -1,3 +1,6 @@
+// fretes.js v1.4.6
+const FRETES_JS_VERSION = '1.4.6';
+
 const sb = db;
 
 const $ = id => document.getElementById('fte-' + id);
@@ -17,6 +20,64 @@ let monthSort = { col: 'excesso', dir: -1 };
 let selectedMonth = '';
 let monthlyRows = [];
 let historyCache = [];
+let _fteSkipAutosave = false;
+let _fteLoadedCompany = null;
+
+function fteCompany() {
+  return typeof company !== 'undefined' ? company : 'DFB';
+}
+
+function fteCteSlot() {
+  return typeof EXCEL_SLOTS !== 'undefined' ? EXCEL_SLOTS.FRETES_CTE : 'fretes_cte';
+}
+
+function fteSapSlot() {
+  return typeof EXCEL_SLOTS !== 'undefined' ? EXCEL_SLOTS.FRETES_SAP_NF : 'fretes_sap_nf';
+}
+
+function updateFretesFileStatus(meta) {
+  const el = $('fileStatus');
+  if (!el) return;
+  const apply = (m) => {
+    const cte = m?.[fteCteSlot()];
+    const sap = m?.[fteSapSlot()];
+    const parts = [];
+    if (typeof excelStatusPart === 'function') {
+      const c = excelStatusPart(cte, 'CT-e:');
+      const s = excelStatusPart(sap, 'SAP:');
+      if (c) parts.push(c);
+      if (s) parts.push(s);
+    } else {
+      if (cte?.file_name) parts.push('CT-e: ' + cte.file_name);
+      if (sap?.file_name) parts.push('SAP: ' + sap.file_name);
+    }
+    if (parts.length) {
+      el.textContent = 'Último ficheiro: ' + parts.join(' · ');
+      el.style.display = 'block';
+    } else {
+      el.textContent = '';
+      el.style.display = 'none';
+    }
+  };
+  if (meta) {
+    apply(meta);
+    return;
+  }
+  if (typeof fetchExcelFiles !== 'function') return;
+  fetchExcelFiles([fteCteSlot(), fteSapSlot()]).then(apply).catch(() => {
+    el.style.display = 'none';
+  });
+}
+
+async function persistFretesFile(slot, fileName, arrayBuffer) {
+  if (typeof upsertExcelBinary !== 'function') return;
+  try {
+    await upsertExcelBinary(slot, fileName, arrayBuffer);
+    updateFretesFileStatus();
+  } catch (err) {
+    console.error('[fretes] persist', err);
+  }
+}
 
 const NF_COLUMNS = [
   { key: 'nf', label: 'Nota Fiscal', type: 'string' },
@@ -695,23 +756,87 @@ function applySapToList(list) {
   });
 }
 
+function processArrayBufferCte(arrayBuffer, fileName, opts = {}) {
+  try {
+    const wb = readWorkbookFromArrayBuffer(arrayBuffer);
+    const { rows, sheetName, headers } = loadRowsFromWorkbook(wb);
+    if (!rows.length) {
+      const msg = 'Nenhuma linha de dados encontrada. Folhas: ' + wb.SheetNames.join(', ');
+      if (!opts.silent) {
+        setLoadbar(msg, false);
+        fteToastError(msg);
+      }
+      return false;
+    }
+    if (!opts.silent) setLoadbar('A ler ' + fileName + ' ...', false);
+    processRows(rows, fileName, sheetName, headers);
+    return true;
+  } catch (err) {
+    console.error(err);
+    const msg = formatXlsxReadError(err, 'cte');
+    if (!opts.silent) {
+      setLoadbar(msg, true);
+      fteToastError(msg);
+    }
+    return false;
+  }
+}
+
+function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
+  try {
+    const wb = readSapWorkbookFromArrayBuffer(arrayBuffer);
+    const { rows, sheetName } = loadSapRowsFromWorkbook(wb);
+    if (!rows.length) {
+      const msg = 'Nenhuma linha SAP encontrada na folha "' + sheetName + '".';
+      if (!opts.silent) setSapLoadStatus(msg, false);
+      return false;
+    }
+    sapNfMap = buildSapNfMap(rows);
+    const nMapped = Object.keys(sapNfMap).length;
+    if (!opts.silent) {
+      console.log('[SAP] Map size:', nMapped, 'keys (canonical NF)');
+    }
+
+    reEnrichAfterSapLoad();
+
+    const nMatched = currentSummary?.nSapMatched ?? countSapMatches(currentNFs);
+    if (!opts.silent) {
+      logSapKeyDebug(currentNFs);
+      setSapLoadStatus(
+        nMapped + ' NFs SAP mapeadas · ' + nMatched + ' matched com Unilog',
+        nMatched > 0 || !currentNFs.length
+      );
+      if (nMatched > 0) {
+        fteToast('Dados SAP carregados — ' + nMatched + ' NF(s) cruzadas com Unilog.');
+        const nMismatch = currentSummary?.nValorMismatch || 0;
+        if (nMismatch) fteToast(nMismatch + ' NF(s) com diferença relevante de valor SAP vs Unilog.');
+      } else if (currentNFs.length) {
+        setSapLoadStatus(nMapped + ' NFs SAP mapeadas · 0 matched com Unilog', false);
+        fteToastError('SAP carregado mas nenhuma NF cruzou com Unilog — verifica formato/chaves.');
+      } else {
+        fteToast('Dados SAP carregados (' + nMapped + ' NFs). Carrega o Excel Unilog para cruzar.');
+      }
+    }
+    return true;
+  } catch (err) {
+    console.error(err);
+    const msg = formatXlsxReadError(err, 'sap');
+    if (!opts.silent) {
+      setSapLoadStatus(msg, false);
+      fteToastError(msg);
+    }
+    return false;
+  }
+}
+
 function handleFile(file) {
   setLoadbar('A ler ' + file.name + ' ...', false);
   const reader = new FileReader();
   reader.onload = (e) => {
-    try {
-      const wb = readWorkbookFromArrayBuffer(e.target.result);
-      const { rows, sheetName, headers } = loadRowsFromWorkbook(wb);
-      if (!rows.length) {
-        setLoadbar('Nenhuma linha de dados encontrada. Folhas: ' + wb.SheetNames.join(', '), false);
-        return;
-      }
-      processRows(rows, file.name, sheetName, headers);
-    } catch (err) {
-      console.error(err);
-      const msg = formatXlsxReadError(err, 'cte');
-      setLoadbar(msg, true);
-      fteToastError(msg);
+    const buf = e.target.result;
+    if (processArrayBufferCte(buf, file.name)) {
+      persistFretesFile(fteCteSlot(), file.name, buf);
+      _fteLoadedCompany = fteCompany();
     }
   };
   reader.readAsArrayBuffer(file);
@@ -736,45 +861,9 @@ function handleSapFile(file) {
   setSapLoadStatus('A ler ' + file.name + ' ...', null);
   const reader = new FileReader();
   reader.onload = (e) => {
-    try {
-      const wb = readSapWorkbookFromArrayBuffer(e.target.result);
-      const { rows, sheetName } = loadSapRowsFromWorkbook(wb);
-      if (!rows.length) {
-        setSapLoadStatus('Nenhuma linha SAP encontrada na folha "' + sheetName + '".', false);
-        return;
-      }
-      sapNfMap = buildSapNfMap(rows);
-      const nMapped = Object.keys(sapNfMap).length;
-      const dateSources = summarizeSapDateSources(rows);
-      console.log('[SAP] Data NF — fontes por coluna:', dateSources,
-        dateSources.colC || dateSources['colC-raw'] ? '(col. C)' : '(alias cabeçalho)');
-      console.log('[SAP] Map size:', nMapped, 'keys (canonical NF)');
-
-      reEnrichAfterSapLoad();
-
-      const nMatched = currentSummary?.nSapMatched ?? countSapMatches(currentNFs);
-      logSapKeyDebug(currentNFs);
-
-      setSapLoadStatus(
-        nMapped + ' NFs SAP mapeadas · ' + nMatched + ' matched com Unilog',
-        nMatched > 0 || !currentNFs.length
-      );
-
-      if (nMatched > 0) {
-        fteToast('Dados SAP carregados — ' + nMatched + ' NF(s) cruzadas com Unilog.');
-        const nMismatch = currentSummary?.nValorMismatch || 0;
-        if (nMismatch) fteToast(nMismatch + ' NF(s) com diferença relevante de valor SAP vs Unilog.');
-      } else if (currentNFs.length) {
-        setSapLoadStatus(nMapped + ' NFs SAP mapeadas · 0 matched com Unilog', false);
-        fteToastError('SAP carregado mas nenhuma NF cruzou com Unilog — verifica formato/chaves.');
-      } else {
-        fteToast('Dados SAP carregados (' + nMapped + ' NFs). Carrega o Excel Unilog para cruzar.');
-      }
-    } catch (err) {
-      console.error(err);
-      const msg = formatXlsxReadError(err, 'sap');
-      setSapLoadStatus(msg, false);
-      fteToastError(msg);
+    const buf = e.target.result;
+    if (processArrayBufferSap(buf, file.name)) {
+      persistFretesFile(fteSapSlot(), file.name, buf);
     }
   };
   reader.readAsArrayBuffer(file);
@@ -991,7 +1080,7 @@ function processRows(rows, fileName, sheetName, headers) {
 
   renderAll();
   showResultsView();
-  autosaveToCloud();
+  if (!_fteSkipAutosave) autosaveToCloud();
 }
 
 function computeSummary(list, fileName) {
@@ -1893,6 +1982,78 @@ async function loadHistory() {
   });
 }
 
+async function loadSavedFretesFiles(silent = false) {
+  if (typeof fetchExcelFiles !== 'function' || typeof base64ToArrayBuffer !== 'function') return false;
+  const co = fteCompany();
+  let meta;
+  try {
+    meta = await fetchExcelFiles([fteCteSlot(), fteSapSlot()]);
+  } catch (err) {
+    console.error('[fretes] load saved', err);
+    return false;
+  }
+
+  updateFretesFileStatus(meta);
+  const cteRec = meta[fteCteSlot()];
+  const sapRec = meta[fteSapSlot()];
+
+  if (!cteRec?.file_data) {
+    if (_fteLoadedCompany === co && currentNFs.length) return true;
+    return false;
+  }
+  if (_fteLoadedCompany === co && currentNFs.length && lastCtePack?.fileName === cteRec.file_name) {
+    return true;
+  }
+
+  _fteSkipAutosave = true;
+  try {
+    sapNfMap = {};
+    const cteBuf = base64ToArrayBuffer(cteRec.file_data);
+    const ok = processArrayBufferCte(cteBuf, cteRec.file_name || 'cte.xlsx', { silent: true });
+    if (!ok) return false;
+
+    if (sapRec?.file_data) {
+      const sapBuf = base64ToArrayBuffer(sapRec.file_data);
+      processArrayBufferSap(sapBuf, sapRec.file_name || 'sap.xlsx', { silent: true });
+    }
+
+    _fteLoadedCompany = co;
+    updateFretesFileStatus(meta);
+    if (!silent) fteToast('Últimos ficheiros fretes carregados.');
+    return true;
+  } catch (err) {
+    console.error('[fretes] restore', err);
+    if (!silent) fteToastError('Erro ao carregar ficheiros guardados.');
+    return false;
+  } finally {
+    _fteSkipAutosave = false;
+  }
+}
+
+function reloadFretesForCompany() {
+  _fteLoadedCompany = null;
+  currentNFs = [];
+  currentSummary = null;
+  currentUploadId = null;
+  sapNfMap = {};
+  lastCtePack = null;
+  activeSubPanel = null;
+  selectedMonth = '';
+  const results = $('results');
+  if (results) results.style.display = 'none';
+  const us = $('uploadSection');
+  if (us) us.style.display = 'block';
+  else {
+    const uz = $('uploadZone');
+    if (uz) uz.style.display = 'block';
+  }
+  setSapLoadStatus('');
+  setLoadbar('');
+  updateSaveStatus('');
+  updateFretesFileStatus();
+  if (typeof loadSavedFretesFiles === 'function') loadSavedFretesFiles(true);
+}
+
 function initFretes() {
   if (fteInited) return;
   fteInited = true;
@@ -1975,5 +2136,5 @@ function initFretes() {
     });
   });
 
-  loadLatestFromCloud();
+  loadSavedFretesFiles(true);
 }
