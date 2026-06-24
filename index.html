@@ -344,7 +344,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.4.6</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.4.7</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -402,6 +402,7 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bg" onclick="loadFromDB()">☁️ Carregar último guardado</button>
       <span id="procSpin" style="display:none"><span class="spin"></span></span>
     </div>
+    <div id="stockFileStatus" style="display:none;font-size:11px;color:var(--muted);margin-top:10px"></div>
   </div>
   <div id="loadBanner" style="display:none" class="banner"></div>
   <div id="upKpis" style="display:none"><div class="kr" id="upKpiRow"></div></div>
@@ -1359,6 +1360,7 @@ select.cad-inp{cursor:pointer;}
             <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
           </div>
         </div>
+        <div id="fte-fileStatus" style="display:none;font-size:11px;color:var(--muted);margin-top:10px"></div>
       </div>
       <div id="fte-loadbar" class="loadbar" style="display:none;"></div>
 
@@ -1468,6 +1470,81 @@ const SB_URL='https://qnscwppgljobelplgbkp.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFuc2N3cHBnbGpvYmVscGxnYmtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxMDc3NzgsImV4cCI6MjA5MTY4Mzc3OH0.9ysq0ibsn3qDPHe5WYF-yyq9-vEKjc_hIn9BNKZccYY';
 const db=supabase.createClient(SB_URL,SB_KEY);
 
+// ── EXCEL FILE PERSISTENCE (Supabase logistica_excel_files) ──
+// CREATE TABLE logistica_excel_files (
+//   company text NOT NULL,
+//   slot text NOT NULL,
+//   file_name text,
+//   uploaded_at timestamptz NOT NULL DEFAULT now(),
+//   file_data text,
+//   PRIMARY KEY (company, slot)
+// );
+// ALTER TABLE logistica_excel_files ENABLE ROW LEVEL SECURITY;
+// CREATE POLICY "anon_all" ON logistica_excel_files FOR ALL TO anon USING (true) WITH CHECK (true);
+const EXCEL_SLOTS={STOCK_SAP:'stock_sap',STOCK_UNILOG:'stock_unilog',FRETES_CTE:'fretes_cte',FRETES_SAP_NF:'fretes_sap_nf'};
+let stockSapFileName='',stockUniFileName='';
+
+function arrayBufferToBase64(buf){
+  const bytes=new Uint8Array(buf);
+  let s='';
+  const sz=0x8000;
+  for(let i=0;i<bytes.length;i+=sz)s+=String.fromCharCode.apply(null,bytes.subarray(i,i+sz));
+  return btoa(s);
+}
+function base64ToArrayBuffer(b64){
+  const bin=atob(b64);
+  const len=bin.length;
+  const bytes=new Uint8Array(len);
+  for(let i=0;i<len;i++)bytes[i]=bin.charCodeAt(i);
+  return bytes.buffer;
+}
+function fmtExcelFileDate(iso){
+  if(!iso)return'';
+  return new Date(iso).toLocaleDateString('pt-BR');
+}
+async function upsertExcelMeta(slot,fileName){
+  const{error}=await db.from('logistica_excel_files').upsert({company,slot,file_name:fileName,uploaded_at:new Date().toISOString()},{onConflict:'company,slot'});
+  if(error)throw error;
+}
+async function upsertExcelBinary(slot,fileName,arrayBuffer){
+  const{error}=await db.from('logistica_excel_files').upsert({company,slot,file_name:fileName,uploaded_at:new Date().toISOString(),file_data:arrayBufferToBase64(arrayBuffer)},{onConflict:'company,slot'});
+  if(error)throw error;
+}
+async function fetchExcelFiles(slots){
+  let q=db.from('logistica_excel_files').select('slot,file_name,uploaded_at,file_data').eq('company',company);
+  if(slots?.length)q=q.in('slot',slots);
+  const{data,error}=await q;
+  if(error)throw error;
+  const map={};
+  (data||[]).forEach(r=>{map[r.slot]=r;});
+  return map;
+}
+function excelStatusPart(rec,label){
+  if(!rec?.file_name)return'';
+  const dt=fmtExcelFileDate(rec.uploaded_at);
+  return label+' '+rec.file_name+(dt?' ('+dt+')':'');
+}
+async function updateStockFileStatus(){
+  const el=document.getElementById('stockFileStatus');
+  if(!el)return;
+  try{
+    const m=await fetchExcelFiles([EXCEL_SLOTS.STOCK_SAP,EXCEL_SLOTS.STOCK_UNILOG]);
+    const parts=[excelStatusPart(m[EXCEL_SLOTS.STOCK_SAP],'SAP:'),excelStatusPart(m[EXCEL_SLOTS.STOCK_UNILOG],'Unilog:')].filter(Boolean);
+    if(parts.length){el.textContent='Último ficheiro: '+parts.join(' · ');el.style.display='block';}
+    else el.style.display='none';
+  }catch(e){el.style.display='none';}
+}
+async function applyStockFileLabelsFromMeta(){
+  try{
+    const m=await fetchExcelFiles([EXCEL_SLOTS.STOCK_SAP,EXCEL_SLOTS.STOCK_UNILOG]);
+    const sapEl=document.getElementById('sapFn'),uniEl=document.getElementById('uniFn');
+    const sapZ=document.getElementById('sapZone'),uniZ=document.getElementById('uniZone');
+    if(m[EXCEL_SLOTS.STOCK_SAP]?.file_name){sapEl.textContent='✓ '+m[EXCEL_SLOTS.STOCK_SAP].file_name;sapZ?.classList.add('loaded');}
+    if(m[EXCEL_SLOTS.STOCK_UNILOG]?.file_name){uniEl.textContent='✓ '+m[EXCEL_SLOTS.STOCK_UNILOG].file_name;uniZ?.classList.add('loaded');}
+    await updateStockFileStatus();
+  }catch(e){}
+}
+
 // Depot maps per company
 const DEPOT_MAP_DFB={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2','FI','SI'],label:'0044 — Avarias'},'MUIM':{classes:['00'],label:'MUIM — Equipamento Profissional',catOnly:'Equipamento Profissional'}};
 const DEPOT_MAP_QB={'11':{classes:['00'],label:'0011 — Disponível'},'44':{classes:['A1','A2','FI','SI'],label:'0044 — Avarias'},'99':{classes:['104'],label:'0099 — Vencidos'}};
@@ -1522,7 +1599,7 @@ async function init(){
         }
       }
       if(t.dataset.page==='history')renderHistory();
-      if(t.dataset.page==='fretes')initFretes();
+      if(t.dataset.page==='fretes'){initFretes();if(typeof loadSavedFretesFiles==='function')loadSavedFretesFiles(true);}
       scheduleColResize();
     };
   });
@@ -1536,8 +1613,8 @@ async function init(){
 function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok':'');document.getElementById('dbLbl').textContent=ok?'Supabase OK':'offline';}
 
 // ── FILES ──
-function loadSap(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
-function loadUni(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
+function loadSap(inp){const f=inp.files[0];if(!f)return;stockSapFileName=f.name;readXlsx(f,rows=>{syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
+function loadUni(inp){const f=inp.files[0];if(!f)return;stockUniFileName=f.name;readXlsx(f,rows=>{syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
 function xlsxReadErrorMsg(err){const m=String(err?.message||err||'');if(/encryptioninfo|encrypted file|password|agile encryption|office crypto|file is password-protected/i.test(m))return 'Ficheiro Excel protegido por password — exporta sem proteção ou guarda como .xlsx não encriptado (Excel → Guardar como). SheetJS CE não suporta ficheiros encriptados.';return 'Erro: '+m;}
 function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast(xlsxReadErrorMsg(err),'error');}};r.readAsArrayBuffer(file);}
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
@@ -3609,6 +3686,11 @@ async function processAll(){
     const{error}=await db.from('logistica_stock').upsert(payload,{onConflict:'id'});
     if(!error){await db.from('logistica_history').insert({company,uploaded_at:procAt,sap_rows:sapData.length,unilog_rows:uniData.length,summary:payload.recon_summary});toast('Guardado ✓','success');}
     else toast('DB: '+error.message,'error');
+    try{
+      if(stockSapFileName)await upsertExcelMeta(EXCEL_SLOTS.STOCK_SAP,stockSapFileName);
+      if(stockUniFileName)await upsertExcelMeta(EXCEL_SLOTS.STOCK_UNILOG,stockUniFileName);
+      await updateStockFileStatus();
+    }catch(e){console.warn('[stock] excel meta',e);}
   }catch(e){toast('Offline — dados em memória','error');}
   updateLoadBanner(procAt);
   document.getElementById('procSpin').style.display='none';document.getElementById('procBtn').disabled=false;
@@ -3759,8 +3841,13 @@ function switchCompany(){
   syncCompanyDepotMap();
   // Reset all data
   sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;valConflData=[];valConflStats=null;vencForaDepStats=null;vencForaDepSapStats=null;suspValidados=new Set();suspValidadosOcultos=0;
+  stockSapFileName='';stockUniFileName='';
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
+  document.getElementById('sapFn').textContent='';document.getElementById('uniFn').textContent='';
+  document.getElementById('sapZone')?.classList.remove('loaded');document.getElementById('uniZone')?.classList.remove('loaded');
+  const stockSt=document.getElementById('stockFileStatus');if(stockSt){stockSt.textContent='';stockSt.style.display='none';}
+  document.getElementById('procBtn').disabled=true;
   renderUpKpis();
   const ec=document.getElementById('transEcBody');if(ec)ec.innerHTML='';
   const qb=document.getElementById('transQbBody');if(qb)qb.innerHTML='';
@@ -3773,6 +3860,7 @@ function switchCompany(){
   const valConflBadge=document.getElementById('valConflBadge');if(valConflBadge){valConflBadge.textContent='';valConflBadge.style.display='none';}
   const alertBadge=document.getElementById('alertBadge');if(alertBadge){alertBadge.textContent='';alertBadge.style.display='none';}
   // Try to load saved data for the new company
+  if(typeof reloadFretesForCompany==='function')reloadFretesForCompany();
   loadFromDB(true);
   toast('Empresa: '+company,'info');
 }
@@ -3803,6 +3891,7 @@ async function loadFromDB(silent=false){
       if(activePage.id==='page-pecas')renderPecas();
     }
     updateLoadBanner(data.uploaded_at);
+    await applyStockFileLabelsFromMeta();
     if(!silent)toast('Carregado: '+company,'success');
   }catch(e){if(!silent)toast('Erro: '+e.message,'error');}
 }
