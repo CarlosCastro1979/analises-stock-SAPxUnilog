@@ -93,6 +93,45 @@ function fteToast(msg) {
   if (typeof toast === 'function') toast(msg, 'success');
 }
 
+function fteToastError(msg) {
+  if (typeof toast === 'function') toast(msg, 'error');
+}
+
+/** SheetJS CE (0.18.x) cannot decrypt ECMA-376 password-protected xlsx. */
+function isEncryptedXlsxError(err) {
+  const m = String(err?.message || err || '');
+  return /encryptioninfo|encrypted file|password|agile encryption|office crypto|file is password-protected/i.test(m);
+}
+
+function formatXlsxReadError(err, context) {
+  if (isEncryptedXlsxError(err)) {
+    return 'Ficheiro SAP protegido por password — não é possível ler ficheiros Excel encriptados. '
+      + 'Exporta do SAP sem proteção, ou abre no Excel e guarda como .xlsx sem password '
+      + '(Ficheiro → Guardar como). Alternativa: exportar como CSV.';
+  }
+  const prefix = context === 'sap' ? 'Erro a ler SAP' : 'Erro a ler o ficheiro';
+  return prefix + ': ' + String(err?.message || err || 'ficheiro inválido');
+}
+
+function setSapLoadStatus(msg, ok) {
+  const el = $('sapLoadStatus');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = ok === false ? 'var(--red)' : (ok === true ? 'var(--green)' : 'var(--muted)');
+}
+
+function setLoadbar(msg, isError) {
+  const el = $('loadbar');
+  if (!el) return;
+  el.style.display = 'block';
+  el.textContent = msg;
+  el.style.color = isError ? 'var(--red)' : 'var(--muted)';
+}
+
+function readWorkbookFromArrayBuffer(data, opts) {
+  return XLSX.read(data, { type: 'array', cellDates: true, ...opts });
+}
+
 function updateSaveStatus(msg, ok) {
   const el = $('saveStatus');
   if (!el) return;
@@ -507,37 +546,36 @@ function applySapToList(list) {
 }
 
 function handleFile(file) {
-  $('loadbar').style.display = 'block';
-  $('loadbar').textContent = 'A ler ' + file.name + ' ...';
+  setLoadbar('A ler ' + file.name + ' ...', false);
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
-      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const wb = readWorkbookFromArrayBuffer(e.target.result);
       const { rows, sheetName, headers } = loadRowsFromWorkbook(wb);
       if (!rows.length) {
-        $('loadbar').textContent =
-          'Nenhuma linha de dados encontrada. Folhas: ' + wb.SheetNames.join(', ');
+        setLoadbar('Nenhuma linha de dados encontrada. Folhas: ' + wb.SheetNames.join(', '), false);
         return;
       }
       processRows(rows, file.name, sheetName, headers);
     } catch (err) {
       console.error(err);
-      $('loadbar').textContent = 'Erro a ler o ficheiro: ' + err.message;
+      const msg = formatXlsxReadError(err, 'cte');
+      setLoadbar(msg, true);
+      fteToastError(msg);
     }
   };
   reader.readAsArrayBuffer(file);
 }
 
 function handleSapFile(file) {
-  const statusEl = $('sapLoadStatus');
-  if (statusEl) statusEl.textContent = 'A ler ' + file.name + ' ...';
+  setSapLoadStatus('A ler ' + file.name + ' ...', null);
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
-      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const wb = readWorkbookFromArrayBuffer(e.target.result);
       const { rows, sheetName } = loadSapRowsFromWorkbook(wb);
       if (!rows.length) {
-        if (statusEl) statusEl.textContent = 'Nenhuma linha SAP encontrada na folha "' + sheetName + '".';
+        setSapLoadStatus('Nenhuma linha SAP encontrada na folha "' + sheetName + '".', false);
         return;
       }
       sapNfMap = buildSapNfMap(rows);
@@ -545,7 +583,7 @@ function handleSapFile(file) {
       const dateSources = summarizeSapDateSources(rows);
       console.log('[SAP] Data NF — fontes por coluna:', dateSources,
         dateSources.colC || dateSources['colC-raw'] ? '(col. C)' : '(alias cabeçalho)');
-      if (statusEl) statusEl.textContent = rows.length + ' linhas SAP · ' + nKeys + ' NFs mapeadas';
+      setSapLoadStatus(rows.length + ' linhas SAP · ' + nKeys + ' NFs mapeadas', true);
       fteToast('Dados SAP carregados.');
 
       if (lastCtePack) {
@@ -563,7 +601,9 @@ function handleSapFile(file) {
       }
     } catch (err) {
       console.error(err);
-      if (statusEl) statusEl.textContent = 'Erro a ler SAP: ' + err.message;
+      const msg = formatXlsxReadError(err, 'sap');
+      setSapLoadStatus(msg, false);
+      fteToastError(msg);
     }
   };
   reader.readAsArrayBuffer(file);

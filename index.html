@@ -1,10 +1,11 @@
-<!DOCTYPE html><!-- v20260624190000 -->
+<!DOCTYPE html><!-- v20260624203000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Performance Logística — Delta Foods Brasil</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8102e'/><text x='16' y='22' font-family='Arial' font-weight='700' font-size='13' fill='white' text-anchor='middle'>DF</text></svg>">
+<!-- SheetJS 0.18.5 CE: não suporta xlsx encriptados (ECMA-376 / password). Ver fretes.js formatXlsxReadError. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -343,7 +344,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.4.2</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.4.3</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1353,7 +1354,7 @@ select.cad-inp{cursor:pointer;}
               <div style="font-size:24px;margin-bottom:6px">🗄️</div>
               <div style="font-size:12px;font-weight:600">Notas fiscais SAP</div>
               <div style="font-size:11px;color:var(--muted);margin-top:4px">NF · data emissão · cliente · valor</div>
-              <div id="fte-sapLoadStatus" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+              <div id="fte-sapLoadStatus" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:8px"></div>
             </div>
             <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
           </div>
@@ -1537,7 +1538,8 @@ function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok'
 // ── FILES ──
 function loadSap(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
 function loadUni(inp){const f=inp.files[0];if(!f)return;readXlsx(f,rows=>{syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
-function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast('Erro: '+err.message,'error');}};r.readAsArrayBuffer(file);}
+function xlsxReadErrorMsg(err){const m=String(err?.message||err||'');if(/encryptioninfo|encrypted file|password|agile encryption|office crypto|file is password-protected/i.test(m))return 'Ficheiro Excel protegido por password — exporta sem proteção ou guarda como .xlsx não encriptado (Excel → Guardar como). SheetJS CE não suporta ficheiros encriptados.';return 'Erro: '+m;}
+function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast(xlsxReadErrorMsg(err),'error');}};r.readAsArrayBuffer(file);}
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
 
 // ── NORMALIZE ──
