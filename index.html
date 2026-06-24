@@ -242,6 +242,9 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-fretes .tbl-wrap th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;position:sticky;top:0;background:#fff;z-index:1;}
 #page-fretes .tbl-wrap td{padding:8px 10px;border-bottom:1px solid var(--bg4);vertical-align:top;}
 #page-fretes .tbl-wrap tr.row-clickable{cursor:pointer;}#page-fretes .tbl-wrap tr.row-clickable:hover{background:var(--bg3);}
+#page-fretes tr.nf-val-mismatch td{background:#fff8e1 !important;}
+#page-fretes tr.nf-val-mismatch:hover td{background:#ffecb3 !important;}
+#page-fretes .filters label.filter-chk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;white-space:nowrap;}
 #page-fretes .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;}
 #page-fretes .b-ok{background:#dcfce7;color:var(--green);}#page-fretes .b-min{background:#fef3c7;color:var(--yellow);}
 #page-fretes .b-dev{background:#dbeafe;color:var(--blue);}#page-fretes .b-flag{background:#fee2e2;color:var(--red);}
@@ -340,7 +343,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.4.0</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1324,7 +1327,7 @@ select.cad-inp{cursor:pointer;}
 <div class="page" id="page-fretes">
   <div class="card">
     <div class="ch"><div class="ct">Conciliação CT-e × Nota Fiscal</div></div>
-    <p style="font-size:12px;color:var(--muted);margin:-8px 0 14px;">Validação da cobrança de frete (6% do valor da NF). Carrega o Excel CT-e/NF e, opcionalmente, o Excel SAP com datas de emissão e nomes de clientes.</p>
+    <p style="font-size:12px;color:var(--muted);margin:-8px 0 14px;">Validação da cobrança de frete (6% do valor da NF). Carrega o Excel CT-e/NF (Unilog) e o Excel SAP de notas fiscais — datas, clientes e comparação de valores.</p>
 
     <div class="fte-tabs">
       <div class="fte-tab active" data-tab="analise">Análise atual</div>
@@ -1349,7 +1352,7 @@ select.cad-inp{cursor:pointer;}
             <div class="uz" id="fte-sapUploadZone">
               <div style="font-size:24px;margin-bottom:6px">🗄️</div>
               <div style="font-size:12px;font-weight:600">Notas fiscais SAP</div>
-              <div style="font-size:11px;color:var(--muted);margin-top:4px">NF + data emissão + nome cliente</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px">NF · data emissão · cliente · valor</div>
               <div id="fte-sapLoadStatus" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
             </div>
             <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
@@ -1386,6 +1389,7 @@ select.cad-inp{cursor:pointer;}
           <select id="fte-filterTransp"><option value="">Todos os transportadores</option></select>
           <select id="fte-filterMes"><option value="">Todos os meses</option></select>
           <input type="text" id="fte-searchNF" placeholder="Procurar NF ou cliente…">
+          <label class="filter-chk"><input type="checkbox" id="fte-filterValorDiff"> Só Δ valor SAP≠Unilog</label>
         </div>
         <div class="tbl-wrap">
           <table id="fte-nfTable">
@@ -6739,7 +6743,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js"></script>
+<script src="fretes.js?v=1.4.0"></script>
 <script>
 init();
 initMultiselects();

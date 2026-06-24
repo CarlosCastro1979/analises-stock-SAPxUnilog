@@ -20,10 +20,13 @@ let historyCache = [];
 
 const NF_COLUMNS = [
   { key: 'nf', label: 'Nota Fiscal', type: 'string' },
-  { key: 'cliente', label: 'Cliente', type: 'string' },
+  { key: 'dtNF', label: 'Data NF', type: 'date', title: 'Data de emissão (SAP, se carregado)' },
+  { key: 'cliente', label: 'Cliente', type: 'string', title: 'Nome do cliente (SAP, se carregado)' },
   { key: 'transportador', label: 'Transportador', type: 'string' },
   { key: 'modalidade', label: 'Modal.', type: 'string' },
-  { key: 'valorNF', label: 'Valor NF', type: 'number', right: true },
+  { key: 'valorNF', label: 'Valor NF (Unilog)', type: 'number', right: true, title: 'Valor da NF no Excel Unilog' },
+  { key: 'valorSAP', label: 'Valor SAP', type: 'number', right: true, title: 'Valor da NF no Excel SAP' },
+  { key: 'valorDiff', label: 'Δ SAP', type: 'number', right: true, title: 'Diferença valor SAP − Unilog' },
   { key: 'nCte', label: 'Qtd CT-e', type: 'number', right: true, title: 'Quantidade de CT-e para esta NF/cobrança (col. E do Excel Unilog)' },
   { key: 'pago', label: 'Pago', type: 'number', right: true },
   { key: 'esperado', label: 'Esperado (6%)', type: 'number', right: true },
@@ -34,10 +37,13 @@ const NF_COLUMNS = [
 
 const SUB_COLUMNS = [
   { key: 'nf', label: 'NF', type: 'string' },
+  { key: 'dtNF', label: 'Data NF', type: 'date' },
   { key: 'cliente', label: 'Cliente', type: 'string' },
   { key: 'transportador', label: 'Transportador', type: 'string' },
   { key: 'nCte', label: 'Qtd CT-e', type: 'number' },
-  { key: 'valorNF', label: 'Valor NF', type: 'number', right: true },
+  { key: 'valorNF', label: 'Valor Unilog', type: 'number', right: true },
+  { key: 'valorSAP', label: 'Valor SAP', type: 'number', right: true },
+  { key: 'valorDiff', label: 'Δ SAP', type: 'number', right: true },
   { key: 'pago', label: 'Pago', type: 'number', right: true },
   { key: 'esperado', label: 'Esperado', type: 'number', right: true },
   { key: 'diff', label: 'Diferença', type: 'number', right: true },
@@ -272,25 +278,55 @@ function buildSapNfMap(rows) {
   return map;
 }
 
+/** Relevant SAP vs Unilog NF value gap: abs diff > R$1 AND > 0.5% of the larger value. */
+const SAP_VALOR_DIFF_MIN_ABS = 1.0;
+const SAP_VALOR_DIFF_MIN_PCT = 0.005;
+
+function isRelevantValorDiff(unilogVal, sapVal) {
+  const u = num(unilogVal);
+  const s = num(sapVal);
+  const diff = Math.abs(s - u);
+  if (diff <= SAP_VALOR_DIFF_MIN_ABS) return false;
+  const ref = Math.max(Math.abs(s), Math.abs(u), 1);
+  return (diff / ref) > SAP_VALOR_DIFF_MIN_PCT;
+}
+
 function applySapToNf(nf) {
+  if (nf.valorUnilog === undefined || nf.valorUnilog === null) {
+    nf.valorUnilog = num(nf.valorNF);
+  }
+
   const key = normNFKey(nf.nf);
   const sap = sapNfMap[key] || sapNfMap[String(nf.nf).trim()];
-  if (!sap) return nf;
+  nf.sapFound = !!sap;
 
-  if (!nf.cliente && sap.cliente) nf.cliente = sap.cliente;
+  if (!sap) {
+    nf.valorSAP = null;
+    nf.valorDiff = null;
+    nf.sapValorMismatch = false;
+    return nf;
+  }
 
-  if (sap.dtEmissao && !nf.dtNF) {
+  if (sap.cliente) nf.cliente = sap.cliente;
+
+  if (sap.dtEmissao) {
     nf.dtNF = sap.dtEmissao;
     delete nf.mesRef;
     delete nf.dtRef;
   }
 
+  nf.valorSAP = sap.valorNF;
+  const unilogVal = nf.valorUnilog;
+
   if ((!nf.valorNF || nf.valorNF === 0) && sap.valorNF) {
     nf.valorNF = sap.valorNF;
-    nf.esperado = nf.valorNF * 0.06;
+    nf.esperado = nf.valorNF * CTE_PCT_TARGET;
     nf.diff = nf.pago - nf.esperado;
     nf.pct = nf.valorNF > 0 ? nf.pago / nf.valorNF : 0;
   }
+
+  nf.valorDiff = sap.valorNF - unilogVal;
+  nf.sapValorMismatch = isRelevantValorDiff(unilogVal, sap.valorNF);
 
   return nf;
 }
@@ -351,6 +387,8 @@ function handleSapFile(file) {
         }));
         currentSummary = computeSummary(currentNFs, currentSummary?.fileName || 'SAP enrich');
         renderAll();
+        const nMismatch = currentSummary.nValorMismatch || 0;
+        if (nMismatch) fteToast(nMismatch + ' NF(s) com diferença relevante de valor SAP vs Unilog.');
       }
     } catch (err) {
       console.error(err);
@@ -481,7 +519,9 @@ function buildNfRecord(g) {
 
   return {
     nf: g.nf, cliente: g.cliente || '', transportador: g.transportador, modalidade: g.modalidade,
-    valorNF: g.valorNF, nCte, pago, esperado, diff, pct, status, motivo, ctes,
+    valorNF: g.valorNF, valorUnilog: g.valorNF, valorSAP: null, valorDiff: null,
+    sapFound: false, sapValorMismatch: false,
+    nCte, pago, esperado, diff, pct, status, motivo, ctes,
     temDevolucao: g.temDevolucao, dtNF: g.dtNF, qtdCteFromSource: g.qtdCteFromSource || 0
   };
 }
@@ -587,6 +627,7 @@ function computeSummary(list, fileName) {
   let nUnicoCte = 0, nMultiplosCte = 0;
   let excessoPositivo = 0, deficit = 0;
 
+  let nValorMismatch = 0, nSapMatched = 0;
   list.forEach(x => {
     byStatus[x.status]++;
     excessoByStatus[x.status] += x.diff;
@@ -594,6 +635,8 @@ function computeSummary(list, fileName) {
     if (x.nCte === 1) nUnicoCte++; else nMultiplosCte++;
     if (x.diff > 0) excessoPositivo += x.diff;
     else if (x.diff < 0) deficit += x.diff;
+    if (x.sapFound) nSapMatched++;
+    if (x.sapValorMismatch) nValorMismatch++;
   });
 
   return {
@@ -601,11 +644,25 @@ function computeSummary(list, fileName) {
     pctPagoSobreNF: totalValorNF ? totalPago / totalValorNF : 0,
     excessoPositivo, deficit, excessoPct: totalEsperado ? excesso / totalEsperado : 0,
     periodoInicio, periodoFim, byStatus, excessoByStatus, pagoByStatus,
-    nUnicoCte, nMultiplosCte
+    nUnicoCte, nMultiplosCte, nValorMismatch, nSapMatched,
+    sapLoaded: Object.keys(sapNfMap).length > 0
   };
 }
 
-function fmtDate(d) { return d ? d.toLocaleDateString('pt-BR') : '-'; }
+function fmtDate(d) {
+  if (!d) return '-';
+  const dt = d instanceof Date ? d : new Date(d);
+  return isNaN(dt) ? '-' : dt.toLocaleDateString('pt-BR');
+}
+
+function fmtValorDiff(v, mismatch) {
+  if (v === null || v === undefined) return '-';
+  const color = mismatch ? '#b3261e' : 'inherit';
+  const sign = v > 0 ? '+' : '';
+  return `<span style="color:${color}">${sign}${fmtMoney(v)}</span>`;
+}
+
+function nfColCount() { return NF_COLUMNS.length; }
 
 function monthKey(d) {
   const dt = d instanceof Date ? d : new Date(d);
@@ -660,6 +717,12 @@ function computeMonthly(list) {
 function sortValue(row, col, type) {
   if (type === 'status') return (statusMeta[row.status] || {}).label || row.status || '';
   if (type === 'number') return num(row[col]);
+  if (type === 'date') {
+    const d = row[col];
+    if (!d) return 0;
+    const dt = d instanceof Date ? d : new Date(d);
+    return isNaN(dt) ? 0 : dt.getTime();
+  }
   return String(row[col] ?? '').toLowerCase();
 }
 
@@ -716,11 +779,15 @@ function nfExportRow(x) {
   enrichNF(x);
   return {
     'Nota Fiscal': x.nf,
+    'Data NF': x.dtNF ? new Date(x.dtNF) : '',
     'Cliente': x.cliente || '',
     'Mês': fmtMesLabel(x.mesRef),
     'Transportador': x.transportador,
     'Modalidade': x.modalidade,
-    'Valor NF': x.valorNF,
+    'Valor NF (Unilog)': x.valorUnilog ?? x.valorNF,
+    'Valor SAP': x.valorSAP ?? '',
+    'Δ SAP (SAP − Unilog)': x.valorDiff ?? '',
+    'Δ valor relevante': x.sapValorMismatch ? 'Sim' : 'Não',
     'Qtd CT-e': x.nCte,
     'Pago': x.pago,
     'Esperado (6%)': x.esperado,
@@ -902,10 +969,12 @@ function getFilteredNFs() {
   const transpF = $('filterTransp').value;
   const mesF = $('filterMes').value;
   const searchF = $('searchNF').value.trim().toLowerCase();
+  const valorDiffF = $('filterValorDiff')?.checked;
   let list = currentNFs;
   if (statusF) list = list.filter(x => x.status === statusF);
   if (transpF) list = list.filter(x => x.transportador === transpF);
   if (mesF) list = list.filter(x => x.mesRef === mesF);
+  if (valorDiffF) list = list.filter(x => x.sapValorMismatch);
   if (searchF) list = list.filter(x =>
     String(x.nf).includes(searchF) ||
     String(x.cliente || '').toLowerCase().includes(searchF)
@@ -958,8 +1027,10 @@ function renderMonthlyTable() {
 
 function renderAll() {
   const s = currentSummary;
-  $('periodoLabel').textContent =
-    `Ficheiro: ${s.fileName} · Período CT-e: ${fmtDate(s.periodoInicio)} a ${fmtDate(s.periodoFim)} · ${s.totalNF} notas fiscais · ${s.nUnicoCte} com CT-e único · ${s.nMultiplosCte} com múltiplos CT-e`;
+  const sapNote = s.sapLoaded ? ` · SAP: ${s.nSapMatched}/${s.totalNF} NFs cruzadas` : '';
+  const mismatchNote = s.nValorMismatch ? ` · <span style="color:#b3261e;font-weight:600">${s.nValorMismatch} Δ valor SAP≠Unilog</span>` : '';
+  $('periodoLabel').innerHTML =
+    `Ficheiro: ${s.fileName} · Período CT-e: ${fmtDate(s.periodoInicio)} a ${fmtDate(s.periodoFim)} · ${s.totalNF} notas fiscais · ${s.nUnicoCte} com CT-e único · ${s.nMultiplosCte} com múltiplos CT-e${sapNote}${mismatchNote}`;
 
   const warnEl = $('dataWarning');
   if (s.loadWarning) {
@@ -971,6 +1042,9 @@ function renderAll() {
     warnEl.innerHTML = '';
   }
 
+  const sapKpi = s.sapLoaded ? `
+    <div class="kpi${s.nValorMismatch ? ' flag' : ''}"><div class="label">Δ valor SAP ≠ Unilog</div><div class="value">${s.nValorMismatch}</div><div class="sub">${s.nSapMatched} NFs cruzadas com SAP</div></div>` : '';
+
   $('kpis').innerHTML = `
     <div class="kpi"><div class="label">Faturação (valor NFs)</div><div class="value">${fmtMoney(s.totalValorNF)}</div><div class="sub">${s.totalNF} notas fiscais</div></div>
     <div class="kpi"><div class="label">Total pago (frete)</div><div class="value">${fmtMoney(s.totalPago)}</div><div class="sub">${fmtPct(s.pctPagoSobreNF)} sobre faturação (meta: 6%)</div></div>
@@ -978,6 +1052,7 @@ function renderAll() {
     <div class="kpi flag"><div class="label">Excesso líquido</div><div class="value">${fmtMoney(s.excesso)}</div><div class="sub">+${fmtPct(s.excessoPct)} vs esperado</div></div>
     <div class="kpi"><div class="label">NFs conformes</div><div class="value">${s.byStatus.ok}</div><div class="sub">${s.totalNF ? fmtPct(s.byStatus.ok / s.totalNF) : '0%'} do total</div></div>
     <div class="kpi flag"><div class="label">NFs a investigar ⚠️</div><div class="value">${s.byStatus.flag}</div><div class="sub">múltiplos CT-e sem devolução</div></div>
+    ${sapKpi}
   `;
 
   $('reconcileBox').innerHTML = `
@@ -1070,9 +1145,13 @@ function renderSubPanels() {
     const cteInfo = x.nCte > 1
       ? `${x.nCte} CT-e${x.temDevolucao ? ' (com devolução)' : ''}`
       : '1 CT-e';
-    return `<tr class="row-clickable" data-nf="${x.nf}">
-      <td>${x.nf}</td><td>${x.cliente || '-'}</td><td>${x.transportador}</td><td>${cteInfo}</td>
-      <td class="right">${fmtMoney(x.valorNF)}</td><td class="right">${fmtMoney(x.pago)}</td>
+    const mismatchCls = x.sapValorMismatch ? ' nf-val-mismatch' : '';
+    return `<tr class="row-clickable${mismatchCls}" data-nf="${x.nf}">
+      <td>${x.nf}</td><td>${fmtDate(x.dtNF)}</td><td>${x.cliente || '-'}</td><td>${x.transportador}</td><td>${cteInfo}</td>
+      <td class="right">${fmtMoney(x.valorUnilog ?? x.valorNF)}</td>
+      <td class="right">${x.valorSAP != null ? fmtMoney(x.valorSAP) : '-'}</td>
+      <td class="right">${fmtValorDiff(x.valorDiff, x.sapValorMismatch)}</td>
+      <td class="right">${fmtMoney(x.pago)}</td>
       <td class="right">${fmtMoney(x.esperado)}</td>
       <td class="right" style="color:${x.diff > 0.5 ? '#b3261e' : (x.diff < -0.5 ? '#555' : 'inherit')}">${fmtMoney(x.diff)}</td>
       <td class="right">${fmtPct(x.pct)}</td>
@@ -1092,7 +1171,7 @@ function renderSubPanels() {
         <div class="tbl-wrap" style="max-height:360px;border:none;border-radius:0;">
           <table>
             <thead><tr id="subTableHead"></tr></thead>
-            <tbody>${rows || '<tr><td colspan="9" class="empty">Sem NFs nesta categoria.</td></tr>'}</tbody>
+            <tbody>${rows || '<tr><td colspan="12" class="empty">Sem NFs nesta categoria.</td></tr>'}</tbody>
           </table>
         </div>
       </div>
@@ -1134,14 +1213,18 @@ function renderTable() {
   body.innerHTML = '';
   list.forEach((x) => {
     const tr = document.createElement('tr');
-    tr.className = 'row-clickable';
+    tr.className = 'row-clickable' + (x.sapValorMismatch ? ' nf-val-mismatch' : '');
     const meta = statusMeta[x.status];
+    enrichNF(x);
     tr.innerHTML = `
       <td>${x.nf}</td>
+      <td>${fmtDate(x.dtNF)}</td>
       <td>${x.cliente || '-'}</td>
       <td>${x.transportador}</td>
       <td>${x.modalidade}</td>
-      <td class="right">${fmtMoney(x.valorNF)}</td>
+      <td class="right">${fmtMoney(x.valorUnilog ?? x.valorNF)}</td>
+      <td class="right">${x.valorSAP != null ? fmtMoney(x.valorSAP) : '-'}</td>
+      <td class="right">${fmtValorDiff(x.valorDiff, x.sapValorMismatch)}</td>
       <td class="right">${x.nCte > 1 ? `<strong>${x.nCte}</strong>` : x.nCte}</td>
       <td class="right">${fmtMoney(x.pago)}</td>
       <td class="right">${fmtMoney(x.esperado)}</td>
@@ -1153,7 +1236,7 @@ function renderTable() {
     body.appendChild(tr);
   });
   if (list.length === 0) {
-    body.innerHTML = `<tr><td colspan="11" class="empty">Sem resultados para este filtro.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="${nfColCount()}" class="empty">Sem resultados para este filtro.</td></tr>`;
   }
 }
 
@@ -1190,8 +1273,12 @@ function toggleDetail(tr, x) {
   const summaryExtra = x.nCte === 1
     ? `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">Esperado 6%: ${fmtMoney(x.esperado)} · Desvio: <span style="color:${x.diff > 0.5 ? '#b3261e' : (x.diff < -0.5 ? '#555' : 'inherit')}">${fmtMoney(x.diff)} (${fmtPp(x.pct - CTE_PCT_TARGET)})</span></p>`
     : `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">${x.nCte} CT-e · Total pago ${fmtMoney(x.pago)} (${fmtPct(x.pct)} da NF) · Validar ou rejeitar cada CT-e individualmente.</p>`;
-  dr.innerHTML = `<td colspan="11"><div class="detail-inner">
+  const sapBlock = x.sapFound ? `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">
+    <strong>SAP:</strong> ${fmtDate(x.dtNF)} · ${x.cliente || '-'} · Unilog ${fmtMoney(x.valorUnilog ?? x.valorNF)} vs SAP ${fmtMoney(x.valorSAP)}${x.sapValorMismatch ? ` — <span style="color:#b3261e;font-weight:600">Δ relevante ${fmtMoney(x.valorDiff)}</span>` : (x.valorDiff != null ? ` (Δ ${fmtMoney(x.valorDiff)})` : '')}
+  </p>` : '';
+  dr.innerHTML = `<td colspan="${nfColCount()}"><div class="detail-inner">
     <p style="margin:0 0 6px;"><strong>Análise:</strong> ${x.motivo}</p>
+    ${sapBlock}
     ${summaryExtra}
     <table class="cte-detail-table"><thead><tr>
       <th>Nº CT-e</th><th>Data CT-e</th><th>Tipo Op.</th><th>Devolução</th><th>Peso</th><th>Pago</th><th>% NF</th><th>Desvio 6%</th><th>Explicação</th>${valHead}
@@ -1474,8 +1561,23 @@ function initFretes() {
   $('exportHistoryBtn').addEventListener('click', () => exportHistoryWorkbook());
   $('exportMensalBtn').addEventListener('click', () => exportMonthlyWorkbook());
 
-  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF'].forEach(id => {
-    $(id).addEventListener('input', () => {
+  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff'].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      if (id === 'filterStatus' && $('filterStatus').value !== activeSubPanel) {
+        activeSubPanel = $('filterStatus').value || null;
+        document.querySelectorAll('.bd-card').forEach(c => {
+          c.classList.toggle('active', c.dataset.status === activeSubPanel);
+        });
+        renderSubPanels();
+      }
+      if (id === 'filterMes') {
+        selectedMonth = $('filterMes').value || '';
+      }
+      renderTable();
+    });
+    el.addEventListener('change', () => {
       if (id === 'filterStatus' && $('filterStatus').value !== activeSubPanel) {
         activeSubPanel = $('filterStatus').value || null;
         document.querySelectorAll('.bd-card').forEach(c => {
