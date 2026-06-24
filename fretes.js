@@ -64,7 +64,7 @@ const FIELD_ALIASES = {
   transportador: ['transportador', 'transportadora', 'nome transportador', 'transp'],
   modalidade: ['modalidade', 'modal', 'mod'],
   dtNF: ['dt nf', 'data nf', 'data nota fiscal', 'dt nota fiscal'],
-  numCte: ['num. cte', 'num cte', 'n cte', 'numero cte', 'n cte-e', 'num cte-e', 'ct-e', 'cte', 'numero do cte'],
+  numCte: ['num. cte', 'num cte', 'n cte', 'numero cte', 'n cte-e', 'num cte-e', 'ct-e', 'cte', 'numero do cte', 'nº cte', 'no cte', 'n. cte', 'chave cte', 'chave cte-e', 'numero cte-e', 'n cte e', 'num cte e'],
   dtCte: ['dt cte', 'data cte', 'dt cte-e', 'data cte-e', 'data do cte'],
   pago: ['total fatura rev.', 'total fatura rev', 'total fatura', 'valor fatura', 'valor pago', 'total pago', 'vl pago', 'frete pago', 'valor cte', 'valor do frete'],
   devolucao: ['devolucao', 'devolução', 'e devolucao', 'retorno'],
@@ -340,6 +340,134 @@ function handleSapFile(file) {
 
 function num(v) { return (v === null || v === undefined || v === '') ? 0 : Number(v); }
 
+const CTE_PCT_TARGET = 0.06;
+const CTE_PCT_LOW = 0.059;
+const CTE_PCT_HIGH = 0.061;
+
+function fmtPp(v) { return (v * 100).toFixed(2) + ' p.p.'; }
+
+function normCteKey(cte, idx) {
+  const n = cte?.numCte;
+  if (n !== null && n !== undefined && String(n).trim() !== '') return String(n).trim();
+  return `_row_${idx}_${cte?.dtCte || ''}_${num(cte?.pago)}`;
+}
+
+/** Count distinct CT-e per NF — falls back to row count when numCte is missing in source rows. */
+function countDistinctCtes(ctes) {
+  if (!ctes?.length) return 0;
+  const ids = ctes.map(c => c?.numCte).filter(n => n !== null && n !== undefined && String(n).trim() !== '');
+  if (ids.length === ctes.length) {
+    return new Set(ids.map(n => String(n).trim())).size;
+  }
+  return ctes.length;
+}
+
+function analyzeSingleCteMotivo(pago, esperado, pct) {
+  const diff = pago - esperado;
+  const diffPct = pct - CTE_PCT_TARGET;
+  if (pct >= CTE_PCT_LOW && pct <= CTE_PCT_HIGH) {
+    return { status: 'ok', motivo: `Conforme: ${fmtMoney(pago)} (${fmtPct(pct)} da NF), esperado ${fmtMoney(esperado)}.` };
+  }
+  if (pct < CTE_PCT_LOW) {
+    return {
+      status: 'low',
+      motivo: `Abaixo de 6%: pagou ${fmtMoney(pago)} (${fmtPct(pct)}) vs esperado ${fmtMoney(esperado)} — desvio ${fmtMoney(diff)} (${fmtPp(diffPct)}). Questionar Unilog.`
+    };
+  }
+  return {
+    status: 'min',
+    motivo: `Acima de 6%: pagou ${fmtMoney(pago)} (${fmtPct(pct)}) vs esperado ${fmtMoney(esperado)} — excedente +${fmtMoney(diff)} (+${fmtPp(diffPct)}). Provável tarifa mínima; questionar Unilog se inesperado.`
+  };
+}
+
+function analyzeCteEntry(cte, idx, valorNF, nCteTotal) {
+  const pago = num(cte.pago);
+  const esperado = valorNF * CTE_PCT_TARGET;
+  const pct = valorNF > 0 ? pago / valorNF : 0;
+  const diff = pago - esperado;
+  const diffPct = pct - CTE_PCT_TARGET;
+  let explicacao;
+
+  if (nCteTotal === 1) {
+    explicacao = analyzeSingleCteMotivo(pago, esperado, pct).motivo;
+  } else if (cte.devolucao) {
+    explicacao = `Devolução — CT-e ${cte.numCte || ('#' + (idx + 1))}: ${fmtMoney(pago)} (${fmtPct(pct)} da NF). Validar se frete de retorno está correcto.`;
+  } else {
+    const pctNote = pct > CTE_PCT_HIGH ? ' — possível cobrança sobre valor total da NF' : '';
+    explicacao = `CT-e ${cte.numCte || ('#' + (idx + 1))}: ${fmtMoney(pago)} = ${fmtPct(pct)} da NF${pctNote}. Desvio vs 6%: ${fmtMoney(diff)} (${fmtPp(diffPct)}). Validar individualmente.`;
+  }
+
+  return {
+    ...cte,
+    pago,
+    pct,
+    esperado,
+    diff,
+    diffPct,
+    explicacao,
+    cteKey: cte.cteKey || normCteKey(cte, idx),
+    validacao: cte.validacao || 'pendente'
+  };
+}
+
+function buildNfRecord(g) {
+  const ctesRaw = g.ctes || [];
+  const nCte = countDistinctCtes(ctesRaw);
+  const ctes = ctesRaw.map((c, i) => analyzeCteEntry(c, i, g.valorNF, nCte));
+  const pago = ctes.reduce((s, c) => s + c.pago, 0);
+  const esperado = g.valorNF * CTE_PCT_TARGET;
+  const diff = pago - esperado;
+  const pct = g.valorNF > 0 ? pago / g.valorNF : 0;
+
+  let status, motivo;
+  if (nCte === 1) {
+    ({ status, motivo } = analyzeSingleCteMotivo(pago, esperado, pct));
+  } else {
+    const nDev = ctes.filter(c => c.devolucao).length;
+    const pendente = ctes.filter(c => c.validacao === 'pendente').length;
+    if (g.temDevolucao) {
+      status = 'dev';
+      motivo = `${nCte} CT-e (${nDev} devolução). Total ${fmtMoney(pago)} (${fmtPct(pct)} da NF) vs esperado ${fmtMoney(esperado)} — desvio ${fmtMoney(diff)}. Validar cada CT-e abaixo${pendente ? ` (${pendente} pendentes)` : ''}.`;
+    } else {
+      status = 'flag';
+      motivo = `${nCte} CT-e sem devolução. Total ${fmtMoney(pago)} (${fmtPct(pct)} da NF) — desvio ${fmtMoney(diff)}. Cada CT-e precisa de validação individual${pendente ? ` (${pendente} pendentes)` : ''}.`;
+    }
+  }
+
+  return {
+    nf: g.nf, cliente: g.cliente || '', transportador: g.transportador, modalidade: g.modalidade,
+    valorNF: g.valorNF, nCte, pago, esperado, diff, pct, status, motivo, ctes,
+    temDevolucao: g.temDevolucao, dtNF: g.dtNF
+  };
+}
+
+function setCteValidacao(nfStr, cteKey, value) {
+  const nf = currentNFs.find(x => String(x.nf) === String(nfStr));
+  if (!nf) return;
+  const idx = nf.ctes.findIndex(c => c.cteKey === cteKey);
+  if (idx < 0) return;
+  nf.ctes[idx].validacao = value;
+  const rebuilt = buildNfRecord({
+    nf: nf.nf, cliente: nf.cliente, transportador: nf.transportador, modalidade: nf.modalidade,
+    valorNF: nf.valorNF, ctes: nf.ctes, temDevolucao: nf.temDevolucao, dtNF: nf.dtNF
+  });
+  Object.assign(nf, rebuilt);
+  renderTable();
+}
+
+function reopenNfDetail(nfStr) {
+  const nfRec = currentNFs.find(n => String(n.nf) === String(nfStr));
+  if (!nfRec) return;
+  document.querySelectorAll('.detail-row').forEach(d => d.remove());
+  const rows = $('nfTableBody').querySelectorAll('tr.row-clickable');
+  for (const row of rows) {
+    if (String(row.cells[0]?.textContent || '').trim() === String(nfStr)) {
+      toggleDetail(row, nfRec);
+      break;
+    }
+  }
+}
+
 function processRows(rows, fileName, sheetName, headers) {
   lastCtePack = { rows, fileName, sheetName, headers };
 
@@ -350,42 +478,26 @@ function processRows(rows, fileName, sheetName, headers) {
   rows.forEach(r => {
     const nf = r.nf;
     if (nf === null || nf === undefined || String(nf).trim() === '') return;
-    if (!byNF[nf]) byNF[nf] = {
-      nf, valorNF: num(r.valorNF), transportador: r.transportador || '-',
+    const nfKey = normNFKey(nf);
+    if (!byNF[nfKey]) byNF[nfKey] = {
+      nf: String(nf).trim(), valorNF: num(r.valorNF), transportador: r.transportador || '-',
       modalidade: r.modalidade || '-', ctes: [], temDevolucao: false, dtNF: r.dtNF,
       cliente: ''
     };
-    byNF[nf].ctes.push({
+    const g = byNF[nfKey];
+    if (num(r.valorNF) > g.valorNF) g.valorNF = num(r.valorNF);
+    if (r.transportador && g.transportador === '-') g.transportador = r.transportador;
+    if (r.modalidade && g.modalidade === '-') g.modalidade = r.modalidade;
+    if (r.dtNF && !g.dtNF) g.dtNF = r.dtNF;
+    g.ctes.push({
       numCte: r.numCte, dtCte: r.dtCte, pago: num(r.pago),
       devolucao: (r.devolucao || '').toString().toLowerCase() === 'sim',
       tipoOp: r.tipoOp, peso: num(r.peso)
     });
-    if ((r.devolucao || '').toString().toLowerCase() === 'sim') byNF[nf].temDevolucao = true;
+    if ((r.devolucao || '').toString().toLowerCase() === 'sim') g.temDevolucao = true;
   });
 
-  let nfList = Object.values(byNF).map(g => {
-    const nCte = new Set(g.ctes.map(c => c.numCte)).size;
-    const pago = g.ctes.reduce((s, c) => s + c.pago, 0);
-    const esperado = g.valorNF * 0.06;
-    const diff = pago - esperado;
-    const pct = g.valorNF > 0 ? pago / g.valorNF : 0;
-
-    let status, motivo;
-    if (nCte === 1) {
-      if (pct < 0.059) { status = 'low'; motivo = 'Pagou menos que os 6% esperados — confirmar se há desconto ou erro no CT-e.'; }
-      else if (pct <= 0.061) { status = 'ok'; motivo = 'Dentro do esperado (6%).'; }
-      else { status = 'min'; motivo = 'Acima de 6%, provavelmente por tarifa mínima do transportador (valor da NF é baixo para o frete cobrado).'; }
-    } else {
-      if (g.temDevolucao) { status = 'dev'; motivo = 'Mais de um CT-e, incluindo devolução (retorno de mercadoria) — frete de ida e volta cobrado separadamente.'; }
-      else { status = 'flag'; motivo = 'Mais de um CT-e sem devolução assinalada. Cada CT-e parece cobrar uma percentagem sobre o valor total da NF em vez de dividir os 6% entre eles — validar com o transportador.'; }
-    }
-
-    return {
-      nf: g.nf, cliente: g.cliente || '', transportador: g.transportador, modalidade: g.modalidade,
-      valorNF: g.valorNF, nCte, pago, esperado, diff, pct, status, motivo, ctes: g.ctes,
-      temDevolucao: g.temDevolucao, dtNF: g.dtNF
-    };
-  });
+  let nfList = Object.values(byNF).map(buildNfRecord);
 
   nfList = applySapToList(nfList);
   nfList.sort((a, b) => b.diff - a.diff);
@@ -584,6 +696,10 @@ function cteExportRows() {
         'Devolução': c.devolucao ? 'Sim' : 'Não',
         'Peso (kg)': c.peso,
         'Pago': c.pago,
+        '% da NF': c.pct,
+        'Desvio vs 6%': c.diff,
+        'Explicação': c.explicacao || '',
+        'Validação': c.validacao || 'pendente',
         'Estado NF': (statusMeta[x.status] || {}).label || x.status
       });
     });
@@ -977,7 +1093,7 @@ function renderTable() {
       <td>${x.transportador}</td>
       <td>${x.modalidade}</td>
       <td class="right">${fmtMoney(x.valorNF)}</td>
-      <td class="right">${x.nCte}</td>
+      <td class="right">${x.nCte > 1 ? `<strong>${x.nCte}</strong>` : x.nCte}</td>
       <td class="right">${fmtMoney(x.pago)}</td>
       <td class="right">${fmtMoney(x.esperado)}</td>
       <td class="right" style="color:${x.diff > 0.5 ? '#b3261e' : (x.diff < -0.5 ? '#555' : 'inherit')}">${fmtMoney(x.diff)}</td>
@@ -998,17 +1114,50 @@ function toggleDetail(tr, x) {
   document.querySelectorAll('.detail-row').forEach(d => d.remove());
   const dr = document.createElement('tr');
   dr.className = 'detail-row';
-  const ctesRows = x.ctes.map(c => `
-    <tr><td>${c.numCte}</td><td>${c.dtCte ? new Date(c.dtCte).toLocaleDateString('pt-BR') : '-'}</td>
-    <td>${c.tipoOp || '-'}</td><td>${c.devolucao ? 'Sim' : 'Não'}</td>
-    <td class="right">${fmtMoney(c.peso)} kg</td><td class="right">${fmtMoney(c.pago)}</td></tr>
-  `).join('');
+  const multi = x.nCte > 1;
+  const ctesRows = x.ctes.map(c => {
+    const valCell = multi ? `<td class="cte-val-cell">
+      <div class="cte-val-btns">
+        <button type="button" class="cte-val-btn ok${c.validacao === 'validado' ? ' active' : ''}" data-nf="${x.nf}" data-key="${c.cteKey}" data-val="validado">✓ Validar</button>
+        <button type="button" class="cte-val-btn no${c.validacao === 'rejeitado' ? ' active' : ''}" data-nf="${x.nf}" data-key="${c.cteKey}" data-val="rejeitado">✗ Rejeitar</button>
+      </div>
+      <span class="cte-val-lbl ${c.validacao}">${c.validacao === 'validado' ? 'Validado' : (c.validacao === 'rejeitado' ? 'Rejeitado' : 'Pendente')}</span>
+    </td>` : '';
+    const diffColor = c.diff > 0.5 ? '#b3261e' : (c.diff < -0.5 ? '#555' : 'inherit');
+    return `<tr class="cte-row${c.validacao !== 'pendente' ? ' cte-row-' + c.validacao : ''}">
+      <td>${c.numCte || '-'}</td>
+      <td>${c.dtCte ? new Date(c.dtCte).toLocaleDateString('pt-BR') : '-'}</td>
+      <td>${c.tipoOp || '-'}</td>
+      <td>${c.devolucao ? 'Sim' : 'Não'}</td>
+      <td class="right">${fmtMoney(c.peso)} kg</td>
+      <td class="right">${fmtMoney(c.pago)}</td>
+      <td class="right">${fmtPct(c.pct)}</td>
+      <td class="right" style="color:${diffColor}">${fmtMoney(c.diff)}</td>
+      <td class="cte-explicacao">${c.explicacao || '-'}</td>
+      ${valCell}
+    </tr>`;
+  }).join('');
+  const valHead = multi ? '<th>Validação</th>' : '';
+  const summaryExtra = x.nCte === 1
+    ? `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">Esperado 6%: ${fmtMoney(x.esperado)} · Desvio: <span style="color:${x.diff > 0.5 ? '#b3261e' : (x.diff < -0.5 ? '#555' : 'inherit')}">${fmtMoney(x.diff)} (${fmtPp(x.pct - CTE_PCT_TARGET)})</span></p>`
+    : `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">${x.nCte} CT-e · Total pago ${fmtMoney(x.pago)} (${fmtPct(x.pct)} da NF) · Validar ou rejeitar cada CT-e individualmente.</p>`;
   dr.innerHTML = `<td colspan="11"><div class="detail-inner">
-    <p style="margin:0 0 10px;"><strong>Motivo:</strong> ${x.motivo}</p>
-    <table><thead><tr><th>Nº CT-e</th><th>Data CT-e</th><th>Tipo Op.</th><th>Devolução</th><th>Peso</th><th>Pago</th></tr></thead>
-    <tbody>${ctesRows}</tbody></table>
+    <p style="margin:0 0 6px;"><strong>Análise:</strong> ${x.motivo}</p>
+    ${summaryExtra}
+    <table class="cte-detail-table"><thead><tr>
+      <th>Nº CT-e</th><th>Data CT-e</th><th>Tipo Op.</th><th>Devolução</th><th>Peso</th><th>Pago</th><th>% NF</th><th>Desvio 6%</th><th>Explicação</th>${valHead}
+    </tr></thead><tbody>${ctesRows}</tbody></table>
   </div></td>`;
   tr.parentNode.insertBefore(dr, tr.nextSibling);
+  if (multi) {
+    dr.querySelectorAll('.cte-val-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        setCteValidacao(btn.dataset.nf, btn.dataset.key, btn.dataset.val);
+        reopenNfDetail(btn.dataset.nf);
+      });
+    });
+  }
 }
 
 function nfsFromDetalhe(rows) {
@@ -1028,23 +1177,16 @@ function nfsFromDetalhe(rows) {
         }
       } catch (e) { ctes = []; }
     }
-    return enrichNF({
+    return enrichNF(buildNfRecord({
       nf: d.nota_fiscal,
       cliente,
       transportador: d.transportador,
       modalidade: d.modalidade,
       valorNF: d.valor_nf,
-      nCte: d.n_cte,
-      pago: d.pago,
-      esperado: d.esperado,
-      diff: d.diferenca,
-      pct: d.pct_pago,
-      status: d.status,
-      motivo: d.motivo,
-      temDevolucao: d.status === 'dev',
-      dtNF,
-      ctes
-    });
+      ctes,
+      temDevolucao: ctes.some(c => c.devolucao) || d.status === 'dev',
+      dtNF
+    }));
   }).sort((a, b) => b.diff - a.diff);
 }
 
