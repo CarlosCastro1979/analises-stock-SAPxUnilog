@@ -1,5 +1,5 @@
-// fretes.js v1.4.7
-const FRETES_JS_VERSION = '1.4.7';
+// fretes.js v1.4.8
+const FRETES_JS_VERSION = '1.4.8';
 
 const sb = db;
 
@@ -145,6 +145,21 @@ const SUB_COLUMNS = [
   { key: 'esperado', label: 'Esperado', type: 'number', right: true },
   { key: 'diff', label: 'Diferença', type: 'number', right: true },
   { key: 'pct', label: '% pago', type: 'number', right: true }
+];
+
+const SAP_ANOMALY_TYPE = 'NF não encontrada no SAP';
+
+const ANOMALY_COLUMNS = [
+  { key: 'nf', label: 'Nota Fiscal', type: 'string' },
+  { key: 'cliente', label: 'Cliente (Unilog)', type: 'string' },
+  { key: 'dtNF', label: 'Data', type: 'date', title: 'Data NF no Unilog (SAP indisponível)' },
+  { key: 'valorNF', label: 'Valor NF Unilog', type: 'number', right: true },
+  { key: 'transportador', label: 'Transportador', type: 'string' },
+  { key: 'nCte', label: 'Qtd CT-e', type: 'number', right: true },
+  { key: 'pago', label: 'Valor pago', type: 'number', right: true },
+  { key: 'status', label: 'Estado frete', type: 'status' },
+  { key: 'sapAnomalyType', label: 'Tipo anomalia', type: 'string' },
+  { key: 'sapAnomalyReason', label: 'Explicação', type: 'string' }
 ];
 
 const MONTH_COLUMNS = [
@@ -744,14 +759,39 @@ function isRelevantValorDiff(unilogVal, sapVal) {
   return (diff / ref) > SAP_VALOR_DIFF_MIN_PCT;
 }
 
+function isSapLoaded() {
+  return Object.keys(sapNfMap).length > 0;
+}
+
+function buildSapMissingReason(nf) {
+  const parts = [
+    'NF presente no Unilog mas não encontrada no export SAP (chave normalizada com série/zeros).'
+  ];
+  if (nf.nCte > 0 && nf.pago > 0) {
+    parts.push(
+      `Unilog emitiu ${nf.nCte} CT-e com ${fmtMoney(nf.pago)} pago — verificar se a NF existe no SAP ou se o CT-e está associado a NF errada/inexistente (ex.: transporte não realizado).`
+    );
+  } else if (nf.nCte > 0) {
+    parts.push(
+      `Unilog regista ${nf.nCte} CT-e sem valor pago — possível CT-e emitido sem transporte ou NF inexistente no SAP.`
+    );
+  } else {
+    parts.push('Sem CT-e associado no Unilog — confirmar se a NF deveria existir no SAP.');
+  }
+  return parts.join(' ');
+}
+
 function applySapToNf(nf) {
   if (nf.valorUnilog === undefined || nf.valorUnilog === null) {
     nf.valorUnilog = num(nf.valorNF);
   }
 
-  const key = normNFKey(nf.nf);
-  const sap = lookupSapEntry(nf.nf);
-  nf.sapFound = !!sap;
+  const sapLoaded = isSapLoaded();
+  const sap = sapLoaded ? lookupSapEntry(nf.nf) : null;
+  nf.sapFound = sapLoaded && !!sap;
+  nf.sapMissing = sapLoaded && !sap;
+  nf.sapAnomalyType = nf.sapMissing ? SAP_ANOMALY_TYPE : '';
+  nf.sapAnomalyReason = nf.sapMissing ? buildSapMissingReason(nf) : '';
 
   if (!sap) {
     nf.valorSAP = null;
@@ -846,6 +886,8 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
         fteToast('Dados SAP carregados — ' + nMatched + ' NF(s) cruzadas com Unilog.');
         const nMismatch = currentSummary?.nValorMismatch || 0;
         if (nMismatch) fteToast(nMismatch + ' NF(s) com diferença relevante de valor SAP vs Unilog.');
+        const nMissing = currentSummary?.nSapMissing || 0;
+        if (nMissing) fteToast(nMissing + ' NF(s) no Unilog sem correspondência no SAP — ver Anomalias.');
       } else if (currentNFs.length) {
         setSapLoadStatus(nMapped + ' NFs SAP mapeadas · 0 matched com Unilog', false);
         fteToastError('SAP carregado mas nenhuma NF cruzou com Unilog — verifica formato/chaves.');
@@ -1064,7 +1106,8 @@ function buildNfRecord(g) {
   return {
     nf: g.nf, cliente: g.cliente || '', transportador: g.transportador, modalidade: g.modalidade,
     valorNF: g.valorNF, valorUnilog: g.valorNF, valorSAP: null, valorDiff: null,
-    sapFound: false, sapValorMismatch: false,
+    sapFound: false, sapMissing: false, sapAnomalyType: '', sapAnomalyReason: '',
+    sapValorMismatch: false,
     nCte, pago, esperado, diff, pct, status, motivo, ctes,
     temDevolucao: g.temDevolucao, dtNF: g.dtNF, qtdCteFromSource: g.qtdCteFromSource || 0
   };
@@ -1170,7 +1213,7 @@ function computeSummary(list, fileName) {
   let nUnicoCte = 0, nMultiplosCte = 0;
   let excessoPositivo = 0, deficit = 0;
 
-  let nValorMismatch = 0, nSapMatched = 0;
+  let nValorMismatch = 0, nSapMatched = 0, nSapMissing = 0;
   list.forEach(x => {
     byStatus[x.status]++;
     excessoByStatus[x.status] += x.diff;
@@ -1179,6 +1222,7 @@ function computeSummary(list, fileName) {
     if (x.diff > 0) excessoPositivo += x.diff;
     else if (x.diff < 0) deficit += x.diff;
     if (x.sapFound) nSapMatched++;
+    if (x.sapMissing) nSapMissing++;
     if (x.sapValorMismatch) nValorMismatch++;
   });
 
@@ -1187,8 +1231,31 @@ function computeSummary(list, fileName) {
     pctPagoSobreNF: totalValorNF ? totalPago / totalValorNF : 0,
     excessoPositivo, deficit, excessoPct: totalEsperado ? excesso / totalEsperado : 0,
     periodoInicio, periodoFim, byStatus, excessoByStatus, pagoByStatus,
-    nUnicoCte, nMultiplosCte, nValorMismatch, nSapMatched,
-    sapLoaded: Object.keys(sapNfMap).length > 0
+    nUnicoCte, nMultiplosCte, nValorMismatch, nSapMatched, nSapMissing,
+    sapLoaded: isSapLoaded()
+  };
+}
+
+function getSapAnomalies(list) {
+  if (!isSapLoaded()) return [];
+  return list.filter(x => x.sapMissing);
+}
+
+function anomalyExportRow(x) {
+  enrichNF(x);
+  const meta = statusMeta[x.status] || {};
+  return {
+    'Nota Fiscal': x.nf,
+    'Cliente (Unilog)': x.cliente || '',
+    'Data NF (Unilog)': x.dtNF ? new Date(x.dtNF) : '',
+    'Mês': fmtMesLabel(x.mesRef),
+    'Valor NF (Unilog)': x.valorUnilog ?? x.valorNF,
+    'Transportador': x.transportador,
+    'Qtd CT-e': x.nCte,
+    'Valor pago': x.pago,
+    'Estado frete': meta.label || x.status,
+    'Tipo anomalia': x.sapAnomalyType || SAP_ANOMALY_TYPE,
+    'Explicação': x.sapAnomalyReason || buildSapMissingReason(x)
   };
 }
 
@@ -1338,7 +1405,10 @@ function nfExportRow(x) {
     'Diferença': x.diff,
     '% Pago': x.pct,
     'Estado': (statusMeta[x.status] || {}).label || x.status,
-    'Motivo': x.motivo
+    'Motivo': x.motivo,
+    'NF no SAP': x.sapMissing ? 'Não' : (x.sapFound ? 'Sim' : ''),
+    'Tipo anomalia SAP': x.sapAnomalyType || '',
+    'Explicação anomalia SAP': x.sapAnomalyReason || ''
   };
 }
 
@@ -1402,6 +1472,13 @@ function exportFullWorkbook() {
     ['Sem devolução — investigar', s.byStatus.flag, s.excessoByStatus.flag, s.pagoByStatus.flag],
     ['Abaixo do esperado', s.byStatus.low, s.excessoByStatus.low, s.pagoByStatus.low],
   ];
+  if (s.sapLoaded) {
+    resumo.push([]);
+    resumo.push(['SAP', 'Valor']);
+    resumo.push(['NFs cruzadas com SAP', s.nSapMatched]);
+    resumo.push(['Δ valor SAP ≠ Unilog', s.nValorMismatch]);
+    resumo.push(['NF sem correspondência SAP (anomalias)', s.nSapMissing]);
+  }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumo), 'Resumo');
 
   const byCat = [];
@@ -1413,6 +1490,11 @@ function exportFullWorkbook() {
   }
 
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(currentNFs.map(nfExportRow)), 'Notas Fiscais');
+
+  const anomalies = getSapAnomalies(currentNFs);
+  if (anomalies.length) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(anomalies.map(anomalyExportRow)), 'Anomalias SAP');
+  }
 
   const ctes = cteExportRows();
   if (ctes.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ctes), 'CT-e');
@@ -1514,11 +1596,13 @@ function getFilteredNFs() {
   const mesF = $('filterMes').value;
   const searchF = $('searchNF').value.trim().toLowerCase();
   const valorDiffF = $('filterValorDiff')?.checked;
+  const sapMissingF = $('filterSapMissing')?.checked;
   let list = currentNFs;
   if (statusF) list = list.filter(x => x.status === statusF);
   if (transpF) list = list.filter(x => x.transportador === transpF);
   if (mesF) list = list.filter(x => x.mesRef === mesF);
   if (valorDiffF) list = list.filter(x => x.sapValorMismatch);
+  if (sapMissingF) list = list.filter(x => x.sapMissing);
   if (searchF) list = list.filter(x =>
     String(x.nf).includes(searchF) ||
     String(x.cliente || '').toLowerCase().includes(searchF)
@@ -1573,8 +1657,9 @@ function renderAll() {
   const s = currentSummary;
   const sapNote = s.sapLoaded ? ` · SAP: ${s.nSapMatched}/${s.totalNF} NFs cruzadas` : '';
   const mismatchNote = s.nValorMismatch ? ` · <span style="color:#b3261e;font-weight:600">${s.nValorMismatch} Δ valor SAP≠Unilog</span>` : '';
+  const sapMissingNote = s.nSapMissing ? ` · <span style="color:#b3261e;font-weight:600">${s.nSapMissing} NF sem SAP</span>` : '';
   $('periodoLabel').innerHTML =
-    `Ficheiro: ${s.fileName} · Período CT-e: ${fmtDate(s.periodoInicio)} a ${fmtDate(s.periodoFim)} · ${s.totalNF} notas fiscais · ${s.nUnicoCte} com CT-e único · ${s.nMultiplosCte} com múltiplos CT-e${sapNote}${mismatchNote}`;
+    `Ficheiro: ${s.fileName} · Período CT-e: ${fmtDate(s.periodoInicio)} a ${fmtDate(s.periodoFim)} · ${s.totalNF} notas fiscais · ${s.nUnicoCte} com CT-e único · ${s.nMultiplosCte} com múltiplos CT-e${sapNote}${mismatchNote}${sapMissingNote}`;
 
   const warnEl = $('dataWarning');
   if (s.loadWarning) {
@@ -1587,7 +1672,8 @@ function renderAll() {
   }
 
   const sapKpi = s.sapLoaded ? `
-    <div class="kpi${s.nValorMismatch ? ' flag' : ''}"><div class="label">Δ valor SAP ≠ Unilog</div><div class="value">${s.nValorMismatch}</div><div class="sub">${s.nSapMatched} NFs cruzadas com SAP</div></div>` : '';
+    <div class="kpi${s.nValorMismatch ? ' flag' : ''}"><div class="label">Δ valor SAP ≠ Unilog</div><div class="value">${s.nValorMismatch}</div><div class="sub">${s.nSapMatched} NFs cruzadas com SAP</div></div>
+    <div class="kpi${s.nSapMissing ? ' flag' : ''}"><div class="label">NF sem SAP</div><div class="value">${s.nSapMissing}</div><div class="sub">anomalias para investigar</div></div>` : '';
 
   $('kpis').innerHTML = `
     <div class="kpi"><div class="label">Faturação (valor NFs)</div><div class="value">${fmtMoney(s.totalValorNF)}</div><div class="sub">${s.totalNF} notas fiscais</div></div>
@@ -1647,8 +1733,76 @@ function renderAll() {
   ).join('');
 
   initMainTableHead();
+  renderAnomaliesPanel();
   renderTable();
   renderMonthlyTable();
+}
+
+function renderAnomaliesPanel() {
+  const section = $('anomaliesSection');
+  const hint = $('anomaliesHint');
+  if (!section || !hint) return;
+
+  const s = currentSummary;
+  if (!s?.sapLoaded) {
+    section.style.display = 'none';
+    hint.style.display = currentNFs.length ? 'block' : 'none';
+    return;
+  }
+
+  hint.style.display = 'none';
+  section.style.display = 'block';
+
+  const anomalies = getSapAnomalies(currentNFs);
+  const countEl = $('anomaliesCount');
+  if (countEl) countEl.textContent = anomalies.length ? `${anomalies.length} anomalia(s)` : 'Nenhuma';
+
+  const body = $('anomaliesTableBody');
+  if (!body) return;
+
+  if (!anomalies.length) {
+    body.innerHTML = '<tr><td colspan="10" class="empty">Nenhuma NF do Unilog em falta no SAP — cruzamento OK.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = anomalies.map(x => {
+    const meta = statusMeta[x.status] || {};
+    enrichNF(x);
+    return `<tr class="row-clickable nf-sap-missing" data-nf="${x.nf}">
+      <td>${x.nf}</td>
+      <td>${x.cliente || '-'}</td>
+      <td>${fmtDate(x.dtNF)}</td>
+      <td class="right">${fmtMoney(x.valorUnilog ?? x.valorNF)}</td>
+      <td>${x.transportador}</td>
+      <td class="right">${x.nCte > 1 ? `<strong>${x.nCte}</strong>` : x.nCte}</td>
+      <td class="right">${fmtMoney(x.pago)}</td>
+      <td><span class="badge ${meta.cls}">${meta.label}</span></td>
+      <td>${x.sapAnomalyType || SAP_ANOMALY_TYPE}</td>
+      <td class="anomaly-reason">${x.sapAnomalyReason || buildSapMissingReason(x)}</td>
+    </tr>`;
+  }).join('');
+
+  body.querySelectorAll('tr.row-clickable').forEach(tr => {
+    tr.addEventListener('click', () => {
+      $('searchNF').value = tr.dataset.nf;
+      if ($('filterSapMissing')) $('filterSapMissing').checked = true;
+      renderTable();
+      $('nfTable').scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+
+  const exportBtn = $('exportAnomaliesBtn');
+  if (exportBtn && !exportBtn._bound) {
+    exportBtn._bound = true;
+    exportBtn.addEventListener('click', () => {
+      const list = getSapAnomalies(currentNFs);
+      if (!list.length) { fteToast('Sem anomalias SAP para exportar.'); return; }
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list.map(anomalyExportRow)), 'Anomalias SAP');
+      downloadWorkbook(wb, `Anomalias_SAP_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      fteToast('Anomalias SAP exportadas.');
+    });
+  }
 }
 
 const CATEGORY_META = {
@@ -1757,7 +1911,9 @@ function renderTable() {
   body.innerHTML = '';
   list.forEach((x) => {
     const tr = document.createElement('tr');
-    tr.className = 'row-clickable' + (x.sapValorMismatch ? ' nf-val-mismatch' : '');
+    tr.className = 'row-clickable'
+      + (x.sapValorMismatch ? ' nf-val-mismatch' : '')
+      + (x.sapMissing ? ' nf-sap-missing' : '');
     const meta = statusMeta[x.status];
     enrichNF(x);
     tr.innerHTML = `
@@ -1817,9 +1973,13 @@ function toggleDetail(tr, x) {
   const summaryExtra = x.nCte === 1
     ? `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">Esperado 6%: ${fmtMoney(x.esperado)} · Desvio: <span style="color:${x.diff > 0.5 ? '#b3261e' : (x.diff < -0.5 ? '#555' : 'inherit')}">${fmtMoney(x.diff)} (${fmtPp(x.pct - CTE_PCT_TARGET)})</span></p>`
     : `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">${x.nCte} CT-e · Total pago ${fmtMoney(x.pago)} (${fmtPct(x.pct)} da NF) · Validar ou rejeitar cada CT-e individualmente.</p>`;
-  const sapBlock = x.sapFound ? `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">
+  const sapBlock = x.sapMissing
+    ? `<p style="margin:0 0 8px;font-size:11px;color:#b3261e;">
+      <strong>Anomalia SAP:</strong> ${x.sapAnomalyType || SAP_ANOMALY_TYPE} — ${x.sapAnomalyReason || buildSapMissingReason(x)}
+    </p>`
+    : (x.sapFound ? `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">
     <strong>SAP:</strong> ${fmtDate(x.dtNF)} · ${x.cliente || '-'} · Unilog ${fmtMoney(x.valorUnilog ?? x.valorNF)} vs SAP ${fmtMoney(x.valorSAP)}${x.sapValorMismatch ? ` — <span style="color:#b3261e;font-weight:600">Δ relevante ${fmtMoney(x.valorDiff)}</span>` : (x.valorDiff != null ? ` (Δ ${fmtMoney(x.valorDiff)})` : '')}
-  </p>` : '';
+  </p>` : '');
   dr.innerHTML = `<td colspan="${nfColCount()}"><div class="detail-inner">
     <p style="margin:0 0 6px;"><strong>Análise:</strong> ${x.motivo}</p>
     ${sapBlock}
@@ -2194,7 +2354,7 @@ function initFretes() {
   $('exportHistoryBtn').addEventListener('click', () => exportHistoryWorkbook());
   $('exportMensalBtn').addEventListener('click', () => exportMonthlyWorkbook());
 
-  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff'].forEach(id => {
+  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff', 'filterSapMissing'].forEach(id => {
     const el = $(id);
     if (!el) return;
     el.addEventListener('input', () => {
