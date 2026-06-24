@@ -24,7 +24,7 @@ const NF_COLUMNS = [
   { key: 'transportador', label: 'Transportador', type: 'string' },
   { key: 'modalidade', label: 'Modal.', type: 'string' },
   { key: 'valorNF', label: 'Valor NF', type: 'number', right: true },
-  { key: 'nCte', label: 'Nº CT-e', type: 'number', right: true },
+  { key: 'nCte', label: 'Qtd CT-e', type: 'number', right: true, title: 'Quantidade de CT-e para esta NF/cobrança (col. E do Excel Unilog)' },
   { key: 'pago', label: 'Pago', type: 'number', right: true },
   { key: 'esperado', label: 'Esperado (6%)', type: 'number', right: true },
   { key: 'diff', label: 'Diferença', type: 'number', right: true },
@@ -36,7 +36,7 @@ const SUB_COLUMNS = [
   { key: 'nf', label: 'NF', type: 'string' },
   { key: 'cliente', label: 'Cliente', type: 'string' },
   { key: 'transportador', label: 'Transportador', type: 'string' },
-  { key: 'nCte', label: 'CT-e', type: 'number' },
+  { key: 'nCte', label: 'Qtd CT-e', type: 'number' },
   { key: 'valorNF', label: 'Valor NF', type: 'number', right: true },
   { key: 'pago', label: 'Pago', type: 'number', right: true },
   { key: 'esperado', label: 'Esperado', type: 'number', right: true },
@@ -64,7 +64,8 @@ const FIELD_ALIASES = {
   transportador: ['transportador', 'transportadora', 'nome transportador', 'transp'],
   modalidade: ['modalidade', 'modal', 'mod'],
   dtNF: ['dt nf', 'data nf', 'data nota fiscal', 'dt nota fiscal'],
-  numCte: ['num. cte', 'num cte', 'n cte', 'numero cte', 'n cte-e', 'num cte-e', 'ct-e', 'cte', 'numero do cte', 'nº cte', 'no cte', 'n. cte', 'chave cte', 'chave cte-e', 'numero cte-e', 'n cte e', 'num cte e'],
+  numCte: ['num. cte', 'num cte', 'numero cte', 'n cte-e', 'num cte-e', 'numero do cte', 'numero do cte-e', 'chave cte', 'chave cte-e', 'numero cte-e', 'n cte e', 'num cte e', 'no cte-e', 'n. cte-e'],
+  qtdCte: ['qtd cte', 'qtd. cte', 'qtd ct-e', 'qtd. ct-e', 'quantidade cte', 'quantidade ct-e', 'quantidade de cte', 'quantidade de ct-e', 'n ctes', 'numero ctes', 'total cte', 'total ct-e', 'total de cte', 'qtd cobranca', 'qtd cobrança', 'quantidade cobranca', 'quantidade cobrança', 'nº cte', 'no cte', 'n. cte', 'n cte'],
   dtCte: ['dt cte', 'data cte', 'dt cte-e', 'data cte-e', 'data do cte'],
   pago: ['total fatura rev.', 'total fatura rev', 'total fatura', 'valor fatura', 'valor pago', 'total pago', 'vl pago', 'frete pago', 'valor cte', 'valor do frete'],
   devolucao: ['devolucao', 'devolução', 'e devolucao', 'retorno'],
@@ -155,6 +156,7 @@ function normalizeRow(row) {
     modalidade: findField(row, 'modalidade'),
     dtNF: findField(row, 'dtNF'),
     numCte: findField(row, 'numCte'),
+    qtdCte: findField(row, 'qtdCte'),
     dtCte: findField(row, 'dtCte'),
     pago: findField(row, 'pago'),
     devolucao: findField(row, 'devolucao'),
@@ -182,6 +184,23 @@ function isSapHeaderRow(cells) {
   return SAP_ALIASES.nf.some(alias => normalized.some(c => c === alias || c.includes(alias) || alias.includes(c)));
 }
 
+function isQtdCteHeader(hdr) {
+  const h = normCol(hdr);
+  if (!h) return true;
+  if (h.includes('qtd') || h.includes('quant')) return true;
+  return FIELD_ALIASES.qtdCte.some(a => h === a || h.includes(a) || a.includes(h));
+}
+
+function applyColEQtdFallback(row, line, headerRow) {
+  const eHdr = headerRow?.[4];
+  const eVal = line?.[4];
+  if (eVal === null || eVal === undefined || eVal === '') return row;
+  if (row.qtdCte !== null && row.qtdCte !== undefined && row.qtdCte !== '') return row;
+  if (!isQtdCteHeader(eHdr)) return row;
+  row.qtdCte = eVal;
+  return row;
+}
+
 function parseSheetRows(sheet, normalizeFn, headerFn) {
   const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
   if (!raw.length) return { rows: [], headers: [] };
@@ -189,14 +208,17 @@ function parseSheetRows(sheet, normalizeFn, headerFn) {
   let headerIdx = raw.findIndex(row => Array.isArray(row) && headerFn(row));
   if (headerIdx < 0) headerIdx = 0;
 
-  const headers = (raw[headerIdx] || []).map(h => String(h || '').trim()).filter(Boolean);
+  const headerRow = raw[headerIdx] || [];
+  const headers = headerRow.map(h => String(h || '').trim()).filter(Boolean);
   const rows = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const line = raw[i];
     if (!Array.isArray(line) || line.every(c => c === null || c === undefined || c === '')) continue;
     const obj = {};
-    headers.forEach((h, j) => { if (h) obj[h] = line[j] ?? null; });
-    rows.push(normalizeFn(obj));
+    headerRow.forEach((h, j) => { if (h) obj[h] = line[j] ?? null; });
+    let row = normalizeFn(obj);
+    row = applyColEQtdFallback(row, line, headerRow);
+    rows.push(row);
   }
   return { rows, headers };
 }
@@ -352,14 +374,37 @@ function normCteKey(cte, idx) {
   return `_row_${idx}_${cte?.dtCte || ''}_${num(cte?.pago)}`;
 }
 
-/** Count distinct CT-e per NF — falls back to row count when numCte is missing in source rows. */
+function looksLikeCteDocNumber(n) {
+  const s = String(n).trim();
+  if (!s) return false;
+  const digits = s.replace(/\D/g, '');
+  if (digits.length >= 9) return true;
+  if (/[./-]/.test(s) && digits.length >= 6) return true;
+  return false;
+}
+
+/** Distinct CT-e document numbers per NF — ignores short integers (often col. E qtd mis-mapped as numCte). */
 function countDistinctCtes(ctes) {
   if (!ctes?.length) return 0;
-  const ids = ctes.map(c => c?.numCte).filter(n => n !== null && n !== undefined && String(n).trim() !== '');
-  if (ids.length === ctes.length) {
-    return new Set(ids.map(n => String(n).trim())).size;
+  const withNum = ctes.map(c => c?.numCte).filter(n => n !== null && n !== undefined && String(n).trim() !== '');
+  const docNums = withNum.filter(looksLikeCteDocNumber);
+  if (docNums.length > 0) {
+    return new Set(docNums.map(n => String(n).trim())).size;
+  }
+  if (withNum.length === ctes.length) {
+    const distinct = new Set(withNum.map(n => String(n).trim())).size;
+    if (distinct === 1 && ctes.length > 1) return ctes.length;
+    return distinct;
   }
   return ctes.length;
+}
+
+/** Best count: Excel col. E (qtd), distinct doc numbers, or row count. */
+function resolveNfCteCount(ctes, qtdFromSource) {
+  const fromRows = countDistinctCtes(ctes);
+  const explicit = num(qtdFromSource);
+  const rowCount = ctes?.length || 0;
+  return Math.max(fromRows, explicit, rowCount);
 }
 
 function analyzeSingleCteMotivo(pago, esperado, pct) {
@@ -412,7 +457,7 @@ function analyzeCteEntry(cte, idx, valorNF, nCteTotal) {
 
 function buildNfRecord(g) {
   const ctesRaw = g.ctes || [];
-  const nCte = countDistinctCtes(ctesRaw);
+  const nCte = resolveNfCteCount(ctesRaw, g.qtdCteFromSource);
   const ctes = ctesRaw.map((c, i) => analyzeCteEntry(c, i, g.valorNF, nCte));
   const pago = ctes.reduce((s, c) => s + c.pago, 0);
   const esperado = g.valorNF * CTE_PCT_TARGET;
@@ -437,7 +482,7 @@ function buildNfRecord(g) {
   return {
     nf: g.nf, cliente: g.cliente || '', transportador: g.transportador, modalidade: g.modalidade,
     valorNF: g.valorNF, nCte, pago, esperado, diff, pct, status, motivo, ctes,
-    temDevolucao: g.temDevolucao, dtNF: g.dtNF
+    temDevolucao: g.temDevolucao, dtNF: g.dtNF, qtdCteFromSource: g.qtdCteFromSource || 0
   };
 }
 
@@ -449,7 +494,8 @@ function setCteValidacao(nfStr, cteKey, value) {
   nf.ctes[idx].validacao = value;
   const rebuilt = buildNfRecord({
     nf: nf.nf, cliente: nf.cliente, transportador: nf.transportador, modalidade: nf.modalidade,
-    valorNF: nf.valorNF, ctes: nf.ctes, temDevolucao: nf.temDevolucao, dtNF: nf.dtNF
+    valorNF: nf.valorNF, ctes: nf.ctes, temDevolucao: nf.temDevolucao, dtNF: nf.dtNF,
+    qtdCteFromSource: nf.qtdCteFromSource
   });
   Object.assign(nf, rebuilt);
   renderTable();
@@ -482,9 +528,11 @@ function processRows(rows, fileName, sheetName, headers) {
     if (!byNF[nfKey]) byNF[nfKey] = {
       nf: String(nf).trim(), valorNF: num(r.valorNF), transportador: r.transportador || '-',
       modalidade: r.modalidade || '-', ctes: [], temDevolucao: false, dtNF: r.dtNF,
-      cliente: ''
+      cliente: '', qtdCteFromSource: 0
     };
     const g = byNF[nfKey];
+    const qtdRow = num(r.qtdCte);
+    if (qtdRow > g.qtdCteFromSource) g.qtdCteFromSource = qtdRow;
     if (num(r.valorNF) > g.valorNF) g.valorNF = num(r.valorNF);
     if (r.transportador && g.transportador === '-') g.transportador = r.transportador;
     if (r.modalidade && g.modalidade === '-') g.modalidade = r.modalidade;
@@ -634,7 +682,8 @@ function renderSortableHead(containerId, columns, sortState, onSort) {
     const sorted = sortState.col === c.key;
     const cls = ['sortable', c.right ? 'right' : '', sorted ? (sortState.dir === 1 ? 'sorted-asc' : 'sorted-desc') : ''].filter(Boolean).join(' ');
     const ind = sorted ? (sortState.dir === 1 ? '▲' : '▼') : '↕';
-    return `<th class="${cls}" data-col="${c.key}">${c.label}<span class="sort-ind">${ind}</span></th>`;
+    const titleAttr = c.title ? ` title="${c.title.replace(/"/g, '&quot;')}"` : '';
+    return `<th class="${cls}" data-col="${c.key}"${titleAttr}>${c.label}<span class="sort-ind">${ind}</span></th>`;
   }).join('');
   tr.querySelectorAll('th.sortable').forEach(th => {
     th.addEventListener('click', e => {
@@ -672,7 +721,7 @@ function nfExportRow(x) {
     'Transportador': x.transportador,
     'Modalidade': x.modalidade,
     'Valor NF': x.valorNF,
-    'Nº CT-e': x.nCte,
+    'Qtd CT-e': x.nCte,
     'Pago': x.pago,
     'Esperado (6%)': x.esperado,
     'Diferença': x.diff,
