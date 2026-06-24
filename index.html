@@ -1329,7 +1329,6 @@ select.cad-inp{cursor:pointer;}
 <div class="page" id="page-fretes">
   <div class="card">
     <div class="ch"><div class="ct">Conciliação CT-e × Nota Fiscal</div></div>
-    <p style="font-size:12px;color:var(--muted);margin:-8px 0 14px;">Validação da cobrança de frete (6% do valor da NF). Carrega o Excel CT-e/NF (Unilog) e o Excel SAP de notas fiscais — datas, clientes e comparação de valores.</p>
 
     <div class="fte-tabs">
       <div class="fte-tab active" data-tab="analise">Análise atual</div>
@@ -1339,26 +1338,34 @@ select.cad-inp{cursor:pointer;}
 
     <div id="fte-tab-analise">
       <div id="fte-uploadSection">
+        <div class="ch" style="border:none;padding:0 0 8px;margin:0"><div class="ct" style="font-size:13px">Carregar Ficheiros de Fretes</div></div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Validação da cobrança de frete (6% do valor da NF). Selecciona o Excel CT-e/NF (Unilog) e, opcionalmente, o Excel SAP de notas fiscais — depois clica <strong>Processar e Guardar</strong>.</p>
         <div class="upload-grid">
           <div>
-            <div class="sl">Excel CT-e / NF</div>
-            <div class="uz" id="fte-uploadZone">
-              <div style="font-size:24px;margin-bottom:6px">📊</div>
-              <div style="font-size:12px;font-weight:600">Relatório CT-e × NF</div>
-              <div style="font-size:11px;color:var(--muted);margin-top:4px">Folha Export — col. E = qtd. CT-e por cobrança/NF</div>
+            <div class="sl">Excel CT-e / NF (Unilog)</div>
+            <div class="uz" id="fte-cteZone">
+              <div style="font-size:26px;margin-bottom:8px">📊</div>
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel CT-e × NF</div>
+              <div style="font-size:11px;color:var(--muted)">Folha Export — col. E = qtd. CT-e por cobrança/NF</div>
+              <div id="fte-cteFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+              <input type="file" id="fte-fileInput" accept=".xlsx,.xls">
             </div>
-            <input type="file" id="fte-fileInput" accept=".xlsx,.xls">
           </div>
           <div>
-            <div class="sl">Excel SAP (opcional)</div>
-            <div class="uz" id="fte-sapUploadZone">
-              <div style="font-size:24px;margin-bottom:6px">🗄️</div>
-              <div style="font-size:12px;font-weight:600">Notas fiscais SAP</div>
-              <div style="font-size:11px;color:var(--muted);margin-top:4px">NF · data emissão · cliente · valor</div>
-              <div id="fte-sapLoadStatus" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:8px"></div>
+            <div class="sl">Excel SAP NF (opcional)</div>
+            <div class="uz" id="fte-sapZone">
+              <div style="font-size:26px;margin-bottom:8px">🗄️</div>
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel SAP</div>
+              <div style="font-size:11px;color:var(--muted)">NF · data emissão · cliente · valor</div>
+              <div id="fte-sapFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+              <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
             </div>
-            <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
           </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
+          <button class="btn bp" id="fte-procBtn" type="button" disabled>⚡ Processar e Guardar</button>
+          <button class="btn bg" id="fte-loadLastBtn" type="button">☁️ Carregar último guardado</button>
+          <span id="fte-procSpin" style="display:none"><span class="spin"></span></span>
         </div>
         <div id="fte-fileStatus" style="display:none;font-size:11px;color:var(--muted);margin-top:10px"></div>
       </div>

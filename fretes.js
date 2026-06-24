@@ -1,5 +1,5 @@
-// fretes.js v1.4.6
-const FRETES_JS_VERSION = '1.4.6';
+// fretes.js v1.4.7
+const FRETES_JS_VERSION = '1.4.7';
 
 const sb = db;
 
@@ -22,6 +22,10 @@ let monthlyRows = [];
 let historyCache = [];
 let _fteSkipAutosave = false;
 let _fteLoadedCompany = null;
+let fteCteFileName = '';
+let fteCteBuffer = null;
+let fteSapFileName = '';
+let fteSapBuffer = null;
 
 function fteCompany() {
   return typeof company !== 'undefined' ? company : 'DFB';
@@ -33,6 +37,38 @@ function fteCteSlot() {
 
 function fteSapSlot() {
   return typeof EXCEL_SLOTS !== 'undefined' ? EXCEL_SLOTS.FRETES_SAP_NF : 'fretes_sap_nf';
+}
+
+function setCteZoneLoaded(name) {
+  const fn = $('cteFn');
+  const zone = $('cteZone');
+  if (fn) fn.textContent = name ? '✓ ' + name : '';
+  zone?.classList.toggle('loaded', !!name);
+  checkFteBtn();
+}
+
+function setSapZoneLoaded(name) {
+  const fn = $('sapFn');
+  const zone = $('sapZone');
+  if (fn) fn.textContent = name ? '✓ ' + name : '';
+  zone?.classList.toggle('loaded', !!name);
+}
+
+function checkFteBtn() {
+  const btn = $('procBtn');
+  if (btn) btn.disabled = !fteCteBuffer;
+}
+
+async function applyFretesFileLabelsFromMeta() {
+  if (typeof fetchExcelFiles !== 'function') return;
+  try {
+    const m = await fetchExcelFiles([fteCteSlot(), fteSapSlot()]);
+    const cte = m[fteCteSlot()];
+    const sap = m[fteSapSlot()];
+    if (cte?.file_name) setCteZoneLoaded(cte.file_name);
+    if (sap?.file_name) setSapZoneLoaded(sap.file_name);
+    updateFretesFileStatus(m);
+  } catch (e) { /* offline */ }
 }
 
 function updateFretesFileStatus(meta) {
@@ -176,9 +212,10 @@ function formatXlsxReadError(err, context) {
 }
 
 function setSapLoadStatus(msg, ok) {
-  const el = $('sapLoadStatus');
+  const el = $('sapLoadStatus') || $('sapFn');
   if (!el) return;
   el.textContent = msg || '';
+  if (el.id === 'fte-sapFn' && !msg) return;
   el.style.color = ok === false ? 'var(--red)' : (ok === true ? 'var(--green)' : 'var(--muted)');
 }
 
@@ -235,7 +272,6 @@ function showResultsView() {
   $('loadbar').style.display = 'none';
   const us = $('uploadSection');
   if (us) us.style.display = 'none';
-  else $('uploadZone').style.display = 'none';
   $('results').style.display = 'block';
 }
 
@@ -829,17 +865,66 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
   }
 }
 
-function handleFile(file) {
-  setLoadbar('A ler ' + file.name + ' ...', false);
+function selectCteFile(file) {
+  if (!file) return;
+  fteCteFileName = file.name;
   const reader = new FileReader();
   reader.onload = (e) => {
-    const buf = e.target.result;
-    if (processArrayBufferCte(buf, file.name)) {
-      persistFretesFile(fteCteSlot(), file.name, buf);
-      _fteLoadedCompany = fteCompany();
-    }
+    fteCteBuffer = e.target.result;
+    setCteZoneLoaded(file.name);
+    fteToast('CT-e seleccionado — clica Processar e Guardar');
   };
+  reader.onerror = () => fteToastError('Erro ao ler ficheiro CT-e.');
   reader.readAsArrayBuffer(file);
+}
+
+function selectSapFile(file) {
+  if (!file) return;
+  fteSapFileName = file.name;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    fteSapBuffer = e.target.result;
+    setSapZoneLoaded(file.name);
+    fteToast('SAP NF seleccionado');
+  };
+  reader.onerror = () => fteToastError('Erro ao ler ficheiro SAP.');
+  reader.readAsArrayBuffer(file);
+}
+
+async function processAndSaveFretes() {
+  if (!fteCteBuffer || !fteCteFileName) {
+    fteToastError('Selecciona o Excel CT-e/NF primeiro.');
+    return;
+  }
+  const spin = $('procSpin');
+  const procBtn = $('procBtn');
+  if (spin) spin.style.display = '';
+  if (procBtn) procBtn.disabled = true;
+
+  try {
+    sapNfMap = {};
+    const ok = processArrayBufferCte(fteCteBuffer, fteCteFileName);
+    if (!ok) return;
+
+    if (fteSapBuffer && fteSapFileName) {
+      processArrayBufferSap(fteSapBuffer, fteSapFileName);
+    }
+
+    await persistFretesFile(fteCteSlot(), fteCteFileName, fteCteBuffer);
+    if (fteSapBuffer && fteSapFileName) {
+      await persistFretesFile(fteSapSlot(), fteSapFileName, fteSapBuffer);
+    }
+
+    _fteLoadedCompany = fteCompany();
+    updateFretesFileStatus();
+    fteToast('Processado e guardado.');
+  } catch (err) {
+    console.error('[fretes] processAndSave', err);
+    fteToastError('Erro: ' + (err.message || err));
+  } finally {
+    if (spin) spin.style.display = 'none';
+    checkFteBtn();
+  }
 }
 
 function reEnrichAfterSapLoad() {
@@ -855,18 +940,6 @@ function reEnrichAfterSapLoad() {
   }));
   currentSummary = computeSummary(currentNFs, currentSummary?.fileName || 'SAP enrich');
   renderAll();
-}
-
-function handleSapFile(file) {
-  setSapLoadStatus('A ler ' + file.name + ' ...', null);
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const buf = e.target.result;
-    if (processArrayBufferSap(buf, file.name)) {
-      persistFretesFile(fteSapSlot(), file.name, buf);
-    }
-  };
-  reader.readAsArrayBuffer(file);
 }
 
 function num(v) { return (v === null || v === undefined || v === '') ? 0 : Number(v); }
@@ -1072,7 +1145,6 @@ function processRows(rows, fileName, sheetName, headers) {
       '0 notas fiscais encontradas na folha "' + sheetName + '". Colunas: ' + cols;
     const us = $('uploadSection');
     if (us) us.style.display = 'block';
-    else $('uploadZone').style.display = 'block';
     $('results').style.display = 'none';
     fteToast('Não foi possível ler notas fiscais — verifica se o ficheiro tem a coluna "Nota Fiscal".');
     return;
@@ -2018,6 +2090,18 @@ async function loadSavedFretesFiles(silent = false) {
     }
 
     _fteLoadedCompany = co;
+    fteCteFileName = cteRec.file_name || '';
+    fteCteBuffer = cteBuf;
+    setCteZoneLoaded(cteRec.file_name);
+    if (sapRec?.file_data) {
+      fteSapFileName = sapRec.file_name || '';
+      fteSapBuffer = base64ToArrayBuffer(sapRec.file_data);
+      setSapZoneLoaded(sapRec.file_name);
+    } else {
+      fteSapFileName = '';
+      fteSapBuffer = null;
+      setSapZoneLoaded('');
+    }
     updateFretesFileStatus(meta);
     if (!silent) fteToast('Últimos ficheiros fretes carregados.');
     return true;
@@ -2039,15 +2123,16 @@ function reloadFretesForCompany() {
   lastCtePack = null;
   activeSubPanel = null;
   selectedMonth = '';
+  fteCteFileName = '';
+  fteCteBuffer = null;
+  fteSapFileName = '';
+  fteSapBuffer = null;
   const results = $('results');
   if (results) results.style.display = 'none';
   const us = $('uploadSection');
   if (us) us.style.display = 'block';
-  else {
-    const uz = $('uploadZone');
-    if (uz) uz.style.display = 'block';
-  }
-  setSapLoadStatus('');
+  setCteZoneLoaded('');
+  setSapZoneLoaded('');
   setLoadbar('');
   updateSaveStatus('');
   updateFretesFileStatus();
@@ -2070,35 +2155,39 @@ function initFretes() {
     });
   });
 
-  const uploadZone = $('uploadZone');
+  const cteZone = $('cteZone');
   const fileInput = $('fileInput');
-  uploadZone.addEventListener('click', () => fileInput.click());
-  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
-  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
-  uploadZone.addEventListener('drop', e => {
-    e.preventDefault(); uploadZone.classList.remove('drag');
-    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
-  });
-  fileInput.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
-
-  const sapUploadZone = $('sapUploadZone');
-  const sapFileInput = $('sapFileInput');
-  if (sapUploadZone && sapFileInput) {
-    sapUploadZone.addEventListener('click', () => sapFileInput.click());
-    sapUploadZone.addEventListener('dragover', e => { e.preventDefault(); sapUploadZone.classList.add('drag'); });
-    sapUploadZone.addEventListener('dragleave', () => sapUploadZone.classList.remove('drag'));
-    sapUploadZone.addEventListener('drop', e => {
-      e.preventDefault(); sapUploadZone.classList.remove('drag');
-      if (e.dataTransfer.files.length) handleSapFile(e.dataTransfer.files[0]);
+  if (cteZone && fileInput) {
+    cteZone.addEventListener('click', () => fileInput.click());
+    cteZone.addEventListener('dragover', e => { e.preventDefault(); cteZone.classList.add('drag'); });
+    cteZone.addEventListener('dragleave', () => cteZone.classList.remove('drag'));
+    cteZone.addEventListener('drop', e => {
+      e.preventDefault(); cteZone.classList.remove('drag');
+      if (e.dataTransfer.files.length) selectCteFile(e.dataTransfer.files[0]);
     });
-    sapFileInput.addEventListener('change', e => { if (e.target.files.length) handleSapFile(e.target.files[0]); });
+    fileInput.addEventListener('change', e => { if (e.target.files.length) selectCteFile(e.target.files[0]); });
   }
+
+  const sapZone = $('sapZone');
+  const sapFileInput = $('sapFileInput');
+  if (sapZone && sapFileInput) {
+    sapZone.addEventListener('click', () => sapFileInput.click());
+    sapZone.addEventListener('dragover', e => { e.preventDefault(); sapZone.classList.add('drag'); });
+    sapZone.addEventListener('dragleave', () => sapZone.classList.remove('drag'));
+    sapZone.addEventListener('drop', e => {
+      e.preventDefault(); sapZone.classList.remove('drag');
+      if (e.dataTransfer.files.length) selectSapFile(e.dataTransfer.files[0]);
+    });
+    sapFileInput.addEventListener('change', e => { if (e.target.files.length) selectSapFile(e.target.files[0]); });
+  }
+
+  $('procBtn')?.addEventListener('click', () => processAndSaveFretes());
+  $('loadLastBtn')?.addEventListener('click', () => loadSavedFretesFiles(false));
 
   $('newFileBtn').addEventListener('click', () => {
     $('results').style.display = 'none';
     const us = $('uploadSection');
     if (us) us.style.display = 'block';
-    else $('uploadZone').style.display = 'block';
   });
   $('exportBtn').addEventListener('click', () => exportFullWorkbook());
   $('exportFilteredBtn').addEventListener('click', () => exportFilteredView());
@@ -2136,5 +2225,6 @@ function initFretes() {
     });
   });
 
+  applyFretesFileLabelsFromMeta();
   loadSavedFretesFiles(true);
 }
