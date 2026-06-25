@@ -1,4 +1,4 @@
-// fretes.js v1.7.9
+// fretes.js v1.7.10
 const FRETES_JS_VERSION = '1.7.8';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
@@ -3862,6 +3862,17 @@ function resumoMesLabel(k, cteLabel) {
   return cteLabel || fmtMesLabel(k);
 }
 
+function enrichResumoMonthPct(t) {
+  t.pctFreteB2b = t.fatCte > 0 ? t.freteCte / t.fatCte : null;
+  t.pctFreteB2c = t.vendasB2c > 0 ? t.freteB2c / t.vendasB2c : null;
+  t.pctFreteTotal = t.fatTotal > 0 ? t.freteTotal / t.fatTotal : null;
+  return t;
+}
+
+function fmtResumoPct(v) {
+  return v != null ? fmtPct(v) : '-';
+}
+
 function aggregateResumoMonthGroup(group) {
   const t = { fatCte: 0, vendasB2c: 0, freteCte: 0, freteB2c: 0, freteQzB2b: 0 };
   group.forEach(m => {
@@ -3874,7 +3885,7 @@ function aggregateResumoMonthGroup(group) {
   t.fatTotal = t.fatCte + t.vendasB2c;
   t.freteTotal = t.freteCte + t.freteB2c;
   t.deltaQzB2b = t.freteCte - t.freteQzB2b;
-  return t;
+  return enrichResumoMonthPct(t);
 }
 
 function buildResumoMonthDisplayRows(totals) {
@@ -3912,7 +3923,8 @@ function renderResumoMonthTableRow(label, m, rowClass) {
     <td class="right">${fmtMoney(m.fatCte)}</td><td class="right">${fmtMoney(m.vendasB2c)}</td><td class="right">${fmtMoney(m.fatTotal)}</td>
     <td class="right">${fmtMoney(m.freteCte)}</td><td class="right">${fmtMoney(m.freteB2c)}</td><td class="right">${fmtMoney(m.freteTotal)}</td>
     <td class="right">${fmtMoney(m.freteQzB2b)}</td>
-    <td class="right">${fmtQzDiff(m.deltaQzB2b, 0.5)}</td></tr>`;
+    <td class="right">${fmtQzDiff(m.deltaQzB2b, 0.5)}</td>
+    <td class="right">${fmtResumoPct(m.pctFreteB2b)}</td><td class="right">${fmtResumoPct(m.pctFreteB2c)}</td><td class="right">${fmtResumoPct(m.pctFreteTotal)}</td></tr>`;
 }
 
 function buildResumoMonthlyRows() {
@@ -3940,13 +3952,13 @@ function buildResumoMonthlyRows() {
     const freteCte = c.freteCte || 0;
     const freteB2c = b2c.frete || 0;
     const freteQzB2b = b2b.freteQz || 0;
-    return {
+    return enrichResumoMonthPct({
       mesKey: k,
       mesLabel: resumoMesLabel(k, c.mesLabel),
       fatCte, vendasB2c, fatTotal: fatCte + vendasB2c,
       freteCte, freteB2c, freteTotal: freteCte + freteB2c,
       freteQzB2b, deltaQzB2b: freteCte - freteQzB2b
-    };
+    });
   });
 }
 
@@ -3982,12 +3994,12 @@ function renderResumoTotal() {
   if (body) {
     const monthTotals = buildResumoMonthlyRows();
     if (!monthTotals.length) {
-      body.innerHTML = '<tr><td colspan="9" class="empty">Sem dados mensais — carrega CT-e e quinzenais</td></tr>';
+      body.innerHTML = '<tr><td colspan="12" class="empty">Sem dados mensais — carrega CT-e e quinzenais</td></tr>';
     } else {
       const displayRows = buildResumoMonthDisplayRows(monthTotals);
       body.innerHTML = displayRows.map(row => {
         if (row.type === 'year') {
-          return `<tr class="month-year-row"><td colspan="9"><strong>${row.label}</strong></td></tr>`;
+          return `<tr class="month-year-row"><td colspan="12"><strong>${row.label}</strong></td></tr>`;
         }
         if (row.type === 'subtotal' || row.type === 'total') {
           const cls = row.type === 'total' ? 'month-total-row' : 'month-subtotal-row';

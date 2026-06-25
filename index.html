@@ -387,7 +387,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.9</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.10</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1633,6 +1633,9 @@ select.cad-inp{cursor:pointer;}
             <th>Mês</th><th class="right">Faturação CT-e</th><th class="right">Vendas B2C</th><th class="right">Faturação total</th>
             <th class="right">Frete CT-e</th><th class="right">Frete B2C</th><th class="right">Frete total</th>
             <th class="right">Frete QZ B2B</th><th class="right">Δ CT-e vs QZ B2B</th>
+            <th class="right" title="Frete CT-e ÷ Faturação CT-e">% frete B2B</th>
+            <th class="right" title="Frete B2C ÷ Vendas B2C">% frete B2C</th>
+            <th class="right" title="Frete total ÷ Faturação total">% frete total</th>
           </tr></thead><tbody id="fte-resumoMonthBody"></tbody></table>
         </div>
       </div>
@@ -7379,7 +7382,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.7.9"></script>
+<script src="fretes.js?v=1.7.10"></script>
 <script>
 init();
 initMultiselects();
