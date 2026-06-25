@@ -367,7 +367,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.5.1</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.5.4</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1496,12 +1496,13 @@ select.cad-inp{cursor:pointer;}
         <div class="qz-subtab" data-qz="b2c">B2C — vendas e fretes</div>
       </div>
       <div id="fte-qzEmpty" class="empty"><div class="empty-i">📅</div><div>Carrega os relatórios quinzenais Unilog na secção acima</div></div>
+      <p id="fte-qzFileNote" style="display:none;font-size:11px;color:var(--muted);margin:0 0 12px;"></p>
       <div id="fte-qzB2b" style="display:none;">
         <div class="kpis" id="fte-qzB2bKpis"></div>
-        <div class="section-title">Totais por quinzena (B2B)</div>
+        <div class="section-title">Resumo por mês (B2B)</div>
         <div class="tbl-wrap" style="max-height:280px;margin-bottom:16px;">
           <table><thead><tr>
-            <th>Quinzena</th><th class="right">NFs (QZ)</th><th class="right">NFs (CT-e)</th><th class="right">Δ NFs</th>
+            <th>Mês</th><th class="right">NFs (QZ)</th><th class="right">NFs (CT-e)</th><th class="right">Δ NFs</th>
             <th class="right">Faturação QZ</th><th class="right">Faturação CT-e</th><th class="right">Δ valor NF</th>
             <th class="right">Frete QZ</th><th class="right">Frete CT-e</th><th class="right">Δ frete</th>
             <th class="right">CT-e QZ</th><th class="right">CT-e CT-e</th><th class="right">Δ CT-e</th>
@@ -1509,7 +1510,7 @@ select.cad-inp{cursor:pointer;}
         </div>
         <div class="section-title">Detalhe por NF — diferenças B2B</div>
         <div class="filters">
-          <select id="fte-qzFilterQuinzena"><option value="">Todas as quinzenas</option></select>
+          <select id="fte-qzFilterQuinzena"><option value="">Todos os meses</option></select>
           <select id="fte-qzFilterDiff">
             <option value="">Todos</option>
             <option value="onlyQz">Só quinzenal</option>
@@ -1531,15 +1532,15 @@ select.cad-inp{cursor:pointer;}
       </div>
       <div id="fte-qzB2c" style="display:none;">
         <div class="kpis" id="fte-qzB2cKpis"></div>
-        <div class="section-title">Totais por quinzena (B2C)</div>
+        <div class="section-title">Resumo por mês (B2C)</div>
         <div class="tbl-wrap" style="max-height:280px;margin-bottom:16px;">
           <table><thead><tr>
-            <th>Quinzena</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th><th class="right">Frete pago</th><th class="right">% frete/vendas</th>
+            <th>Mês</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th><th class="right">Frete pago</th><th class="right">% frete/vendas</th>
           </tr></thead><tbody id="fte-qzB2cQuinzenaBody"></tbody></table>
         </div>
         <div class="section-title">Detalhe B2C</div>
         <div class="filters">
-          <select id="fte-qzB2cFilterQuinzena"><option value="">Todas as quinzenas</option></select>
+          <select id="fte-qzB2cFilterQuinzena"><option value="">Todos os meses</option></select>
           <input type="text" id="fte-qzB2cSearch" placeholder="Procurar pedido, destinatário…">
         </div>
         <div class="tbl-wrap">

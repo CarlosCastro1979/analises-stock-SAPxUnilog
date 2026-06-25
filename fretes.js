@@ -1,5 +1,5 @@
-// fretes.js v1.5.2
-const FRETES_JS_VERSION = '1.5.2';
+// fretes.js v1.5.4
+const FRETES_JS_VERSION = '1.5.4';
 
 const sb = db;
 
@@ -69,13 +69,30 @@ function checkFteBtn() {
 async function applyFretesFileLabelsFromMeta() {
   if (typeof fetchExcelFiles !== 'function') return;
   try {
-    const m = await fetchExcelFiles([fteCteSlot(), fteSapSlot()]);
+    const m = await fetchExcelFiles([fteCteSlot(), fteSapSlot(), fteQuinzenalSlot()]);
     const cte = m[fteCteSlot()];
     const sap = m[fteSapSlot()];
     if (cte?.file_name) setCteZoneLoaded(cte.file_name);
     if (sap?.file_name) setSapZoneLoaded(sap.file_name);
+    await loadSavedQuinzenalPack(true, m);
     updateFretesFileStatus(m);
   } catch (e) { /* offline */ }
+}
+
+function quinzenalStatusFromPack(pack) {
+  if (!pack?.files?.length) return '';
+  const b2c = pack.files.filter(f => f.canal === 'B2C').length;
+  const b2b = pack.files.filter(f => f.canal === 'B2B').length;
+  return `Últimos quinzenais: ${b2c} B2C · ${b2b} B2B`;
+}
+
+function parseQuinzenalPackFromRec(rec) {
+  if (!rec?.file_data || typeof base64ToArrayBuffer !== 'function') return null;
+  try {
+    return JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(rec.file_data)));
+  } catch (_) {
+    return null;
+  }
 }
 
 function updateFretesFileStatus(meta) {
@@ -94,8 +111,11 @@ function updateFretesFileStatus(meta) {
       if (cte?.file_name) parts.push('CT-e: ' + cte.file_name);
       if (sap?.file_name) parts.push('SAP: ' + sap.file_name);
     }
+    const qzPart = quinzenalStatusFromPack(quinzenalPack) ||
+      quinzenalStatusFromPack(parseQuinzenalPackFromRec(m?.[fteQuinzenalSlot()]));
+    if (qzPart) parts.push(qzPart);
     if (parts.length) {
-      el.textContent = 'Último ficheiro: ' + parts.join(' · ');
+      el.textContent = parts.join(' · ');
       el.style.display = 'block';
     } else {
       el.textContent = '';
@@ -107,7 +127,7 @@ function updateFretesFileStatus(meta) {
     return;
   }
   if (typeof fetchExcelFiles !== 'function') return;
-  fetchExcelFiles([fteCteSlot(), fteSapSlot()]).then(apply).catch(() => {
+  fetchExcelFiles([fteCteSlot(), fteSapSlot(), fteQuinzenalSlot()]).then(apply).catch(() => {
     el.style.display = 'none';
   });
 }
@@ -2363,7 +2383,7 @@ async function loadSavedFretesFiles(silent = false) {
   const co = fteCompany();
   let meta;
   try {
-    meta = await fetchExcelFiles([fteCteSlot(), fteSapSlot()]);
+    meta = await fetchExcelFiles([fteCteSlot(), fteSapSlot(), fteQuinzenalSlot()]);
   } catch (err) {
     console.error('[fretes] load saved', err);
     if (!silent) {
@@ -2376,6 +2396,7 @@ async function loadSavedFretesFiles(silent = false) {
     return false;
   }
 
+  const qzLoaded = await loadSavedQuinzenalPack(silent, meta);
   updateFretesFileStatus(meta);
   const cteRec = meta[fteCteSlot()];
   const sapRec = meta[fteSapSlot()];
@@ -2383,11 +2404,11 @@ async function loadSavedFretesFiles(silent = false) {
   if (!cteRec?.file_data) {
     if (cteRec?.file_name && !silent) {
       fteToastError('CT-e guardado só com nome — clica Processar e Guardar para persistir o ficheiro.');
-    } else if (!cteRec && !silent) {
+    } else if (!cteRec && !silent && !qzLoaded) {
       fteToastError('Sem ficheiros CT-e guardados para ' + co + '.');
     }
     if (_fteLoadedCompany === co && currentNFs.length) return true;
-    return false;
+    return qzLoaded;
   }
   if (_fteLoadedCompany === co && currentNFs.length && lastCtePack?.fileName === cteRec.file_name) {
     return true;
@@ -2497,9 +2518,18 @@ function parseQuinzenalFileName(name) {
     const kk = k.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (norm.includes(kk)) { mes = v; break; }
   }
-  const quinzenaKey = ano && mes && quinzena ? `${ano}-${String(mes).padStart(2, '0')}-Q${quinzena}` : null;
+  const mesKey = ano && mes ? `${ano}-${String(mes).padStart(2, '0')}` : null;
+  const mesLabel = mesKey ? fmtMesLabel(mesKey) : null;
+  const quinzenaKey = ano && mes && quinzena ? `${mesKey}-Q${quinzena}` : null;
   const qLabel = quinzena && mes && ano ? `${quinzena}ªQ ${MESES_PT[mes - 1]}/${ano}` : name;
-  return { canal, quinzena, mes, ano, quinzenaKey, quinzenaLabel: qLabel, fileName: name };
+  return { canal, quinzena, mes, ano, mesKey, mesLabel, quinzenaKey, quinzenaLabel: qLabel, fileName: name };
+}
+
+function mesKeyFromQuinzenaKey(qk) {
+  if (!qk || qk === 'sem-quinzena') return 'sem-mes';
+  const parts = qk.split('-');
+  if (parts.length >= 2 && /^\d{4}$/.test(parts[0]) && /^\d{2}$/.test(parts[1])) return `${parts[0]}-${parts[1]}`;
+  return 'sem-mes';
 }
 
 function quinzenaDateRange(meta) {
@@ -2510,6 +2540,30 @@ function quinzenaDateRange(meta) {
     ? new Date(meta.ano, meta.mes - 1, 15, 23, 59, 59, 999)
     : new Date(meta.ano, meta.mes, 0, 23, 59, 59, 999);
   return { start, end };
+}
+
+function monthDateRange(ano, mes) {
+  if (!ano || !mes) return null;
+  const start = new Date(ano, mes - 1, 1);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(ano, mes, 0, 23, 59, 59, 999);
+  return { start, end };
+}
+
+function detectCanalFromWorkbook(wb) {
+  let b2bScore = 0;
+  let b2cScore = 0;
+  for (const name of wb.SheetNames) {
+    const raw = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: null });
+    for (const row of raw.slice(0, 30)) {
+      if (!Array.isArray(row)) continue;
+      if (isQzB2BHeader(row)) b2bScore += 3;
+      if (isQzB2CHeader(row)) b2cScore += 3;
+    }
+  }
+  if (b2bScore > b2cScore) return 'B2B';
+  if (b2cScore > b2bScore) return 'B2C';
+  return null;
 }
 
 function isQzB2BHeader(cells) {
@@ -2602,6 +2656,8 @@ function aggregateQzB2BRows(rows, fileMeta) {
       byNf[key] = {
         nf: String(r.nf).trim(), nfKey: key, valorNF: 0, pago: 0, nCteSet: new Set(),
         transportador: r.transportador || '', destinatario: r.destinatario || '',
+        mesKey: fileMeta.mesKey || mesKeyFromQuinzenaKey(fileMeta.quinzenaKey),
+        mesLabel: fileMeta.mesLabel || (fileMeta.mesKey ? fmtMesLabel(fileMeta.mesKey) : ''),
         quinzenaKey: fileMeta.quinzenaKey, quinzenaLabel: fileMeta.quinzenaLabel, fileName: fileMeta.fileName
       };
     }
@@ -2624,45 +2680,47 @@ function cteNfsInQuinzena(range) {
   });
 }
 
-function buildB2BQuinzenaTotals(b2bRows) {
-  const byQz = {};
+function cteNfsInMonth(ano, mes) {
+  return cteNfsInQuinzena(monthDateRange(ano, mes));
+}
+
+function buildB2BMonthTotals(b2bRows) {
+  const byMes = {};
   b2bRows.forEach(r => {
-    const k = r.quinzenaKey || 'sem-quinzena';
-    if (!byQz[k]) {
-      byQz[k] = {
-        quinzenaKey: k, quinzenaLabel: r.quinzenaLabel || k,
+    const k = r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey);
+    if (!byMes[k]) {
+      byMes[k] = {
+        mesKey: k, mesLabel: r.mesLabel || (k !== 'sem-mes' ? fmtMesLabel(k) : 'Sem mês'),
         nfCountQz: 0, totalValorNFQz: 0, totalPagoQz: 0, totalCteQz: 0,
         nfCountCte: 0, totalValorNFCte: 0, totalPagoCte: 0, totalCteCte: 0
       };
     }
-    const b = byQz[k];
+    const b = byMes[k];
     b.nfCountQz++; b.totalValorNFQz += r.valorNF; b.totalPagoQz += r.pago; b.totalCteQz += r.nCte;
   });
-  Object.values(byQz).forEach(b => {
-    const parts = b.quinzenaKey.split('-');
-    if (parts.length >= 3) {
-      const ano = parseInt(parts[0], 10);
-      const mes = parseInt(parts[1], 10);
-      const quinzena = parseInt(parts[2].replace('Q', ''), 10);
-      const cteList = cteNfsInQuinzena(quinzenaDateRange({ ano, mes, quinzena }));
-      b.nfCountCte = cteList.length;
-      b.totalValorNFCte = cteList.reduce((s, x) => s + x.valorNF, 0);
-      b.totalPagoCte = cteList.reduce((s, x) => s + x.pago, 0);
-      b.totalCteCte = cteList.reduce((s, x) => s + x.nCte, 0);
-    }
+  Object.values(byMes).forEach(b => {
+    if (b.mesKey === 'sem-mes') return;
+    const parts = b.mesKey.split('-');
+    const ano = parseInt(parts[0], 10);
+    const mes = parseInt(parts[1], 10);
+    const cteList = cteNfsInMonth(ano, mes);
+    b.nfCountCte = cteList.length;
+    b.totalValorNFCte = cteList.reduce((s, x) => s + x.valorNF, 0);
+    b.totalPagoCte = cteList.reduce((s, x) => s + x.pago, 0);
+    b.totalCteCte = cteList.reduce((s, x) => s + x.nCte, 0);
   });
-  return Object.values(byQz).sort((a, b) => (a.quinzenaKey || '').localeCompare(b.quinzenaKey || ''));
+  return Object.values(byMes).sort((a, b) => compareMesRef(a.mesKey, b.mesKey));
 }
 
-function buildB2CQuinzenaTotals(b2cRows) {
-  const byQz = {};
+function buildB2CMonthTotals(b2cRows) {
+  const byMes = {};
   b2cRows.forEach(r => {
-    const k = r.quinzenaKey || 'sem-quinzena';
-    if (!byQz[k]) byQz[k] = { quinzenaKey: k, quinzenaLabel: r.quinzenaLabel || k, count: 0, totalVendas: 0, totalFrete: 0 };
-    byQz[k].count++; byQz[k].totalVendas += r.valorNF; byQz[k].totalFrete += r.pago;
+    const k = r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey);
+    if (!byMes[k]) byMes[k] = { mesKey: k, mesLabel: r.mesLabel || (k !== 'sem-mes' ? fmtMesLabel(k) : 'Sem mês'), count: 0, totalVendas: 0, totalFrete: 0 };
+    byMes[k].count++; byMes[k].totalVendas += r.valorNF; byMes[k].totalFrete += r.pago;
   });
-  return Object.values(byQz).map(b => ({ ...b, pctFrete: b.totalVendas ? b.totalFrete / b.totalVendas : 0 }))
-    .sort((a, b) => (a.quinzenaKey || '').localeCompare(b.quinzenaKey || ''));
+  return Object.values(byMes).map(b => ({ ...b, pctFrete: b.totalVendas ? b.totalFrete / b.totalVendas : 0 }))
+    .sort((a, b) => compareMesRef(a.mesKey, b.mesKey));
 }
 
 function buildB2BCompare(b2bRows) {
@@ -2691,6 +2749,8 @@ function buildB2BCompare(b2bRows) {
     else if (Math.abs(valorNFQz - valorNFCte) > 1 || Math.abs(pagoQz - pagoCte) > 0.5 || nCteQz !== nCteCte) status = 'diff';
     rows.push({
       nfKey: k, nf: qz?.nf || cte?.nf || k,
+      mesKey: qz?.mesKey || mesKeyFromQuinzenaKey(qz?.quinzenaKey),
+      mesLabel: qz?.mesLabel || (qz?.mesKey ? fmtMesLabel(qz.mesKey) : ''),
       quinzenaKey: qz?.quinzenaKey || '', quinzenaLabel: qz?.quinzenaLabel || '',
       valorNFQz, valorNFCte, diffValorNF: valorNFCte - valorNFQz,
       pagoQz, pagoCte, diffPago: pagoCte - pagoQz,
@@ -2702,18 +2762,24 @@ function buildB2BCompare(b2bRows) {
   return rows.sort((a, b) => (ord[a.status] ?? 9) - (ord[b.status] ?? 9) || String(a.nf).localeCompare(String(b.nf)));
 }
 
-function buildQuinzenalPack(fileResults) {
+function buildQuinzenalPack(fileResults, fileBinaries) {
   const b2bRows = [];
   const b2cRows = [];
   const files = [];
+  const failedFiles = [];
+  const binaries = { ...(fileBinaries || {}) };
   fileResults.forEach(fr => {
-    if (!fr.ok) return;
+    if (!fr.ok) {
+      failedFiles.push({ fileName: fr.fileName, error: fr.error || 'Erro desconhecido' });
+      return;
+    }
     const { meta, canal, rows, sheetName } = fr;
     if (canal === 'B2B') {
       const agg = aggregateQzB2BRows(rows, meta);
       b2bRows.push(...agg);
       files.push({
-        fileName: meta.fileName, canal, quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel,
+        fileName: meta.fileName, canal, mesKey: meta.mesKey, mesLabel: meta.mesLabel,
+        quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel,
         sheetName, rowCount: rows.length, nfCount: agg.length,
         totalValorNF: agg.reduce((s, x) => s + x.valorNF, 0),
         totalPago: agg.reduce((s, x) => s + x.pago, 0),
@@ -2723,11 +2789,14 @@ function buildQuinzenalPack(fileResults) {
       rows.forEach(r => {
         b2cRows.push({
           ...r, valorNF: num(r.valorNF) || num(r.valorProdutos), pago: num(r.pago),
+          mesKey: meta.mesKey || mesKeyFromQuinzenaKey(meta.quinzenaKey),
+          mesLabel: meta.mesLabel || (meta.mesKey ? fmtMesLabel(meta.mesKey) : ''),
           quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel, fileName: meta.fileName
         });
       });
       files.push({
-        fileName: meta.fileName, canal, quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel,
+        fileName: meta.fileName, canal, mesKey: meta.mesKey, mesLabel: meta.mesLabel,
+        quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel,
         sheetName, rowCount: rows.length, nfCount: rows.length,
         totalValorNF: rows.reduce((s, x) => s + (num(x.valorNF) || num(x.valorProdutos)), 0),
         totalPago: rows.reduce((s, x) => s + num(x.pago), 0),
@@ -2735,11 +2804,41 @@ function buildQuinzenalPack(fileResults) {
       });
     }
   });
-  const pack = { version: 1, updatedAt: new Date().toISOString(), files, b2bRows, b2cRows };
+  const pack = { version: 2, updatedAt: new Date().toISOString(), files, failedFiles, b2bRows, b2cRows, fileBinaries: binaries };
   pack.b2bCompare = buildB2BCompare(b2bRows);
-  pack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(b2bRows);
-  pack.b2cQuinzenaTotals = buildB2CQuinzenaTotals(b2cRows);
+  pack.b2bMonthTotals = buildB2BMonthTotals(b2bRows);
+  pack.b2cMonthTotals = buildB2CMonthTotals(b2cRows);
   return pack;
+}
+
+function qzFileCounts() {
+  const files = quinzenalPack?.files || [];
+  const failed = quinzenalPack?.failedFiles || [];
+  return {
+    b2c: files.filter(f => f.canal === 'B2C').length,
+    b2b: files.filter(f => f.canal === 'B2B').length,
+    total: files.length,
+    failed: failed.length
+  };
+}
+
+function qzFileCountNoteHtml() {
+  const c = qzFileCounts();
+  if (!c.total && !c.failed) return '';
+  let s = `${c.b2c} ficheiro${c.b2c !== 1 ? 's' : ''} B2C · ${c.b2b} ficheiro${c.b2b !== 1 ? 's' : ''} B2B carregados`;
+  if (c.failed) {
+    const names = (quinzenalPack.failedFiles || []).map(f => f.fileName).join(', ');
+    s += ` · ${c.failed} com erro (${names})`;
+  }
+  return s;
+}
+
+function updateQzFileNote() {
+  const el = $('qzFileNote');
+  if (!el) return;
+  const note = qzFileCountNoteHtml();
+  if (note) { el.style.display = 'block'; el.textContent = note; }
+  else { el.style.display = 'none'; el.textContent = ''; }
 }
 
 function qzCompareSummary(rows) {
@@ -2754,43 +2853,72 @@ function qzCompareSummary(rows) {
 function refreshQuinzenalCompare() {
   if (!quinzenalPack?.b2bRows) return;
   quinzenalPack.b2bCompare = buildB2BCompare(quinzenalPack.b2bRows);
-  quinzenalPack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(quinzenalPack.b2bRows);
+  quinzenalPack.b2bMonthTotals = buildB2BMonthTotals(quinzenalPack.b2bRows);
+  if (quinzenalPack.b2cRows) quinzenalPack.b2cMonthTotals = buildB2CMonthTotals(quinzenalPack.b2cRows);
 }
 
-function setQzZoneLoaded(count) {
+function updateQzProcessStatus() {
+  const st = $('qzStatus');
+  if (!st) return;
+  st.textContent = quinzenalPack?.files?.length ? quinzenalStatusFromPack(quinzenalPack) : '';
+}
+
+function syncQzUploadZone() {
   const fn = $('qzFn');
   const zone = $('qzZone');
   const list = $('qzFileList');
-  if (fn) fn.textContent = count ? `✓ ${count} ficheiro(s) seleccionado(s)` : '';
-  zone?.classList.toggle('loaded', count > 0);
-  if (list) {
-    if (count && fteQzPendingFiles.length) {
+  const btn = $('qzProcBtn');
+  const pending = fteQzPendingFiles.length;
+  const saved = quinzenalPack?.files?.length || 0;
+  if (pending) {
+    if (fn) fn.textContent = `✓ ${pending} ficheiro(s) seleccionado(s)`;
+    zone?.classList.add('loaded');
+    if (list) {
       list.style.display = 'block';
       list.innerHTML = fteQzPendingFiles.map(f => `<div>${f.name}</div>`).join('');
-    } else { list.style.display = 'none'; list.innerHTML = ''; }
+    }
+    if (btn) btn.disabled = false;
+  } else if (saved) {
+    if (fn) fn.textContent = `✓ ${saved} ficheiro(s) guardado(s)`;
+    zone?.classList.add('loaded');
+    if (list) {
+      list.style.display = 'block';
+      list.innerHTML = quinzenalPack.files.map(f => `<div>${f.fileName}</div>`).join('');
+    }
+    if (btn) btn.disabled = true;
+  } else {
+    if (fn) fn.textContent = '';
+    zone?.classList.remove('loaded');
+    if (list) { list.style.display = 'none'; list.innerHTML = ''; }
+    if (btn) btn.disabled = true;
   }
-  const btn = $('qzProcBtn');
-  if (btn) btn.disabled = !count;
+}
+
+function setQzZoneLoaded(count) {
+  syncQzUploadZone();
 }
 
 async function persistQuinzenalPack(pack) {
   if (typeof upsertExcelBinary !== 'function') return;
   const buf = new TextEncoder().encode(JSON.stringify(pack)).buffer;
-  try { await upsertExcelBinary(fteQuinzenalSlot(), `quinzenal_${pack.files.length}_files.json`, buf); }
-  catch (err) { console.error('[fretes] persist quinzenal', err); }
+  try {
+    await upsertExcelBinary(fteQuinzenalSlot(), `quinzenal_${pack.files.length}_files.json`, buf);
+    updateQzProcessStatus();
+    updateFretesFileStatus();
+  } catch (err) { console.error('[fretes] persist quinzenal', err); }
 }
 
-async function loadSavedQuinzenalPack(silent) {
+async function loadSavedQuinzenalPack(silent, meta) {
   if (typeof fetchExcelFiles !== 'function') return false;
   try {
-    const m = await fetchExcelFiles([fteQuinzenalSlot()]);
+    const m = meta || await fetchExcelFiles([fteQuinzenalSlot()]);
     const rec = m[fteQuinzenalSlot()];
     if (!rec?.file_data) return false;
-    quinzenalPack = JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(rec.file_data)));
+    quinzenalPack = parseQuinzenalPackFromRec(rec);
+    if (!quinzenalPack?.files?.length) return false;
     refreshQuinzenalCompare();
-    setQzZoneLoaded(quinzenalPack.files?.length || 0);
-    const st = $('qzStatus');
-    if (st && rec.file_name) st.textContent = `Guardado: ${rec.file_name}`;
+    syncQzUploadZone();
+    updateQzProcessStatus();
     if (!silent) fteToast('Relatórios quinzenais carregados.');
     renderQuinzenalTab();
     return true;
@@ -2800,13 +2928,18 @@ async function loadSavedQuinzenalPack(silent) {
 function processQuinzenalFile(file) {
   return new Promise((resolve) => {
     const meta = parseQuinzenalFileName(file.name);
-    if (!meta.canal) { resolve({ ok: false, fileName: file.name, error: 'Canal B2B/B2C não detectado' }); return; }
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const loaded = loadQuinzenalFromWorkbook(readWorkbookFromArrayBuffer(e.target.result), meta);
+        const wb = readWorkbookFromArrayBuffer(e.target.result);
+        if (!meta.canal) {
+          const detected = detectCanalFromWorkbook(wb);
+          if (detected) meta.canal = detected;
+        }
+        if (!meta.canal) { resolve({ ok: false, fileName: file.name, error: 'Canal B2B/B2C não detectado' }); return; }
+        const loaded = loadQuinzenalFromWorkbook(wb, meta);
         if (!loaded.rows.length) { resolve({ ok: false, fileName: file.name, error: 'Sem linhas de detalhe' }); return; }
-        resolve({ ok: true, ...loaded, meta });
+        resolve({ ok: true, ...loaded, meta, canal: meta.canal, arrayBuffer: e.target.result });
       } catch (err) { resolve({ ok: false, fileName: file.name, error: String(err.message || err) }); }
     };
     reader.onerror = () => resolve({ ok: false, fileName: file.name, error: 'Erro de leitura' });
@@ -2825,10 +2958,21 @@ async function processAndSaveQuinzenal() {
     const ok = results.filter(r => r.ok);
     const fail = results.filter(r => !r.ok);
     if (!ok.length) { fteToastError('Nenhum ficheiro processado.'); return; }
-    quinzenalPack = buildQuinzenalPack(results);
+    const fileBinaries = {};
+    ok.forEach(r => {
+      if (!r.arrayBuffer || typeof arrayBufferToBase64 !== 'function') return;
+      fileBinaries[r.meta.fileName] = arrayBufferToBase64(r.arrayBuffer);
+    });
+    quinzenalPack = buildQuinzenalPack(results, fileBinaries);
     await persistQuinzenalPack(quinzenalPack);
+    fteQzPendingFiles = [];
+    const qzInput = $('qzFileInput');
+    if (qzInput) qzInput.value = '';
+    syncQzUploadZone();
+    const fc = qzFileCounts();
     const st = $('qzStatus');
-    if (st) st.textContent = `${ok.length} ficheiro(s) · ${quinzenalPack.b2bRows.length} NFs B2B · ${quinzenalPack.b2cRows.length} linhas B2C`;
+    if (st) st.textContent = quinzenalStatusFromPack(quinzenalPack) ||
+      `${fc.total} ficheiro(s) · ${quinzenalPack.b2bRows.length} NFs B2B · ${quinzenalPack.b2cRows.length} linhas B2C`;
     if (fail.length) fteToast(`${ok.length} OK, ${fail.length} com erro`);
     else fteToast('Quinzenais processados e guardados.');
     renderQuinzenalTab();
@@ -2852,24 +2996,24 @@ function fmtQzStatus(s) {
     onlyQz: '<span style="color:#b3261e">Só quinzenal</span>', onlyCte: '<span style="color:#b3261e">Só CT-e</span>' }[s] || s;
 }
 
-function populateQzQuinzenaFilters() {
+function populateQzMonthFilters() {
   if (!quinzenalPack) return;
-  const keys = [...new Set((quinzenalPack.b2bRows || []).map(r => r.quinzenaKey).filter(Boolean))].sort();
+  const keys = [...new Set((quinzenalPack.b2bRows || []).map(r => r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)).filter(k => k && k !== 'sem-mes'))].sort(compareMesRef);
   const sel = $('qzFilterQuinzena');
   if (sel) {
     const cur = sel.value;
-    sel.innerHTML = '<option value="">Todas as quinzenas</option>' + keys.map(k => {
-      const lbl = quinzenalPack.b2bRows.find(r => r.quinzenaKey === k)?.quinzenaLabel || k;
+    sel.innerHTML = '<option value="">Todos os meses</option>' + keys.map(k => {
+      const lbl = quinzenalPack.b2bRows.find(r => (r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)) === k)?.mesLabel || fmtMesLabel(k);
       return `<option value="${k}">${lbl}</option>`;
     }).join('');
     sel.value = keys.includes(cur) ? cur : '';
   }
-  const keysB2c = [...new Set((quinzenalPack.b2cRows || []).map(r => r.quinzenaKey).filter(Boolean))].sort();
+  const keysB2c = [...new Set((quinzenalPack.b2cRows || []).map(r => r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)).filter(k => k && k !== 'sem-mes'))].sort(compareMesRef);
   const selB2c = $('qzB2cFilterQuinzena');
   if (selB2c) {
     const cur = selB2c.value;
-    selB2c.innerHTML = '<option value="">Todas as quinzenas</option>' + keysB2c.map(k => {
-      const lbl = quinzenalPack.b2cRows.find(r => r.quinzenaKey === k)?.quinzenaLabel || k;
+    selB2c.innerHTML = '<option value="">Todos os meses</option>' + keysB2c.map(k => {
+      const lbl = quinzenalPack.b2cRows.find(r => (r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)) === k)?.mesLabel || fmtMesLabel(k);
       return `<option value="${k}">${lbl}</option>`;
     }).join('');
     selB2c.value = keysB2c.includes(cur) ? cur : '';
@@ -2894,7 +3038,8 @@ function renderQuinzenalTab() {
     return;
   }
   if (empty) empty.style.display = 'none';
-  populateQzQuinzenaFilters();
+  updateQzFileNote();
+  populateQzMonthFilters();
   refreshQuinzenalCompare();
   if (activeQzPanel === 'b2b') {
     if (b2bPanel) b2bPanel.style.display = 'block';
@@ -2921,12 +3066,12 @@ function renderQzB2b() {
 
   const qzBody = $('qzB2bQuinzenaBody');
   if (qzBody) {
-    const totals = quinzenalPack.b2bQuinzenaTotals || [];
+    const totals = quinzenalPack.b2bMonthTotals || [];
     let tQz = { nf: 0, val: 0, frete: 0, cte: 0, nfC: 0, valC: 0, freteC: 0, cteC: 0 };
     qzBody.innerHTML = totals.map(t => {
       tQz.nf += t.nfCountQz; tQz.val += t.totalValorNFQz; tQz.frete += t.totalPagoQz; tQz.cte += t.totalCteQz;
       tQz.nfC += t.nfCountCte; tQz.valC += t.totalValorNFCte; tQz.freteC += t.totalPagoCte; tQz.cteC += t.totalCteCte;
-      return `<tr><td><strong>${t.quinzenaLabel}</strong></td>
+      return `<tr><td><strong>${t.mesLabel}</strong></td>
         <td class="right">${t.nfCountQz}</td><td class="right">${t.nfCountCte}</td><td class="right">${t.nfCountCte - t.nfCountQz}</td>
         <td class="right">${fmtMoney(t.totalValorNFQz)}</td><td class="right">${fmtMoney(t.totalValorNFCte)}</td>
         <td class="right">${fmtQzDiff(t.totalValorNFCte - t.totalValorNFQz, 1)}</td>
@@ -2946,7 +3091,7 @@ function renderQzB2b() {
   const dFilter = $('qzFilterDiff')?.value || '';
   const search = ($('qzSearchNF')?.value || '').trim();
   let list = rows;
-  if (qFilter) list = list.filter(r => r.quinzenaKey === qFilter);
+  if (qFilter) list = list.filter(r => (r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)) === qFilter);
   if (dFilter === 'onlyQz') list = list.filter(r => r.status === 'onlyQz');
   else if (dFilter === 'onlyCte') list = list.filter(r => r.status === 'onlyCte');
   else if (dFilter === 'valor') list = list.filter(r => Math.abs(r.diffValorNF) > 1);
@@ -2979,17 +3124,15 @@ function renderQzB2c() {
     <div class="kpi"><div class="label">Entregas B2C</div><div class="value">${rows.length}</div></div>
     <div class="kpi"><div class="label">Vendas (Total NF)</div><div class="value">${fmtMoney(totalVendas)}</div></div>
     <div class="kpi"><div class="label">Frete pago</div><div class="value">${fmtMoney(totalFrete)}</div></div>
-    <div class="kpi"><div class="label">% frete/vendas</div><div class="value">${fmtPct(totalVendas ? totalFrete / totalVendas : 0)}</div></div>
-    <div class="kpi"><div class="label">Quinzenas</div><div class="value">${(quinzenalPack.b2cQuinzenaTotals || []).length}</div></div>
-    <div class="kpi"><div class="label">Ficheiros B2C</div><div class="value">${(quinzenalPack.files || []).filter(f => f.canal === 'B2C').length}</div></div>`;
+    <div class="kpi"><div class="label">% frete/vendas</div><div class="value">${fmtPct(totalVendas ? totalFrete / totalVendas : 0)}</div></div>`;
 
   const qBody = $('qzB2cQuinzenaBody');
   if (qBody) {
-    const totals = quinzenalPack.b2cQuinzenaTotals || [];
+    const totals = quinzenalPack.b2cMonthTotals || [];
     let t = { c: 0, v: 0, f: 0 };
     qBody.innerHTML = totals.map(b => {
       t.c += b.count; t.v += b.totalVendas; t.f += b.totalFrete;
-      return `<tr><td><strong>${b.quinzenaLabel}</strong></td><td class="right">${b.count}</td>
+      return `<tr><td><strong>${b.mesLabel}</strong></td><td class="right">${b.count}</td>
         <td class="right">${fmtMoney(b.totalVendas)}</td><td class="right">${fmtMoney(b.totalFrete)}</td>
         <td class="right">${fmtPct(b.pctFrete)}</td></tr>`;
     }).join('') + `<tr class="month-total-row"><td><strong>Total</strong></td>
@@ -3000,7 +3143,7 @@ function renderQzB2c() {
   const qFilter = $('qzB2cFilterQuinzena')?.value || '';
   const search = ($('qzB2cSearch')?.value || '').toLowerCase();
   let list = rows;
-  if (qFilter) list = list.filter(r => r.quinzenaKey === qFilter);
+  if (qFilter) list = list.filter(r => (r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)) === qFilter);
   if (search) list = list.filter(r => String(r.pedido || '').includes(search) || String(r.nf || '').includes(search) ||
     String(r.destinatario || '').toLowerCase().includes(search));
 
@@ -3019,13 +3162,13 @@ function exportQuinzenalWorkbook() {
   if (!quinzenalPack?.files?.length) { fteToast('Sem dados quinzenais.'); return; }
   refreshQuinzenalCompare();
   const wb = XLSX.utils.book_new();
-  const resumo = (quinzenalPack.b2bQuinzenaTotals || []).map(t => ({
-    Quinzena: t.quinzenaLabel, 'NFs QZ': t.nfCountQz, 'NFs CT-e': t.nfCountCte, 'Δ NFs': t.nfCountCte - t.nfCountQz,
+  const resumo = (quinzenalPack.b2bMonthTotals || []).map(t => ({
+    Mês: t.mesLabel, 'NFs QZ': t.nfCountQz, 'NFs CT-e': t.nfCountCte, 'Δ NFs': t.nfCountCte - t.nfCountQz,
     'Faturação QZ': t.totalValorNFQz, 'Faturação CT-e': t.totalValorNFCte, 'Δ valor NF': t.totalValorNFCte - t.totalValorNFQz,
     'Frete QZ': t.totalPagoQz, 'Frete CT-e': t.totalPagoCte, 'Δ frete': t.totalPagoCte - t.totalPagoQz,
     'CT-e QZ': t.totalCteQz, 'CT-e CT-e': t.totalCteCte, 'Δ CT-e': t.totalCteCte - t.totalCteQz
   }));
-  if (resumo.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), 'Resumo B2B');
+  if (resumo.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), 'Resumo B2B mensal');
   const b2b = (quinzenalPack.b2bCompare || []).map(r => ({
     NF: r.nf, Quinzena: r.quinzenaLabel, 'Valor NF QZ': r.valorNFQz, 'Valor NF CT-e': r.valorNFCte, 'Δ valor NF': r.diffValorNF,
     'Frete QZ': r.pagoQz, 'Frete CT-e': r.pagoCte, 'Δ frete': r.diffPago,
@@ -3033,6 +3176,10 @@ function exportQuinzenalWorkbook() {
     '% pago QZ (6%)': r.valorNFQz > 0 ? r.pagoQz / r.valorNFQz : null
   }));
   if (b2b.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2b), 'Diff B2B');
+  const b2cMes = (quinzenalPack.b2cMonthTotals || []).map(t => ({
+    Mês: t.mesLabel, Entregas: t.count, Vendas: t.totalVendas, 'Frete pago': t.totalFrete, '% frete/vendas': t.pctFrete
+  }));
+  if (b2cMes.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2cMes), 'Resumo B2C mensal');
   const b2c = (quinzenalPack.b2cRows || []).map(r => ({
     Pedido: r.pedido, NF: r.nf, Quinzena: r.quinzenaLabel, 'Data coleta': r.dtColeta || r.dtNF,
     Destinatário: r.destinatario, Transportador: r.transportador, Vendas: r.valorNF, Frete: r.pago,
@@ -3058,7 +3205,7 @@ function reloadFretesForCompany() {
   fteSapBuffer = null;
   fteQzPendingFiles = [];
   quinzenalPack = null;
-  setQzZoneLoaded(0);
+  syncQzUploadZone();
   const results = $('results');
   if (results) results.style.display = 'none';
   const us = $('uploadSection');
@@ -3069,7 +3216,6 @@ function reloadFretesForCompany() {
   updateSaveStatus('');
   updateFretesFileStatus();
   if (typeof loadSavedFretesFiles === 'function') loadSavedFretesFiles(true);
-  loadSavedQuinzenalPack(true);
 }
 
 function initFretes() {
@@ -3138,14 +3284,14 @@ function initFretes() {
     qzZone.addEventListener('drop', e => {
       e.preventDefault(); qzZone.classList.remove('drag');
       if (e.dataTransfer.files.length) {
-        fteQzPendingFiles = [...fteQzPendingFiles, ...Array.from(e.dataTransfer.files)];
-        setQzZoneLoaded(fteQzPendingFiles.length);
+        fteQzPendingFiles = Array.from(e.dataTransfer.files);
+        syncQzUploadZone();
       }
     });
     qzInput.addEventListener('change', e => {
       if (e.target.files.length) {
-        fteQzPendingFiles = [...fteQzPendingFiles, ...Array.from(e.target.files)];
-        setQzZoneLoaded(fteQzPendingFiles.length);
+        fteQzPendingFiles = Array.from(e.target.files);
+        syncQzUploadZone();
       }
     });
   }
