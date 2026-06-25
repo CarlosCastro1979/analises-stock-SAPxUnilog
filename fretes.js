@@ -1,5 +1,5 @@
-// fretes.js v1.7.7
-const FRETES_JS_VERSION = '1.7.7';
+// fretes.js v1.7.8
+const FRETES_JS_VERSION = '1.7.8';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -3431,7 +3431,7 @@ function buildB2BCompare(b2bRows) {
       mesLabel: mesLabelQz || mesLabelCte,
       mesLabelQz, mesLabelCte,
       dtNFQz, dtNFCte,
-      quinzenaKey: qz?.quinzenaKey || '', quinzenaLabel: qz?.quinzenaLabel || '',
+      quinzenaKey: qz?.quinzenaKey || '', quinzenaLabel: qz?.quinzenaLabel || '', fileName: qz?.fileName || '',
       valorNFQz, valorNFCte, diffValorNF: valorNFCte - valorNFQz,
       pagoQz, pagoCte, diffPago: pagoCte - pagoQz,
       nCteQz, nCteCte, diffCte: nCteCte - nCteQz, status,
@@ -3929,6 +3929,98 @@ function renderResumoTotal() {
   fteEnableDomSort(body);
 }
 
+function fmtB2bMissingQzQuinzena(r) {
+  const qz = r.quinzenaLabel || r.quinzenaKey || '';
+  const fn = r.fileName || '';
+  if (fn && fn !== qz) {
+    const safe = String(fn).replace(/"/g, '&quot;');
+    return `${qz || '-'}<div class="qz-qz-file" title="${safe}">${safe}</div>`;
+  }
+  return qz || '-';
+}
+
+function b2bCompareMissingQz() {
+  return (quinzenalPack?.b2bCompare || []).filter(r => r.status === 'onlyQz');
+}
+
+function b2bCompareMissingCte() {
+  return (quinzenalPack?.b2bCompare || []).filter(r => r.status === 'onlyCte');
+}
+
+function b2bMissingQzExportRows(rows) {
+  return rows.map(r => ({
+    NF: r.nf,
+    'Data NF': r.dtNFQz ? new Date(r.dtNFQz) : '',
+    Mês: r.mesLabelQz || r.mesLabel || '',
+    'Valor NF': r.valorNFQz,
+    Frete: r.pagoQz,
+    Quinzena: r.quinzenaLabel || '',
+    Ficheiro: r.fileName || '',
+    Transportador: r.transportador || ''
+  }));
+}
+
+function b2bMissingCteExportRows(rows) {
+  return rows.map(r => ({
+    NF: r.nf,
+    'Data NF': r.dtNFCte ? new Date(r.dtNFCte) : '',
+    Mês: r.mesLabelCte || r.mesLabel || '',
+    'Valor NF': r.valorNFCte,
+    Frete: r.pagoCte,
+    Transportador: r.transportador || ''
+  }));
+}
+
+function b2bDiffExportRows(rows) {
+  return rows.map(r => ({
+    NF: r.nf,
+    'Data QZ': r.dtNFQz ? new Date(r.dtNFQz) : '',
+    'Data CT-e': r.dtNFCte ? new Date(r.dtNFCte) : '',
+    Mês: fmtB2bCompareMesCell(r),
+    'Valor NF QZ': r.valorNFQz, 'Valor NF CT-e': r.valorNFCte, 'Δ valor NF': r.diffValorNF,
+    'Frete QZ': r.pagoQz, 'Frete CT-e': r.pagoCte, 'Δ frete': r.diffPago,
+    'Qtd CT-e QZ': r.nCteQz, 'Qtd CT-e CT-e': r.nCteCte, 'Δ CT-e': r.diffCte
+  }));
+}
+
+function exportB2bMissingQz() {
+  if (!quinzenalPack?.b2bRows?.length) { fteToast('Sem dados quinzenais B2B.'); return; }
+  refreshQuinzenalCompare();
+  const rows = b2bCompareMissingQz();
+  if (!rows.length) { fteToast('Sem NFs só no quinzenal.'); return; }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2bMissingQzExportRows(rows)), 'Só quinzenal');
+  downloadWorkbook(wb, `B2B_so_quinzenal_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  fteToast(`${rows.length} NF(s) exportadas (só quinzenal).`);
+}
+
+function exportB2bMissingCte() {
+  if (!currentNFs.length) { fteToast('Sem dados CT-e.'); return; }
+  refreshQuinzenalCompare();
+  const rows = b2bCompareMissingCte();
+  if (!rows.length) { fteToast('Sem NFs só no CT-e.'); return; }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2bMissingCteExportRows(rows)), 'Só CT-e');
+  downloadWorkbook(wb, `B2B_so_CTe_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  fteToast(`${rows.length} NF(s) exportadas (só CT-e).`);
+}
+
+function exportB2bMismatchWorkbook() {
+  if (!quinzenalPack?.b2bRows?.length && !currentNFs.length) { fteToast('Sem dados para confronto B2B.'); return; }
+  refreshQuinzenalCompare();
+  const cmp = quinzenalPack?.b2bCompare || [];
+  const qz = cmp.filter(r => r.status === 'onlyQz');
+  const cte = cmp.filter(r => r.status === 'onlyCte');
+  const diff = cmp.filter(r => r.status === 'diff');
+  if (!qz.length && !cte.length && !diff.length) { fteToast('Sem dados de confronto B2B.'); return; }
+  const wb = XLSX.utils.book_new();
+  if (qz.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2bMissingQzExportRows(qz)), 'Só quinzenal');
+  if (cte.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2bMissingCteExportRows(cte)), 'Só CT-e');
+  if (diff.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2bDiffExportRows(diff)), 'Com diferença');
+  downloadWorkbook(wb, `B2B_confronto_Unilog_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  fteToast('Workbook confronto Unilog exportado.');
+}
+
 function renderQzB2b() {
   const rows = quinzenalPack.b2bCompare || [];
   const monthTotals = quinzenalPack.b2bMonthTotals || [];
@@ -3949,6 +4041,31 @@ function renderQzB2b() {
       }
       return renderB2bMonthTableRow(row.mesLabel, row, 'qz-month-row');
     }).join('');
+  }
+
+  const onlyQz = rows.filter(r => r.status === 'onlyQz');
+  const onlyCte = rows.filter(r => r.status === 'onlyCte');
+  const qzMissingCount = $('qzMissingQzCount');
+  if (qzMissingCount) qzMissingCount.textContent = onlyQz.length ? `(${onlyQz.length} NF${onlyQz.length !== 1 ? 's' : ''})` : '';
+  const cteMissingCount = $('qzMissingCteCount');
+  if (cteMissingCount) cteMissingCount.textContent = onlyCte.length ? `(${onlyCte.length} NF${onlyCte.length !== 1 ? 's' : ''})` : '';
+
+  const qzMissBody = $('qzMissingQzBody');
+  if (qzMissBody) {
+    qzMissBody.innerHTML = onlyQz.length ? onlyQz.map(r => `<tr class="qz-only-row">
+      <td>${r.nf}</td><td>${fmtDate(r.dtNFQz)}</td><td>${r.mesLabelQz || r.mesLabel || '-'}</td>
+      <td class="right">${fmtMoney(r.valorNFQz)}</td><td class="right">${fmtMoney(r.pagoQz)}</td>
+      <td>${fmtB2bMissingQzQuinzena(r)}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="empty">Nenhuma NF só no quinzenal</td></tr>';
+  }
+
+  const cteMissBody = $('qzMissingCteBody');
+  if (cteMissBody) {
+    cteMissBody.innerHTML = onlyCte.length ? onlyCte.map(r => `<tr class="qz-only-row">
+      <td>${r.nf}</td><td>${fmtDate(r.dtNFCte)}</td><td>${r.mesLabelCte || r.mesLabel || '-'}</td>
+      <td class="right">${fmtMoney(r.valorNFCte)}</td><td class="right">${fmtMoney(r.pagoCte)}</td>
+      <td>${r.transportador || '-'}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="empty">Nenhuma NF só no CT-e</td></tr>';
   }
 
   const qFilter = $('qzFilterQuinzena')?.value || '';
@@ -3985,6 +4102,8 @@ function renderQzB2b() {
     }).join('') || '<tr><td colspan="14" class="empty">Sem dados B2B — carrega quinzenais B2B e análise CT-e</td></tr>';
   }
   fteEnableDomSort(qzBody);
+  fteEnableDomSort(qzMissBody);
+  fteEnableDomSort(cteMissBody);
   fteEnableDomSort(detBody);
 }
 
@@ -4227,6 +4346,9 @@ function initFretes() {
   $('exportMensalBtn')?.addEventListener('click', () => exportMonthlyWorkbook());
   $('exportQzBtn')?.addEventListener('click', () => exportQuinzenalWorkbook());
   $('exportQzB2cBtn')?.addEventListener('click', () => exportQuinzenalWorkbook());
+  $('exportB2bMissingQzBtn')?.addEventListener('click', () => exportB2bMissingQz());
+  $('exportB2bMissingCteBtn')?.addEventListener('click', () => exportB2bMissingCte());
+  $('exportB2bMismatchBtn')?.addEventListener('click', () => exportB2bMismatchWorkbook());
 
   ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff', 'filterSapMissing'].forEach(id => {
     const el = $(id);

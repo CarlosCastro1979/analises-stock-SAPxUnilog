@@ -260,6 +260,10 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-fretes .b-dev{background:#dbeafe;color:var(--blue);}#page-fretes .b-flag{background:#fee2e2;color:var(--red);}
 #page-fretes .b-low{background:#eee;color:#555;}
 #page-fretes .section-title{font-size:12px;font-weight:700;margin:20px 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+#page-fretes .qz-missing-panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:8px;}
+@media(max-width:900px){#page-fretes .qz-missing-panels{grid-template-columns:1fr;}}
+#page-fretes .qz-missing-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:12px;}
+#page-fretes .qz-missing-head .btn{margin-left:auto;}
 #page-fretes .sub-panel{display:none;margin:-4px 0 16px;}#page-fretes .sub-panel.open{display:block;}
 #page-fretes .sub-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg3);}
 #page-fretes .sub-head h4{margin:0;font-size:13px;}
@@ -383,7 +387,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.7</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.8</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1558,6 +1562,37 @@ select.cad-inp{cursor:pointer;}
             <th class="right">Frete QZ</th><th class="right">Frete CT-e</th><th class="right">Δ frete</th>
             <th class="right">CT-e QZ</th><th class="right">CT-e CT-e</th><th class="right">Δ CT-e</th>
           </tr></thead><tbody id="fte-qzB2bQuinzenaBody"></tbody></table>
+        </div>
+        <div class="section-title" style="margin-top:0;">
+          NFs em falta — confronto Unilog
+          <button class="btn bg bs" id="fte-exportB2bMismatchBtn" type="button" style="margin-left:auto">Exportar workbook confronto</button>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin:-4px 0 12px;">Listas completas de NFs que existem só numa fonte — alimentam os KPIs «Só quinzenal» e «Só CT-e» acima.</p>
+        <div class="qz-missing-panels">
+          <div class="qz-missing-panel">
+            <div class="qz-missing-head">
+              <strong>NFs só no quinzenal Unilog</strong>
+              <span id="fte-qzMissingQzCount" class="muted"></span>
+              <button class="btn bg bs" id="fte-exportB2bMissingQzBtn" type="button">Exportar Excel</button>
+            </div>
+            <div class="tbl-wrap" style="max-height:320px;margin-bottom:16px;">
+              <table id="fte-qzMissingQzTable"><thead><tr>
+                <th>NF</th><th>Data</th><th>Mês</th><th class="right">Valor NF</th><th class="right">Frete</th><th>Quinzena / ficheiro</th>
+              </tr></thead><tbody id="fte-qzMissingQzBody"></tbody></table>
+            </div>
+          </div>
+          <div class="qz-missing-panel">
+            <div class="qz-missing-head">
+              <strong>NFs só no CT-e</strong>
+              <span id="fte-qzMissingCteCount" class="muted"></span>
+              <button class="btn bg bs" id="fte-exportB2bMissingCteBtn" type="button">Exportar Excel</button>
+            </div>
+            <div class="tbl-wrap" style="max-height:320px;margin-bottom:16px;">
+              <table id="fte-qzMissingCteTable"><thead><tr>
+                <th>NF</th><th>Data</th><th>Mês</th><th class="right">Valor NF</th><th class="right">Frete</th><th>Transportador</th>
+              </tr></thead><tbody id="fte-qzMissingCteBody"></tbody></table>
+            </div>
+          </div>
         </div>
         <div class="section-title">Detalhe por NF — diferenças B2B</div>
         <div class="filters">
@@ -7344,7 +7379,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.7.7"></script>
+<script src="fretes.js?v=1.7.8"></script>
 <script>
 init();
 initMultiselects();
