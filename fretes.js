@@ -2964,7 +2964,7 @@ function buildB2BMonthTotals(b2bRows) {
     const nfKey = r.nfKey || normNFKey(r.nf);
     if (!nfKey) return;
     if (!qzByMes[k].byNf[nfKey]) qzByMes[k].byNf[nfKey] = { valorNF: 0, pago: 0, nCte: 0 };
-    mergeQzB2BNf(qzByMes[k].byNf[nfKey/os], r);
+    mergeQzB2BNf(qzByMes[k].byNf[nfKey], r);
   });
   const cteByMes = buildCteMonthTotalsMap();
   const allKeys = new Set([...Object.keys(qzByMes), ...Object.keys(cteByMes)]);
@@ -3029,7 +3029,7 @@ function aggregateB2bMonthGroup(group) {
   return t;
 }
 
-function buildB2bMonthDisplayRows(totals) {
+function buildB2bMonthDisplayRows(totals, cteGrand) {
   const out = [];
   const dated = totals.filter(m => m.mesKey !== 'sem-mes');
   const noData = totals.filter(m => m.mesKey === 'sem-mes');
@@ -3054,7 +3054,14 @@ function buildB2bMonthDisplayRows(totals) {
   }
   noData.forEach(m => out.push({ type: 'month', ...m }));
   if (totals.length) {
-    out.push({ type: 'total', label: 'Total geral', ...aggregateB2bMonthGroup(totals) });
+    const t = aggregateB2bMonthGroup(totals);
+    if (cteGrand) {
+      t.nfCountCte = cteGrand.nfCount;
+      t.totalValorNFCte = cteGrand.totalValorNF;
+      t.totalPagoCte = cteGrand.totalPago;
+      t.totalCteCte = cteGrand.totalCte;
+    }
+    out.push({ type: 'total', label: 'Total geral', ...t });
   }
   return out;
 }
@@ -3133,22 +3140,24 @@ function renderB2cKpiBlock(label, stats) {
   </div>`;
 }
 
-function renderB2bCompareKpis(monthTotals) {
+function renderB2bCompareKpis(monthTotals, cteGrand) {
   const t = aggregateB2bMonthGroup(monthTotals || []);
+  const fatCte = cteGrand?.totalValorNF ?? t.totalValorNFCte;
+  const freteCte = cteGrand?.totalPago ?? t.totalPagoCte;
   return `<div class="qz-year-kpi-block">
     <div class="qz-year-kpi-label">Faturação (valor NF)</div>
     <div class="kpis">
       <div class="kpi"><div class="label">Faturação QZ</div><div class="value">${fmtMoney(t.totalValorNFQz)}</div></div>
-      <div class="kpi"><div class="label">Faturação CT-e</div><div class="value">${fmtMoney(t.totalValorNFCte)}</div></div>
-      <div class="kpi flag"><div class="label">Δ total</div><div class="value">${fmtQzDiff(t.totalValorNFCte - t.totalValorNFQz, 1)}</div></div>
+      <div class="kpi"><div class="label">Faturação CT-e</div><div class="value">${fmtMoney(fatCte)}</div></div>
+      <div class="kpi flag"><div class="label">Δ total</div><div class="value">${fmtQzDiff(fatCte - t.totalValorNFQz, 1)}</div></div>
     </div>
   </div>
   <div class="qz-year-kpi-block">
     <div class="qz-year-kpi-label">Fretes cobrados</div>
     <div class="kpis">
       <div class="kpi"><div class="label">Frete QZ</div><div class="value">${fmtMoney(t.totalPagoQz)}</div></div>
-      <div class="kpi"><div class="label">Frete CT-e</div><div class="value">${fmtMoney(t.totalPagoCte)}</div></div>
-      <div class="kpi flag"><div class="label">Δ total</div><div class="value">${fmtQzDiff(t.totalPagoCte - t.totalPagoQz, 0.5)}</div></div>
+      <div class="kpi"><div class="label">Frete CT-e</div><div class="value">${fmtMoney(freteCte)}</div></div>
+      <div class="kpi flag"><div class="label">Δ total</div><div class="value">${fmtQzDiff(freteCte - t.totalPagoQz, 0.5)}</div></div>
     </div>
   </div>`;
 }
@@ -3655,12 +3664,13 @@ function renderResumoTotal() {
 function renderQzB2b() {
   const rows = quinzenalPack.b2bCompare || [];
   const monthTotals = quinzenalPack.b2bMonthTotals || [];
+  const cteGrand = cteGrandTotalsFromNFs();
   const kpis = $('qzB2bKpis');
-  if (kpis) kpis.innerHTML = renderB2bCompareKpis(monthTotals);
+  if (kpis) kpis.innerHTML = renderB2bCompareKpis(monthTotals, cteGrand);
 
   const qzBody = $('qzB2bQuinzenaBody');
   if (qzBody) {
-    const displayRows = buildB2bMonthDisplayRows(monthTotals);
+    const displayRows = buildB2bMonthDisplayRows(monthTotals, cteGrand);
     qzBody.innerHTML = displayRows.map(row => {
       if (row.type === 'year') {
         return `<tr class="month-year-row"><td colspan="13"><strong>${row.label}</strong></td></tr>`;
