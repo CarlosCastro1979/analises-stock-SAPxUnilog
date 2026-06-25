@@ -1,5 +1,5 @@
-// fretes.js v1.5.8
-const FRETES_JS_VERSION = '1.5.8';
+// fretes.js v1.5.9
+const FRETES_JS_VERSION = '1.5.9';
 
 const sb = db;
 
@@ -2942,6 +2942,86 @@ function buildB2CMonthTotals(b2cRows) {
     .sort((a, b) => compareMesRef(a.mesKey, b.mesKey));
 }
 
+function aggregateB2cMonthGroup(group) {
+  const t = { count: 0, totalVendas: 0, totalFrete: 0 };
+  group.forEach(m => { t.count += m.count; t.totalVendas += m.totalVendas; t.totalFrete += m.totalFrete; });
+  t.pctFrete = t.totalVendas ? t.totalFrete / t.totalVendas : 0;
+  return t;
+}
+
+function buildB2cMonthDisplayRows(totals) {
+  const out = [];
+  const dated = totals.filter(m => m.mesKey !== 'sem-mes');
+  const noData = totals.filter(m => m.mesKey === 'sem-mes');
+  let lastYear = null;
+  let yearGroup = [];
+
+  dated.forEach(m => {
+    const year = m.mesKey.slice(0, 4);
+    if (lastYear && year !== lastYear && yearGroup.length) {
+      out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...aggregateB2cMonthGroup(yearGroup) });
+      yearGroup = [];
+    }
+    if (year !== lastYear) {
+      out.push({ type: 'year', label: year, year });
+      lastYear = year;
+    }
+    out.push({ type: 'month', ...m });
+    yearGroup.push(m);
+  });
+  if (yearGroup.length && lastYear) {
+    out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...aggregateB2cMonthGroup(yearGroup) });
+  }
+  noData.forEach(m => out.push({ type: 'month', ...m }));
+  if (totals.length) {
+    out.push({ type: 'total', label: 'Total geral', ...aggregateB2cMonthGroup(totals) });
+  }
+  return out;
+}
+
+function buildB2CRegionTotals(b2cRows) {
+  const byReg = {};
+  b2cRows.forEach(r => {
+    const reg = String(r.zona || '').trim() || 'Sem região';
+    if (!byReg[reg]) byReg[reg] = { regiao: reg, count: 0, totalVendas: 0, totalFrete: 0 };
+    byReg[reg].count++;
+    byReg[reg].totalVendas += r.valorNF;
+    byReg[reg].totalFrete += r.pago;
+  });
+  return Object.values(byReg).map(b => ({
+    ...b,
+    pctFrete: b.totalVendas ? b.totalFrete / b.totalVendas : 0,
+    precoMedio: b.count ? b.totalVendas / b.count : 0
+  })).sort((a, b) => b.totalVendas - a.totalVendas);
+}
+
+function buildB2CYearTotals(monthTotals) {
+  const byYear = {};
+  monthTotals.forEach(m => {
+    const year = m.mesKey === 'sem-mes' ? 'sem-ano' : m.mesKey.slice(0, 4);
+    if (!byYear[year]) byYear[year] = { year, label: year === 'sem-ano' ? 'Sem ano' : year, count: 0, totalVendas: 0, totalFrete: 0 };
+    byYear[year].count += m.count;
+    byYear[year].totalVendas += m.totalVendas;
+    byYear[year].totalFrete += m.totalFrete;
+  });
+  return Object.values(byYear).map(b => ({
+    ...b,
+    pctFrete: b.totalVendas ? b.totalFrete / b.totalVendas : 0
+  })).sort((a, b) => String(a.year).localeCompare(String(b.year)));
+}
+
+function renderB2cKpiBlock(label, stats) {
+  return `<div class="qz-year-kpi-block">
+    <div class="qz-year-kpi-label">${label}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="label">Entregas B2C</div><div class="value">${stats.count}</div></div>
+      <div class="kpi"><div class="label">Vendas (Total NF)</div><div class="value">${fmtMoney(stats.totalVendas)}</div></div>
+      <div class="kpi"><div class="label">Frete pago</div><div class="value">${fmtMoney(stats.totalFrete)}</div></div>
+      <div class="kpi"><div class="label">% frete/vendas</div><div class="value">${fmtPct(stats.pctFrete)}</div></div>
+    </div>
+  </div>`;
+}
+
 function buildB2BCompare(b2bRows) {
   const qzMap = {};
   b2bRows.forEach(r => {
@@ -3028,6 +3108,7 @@ function buildQuinzenalPack(fileResults, fileBinaries) {
   pack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(b2bRows);
   pack.b2cMonthTotals = buildB2CMonthTotals(b2cRows);
   pack.b2cQuinzenaTotals = buildB2CQuinzenaTotals(b2cRows);
+  pack.b2cRegionTotals = buildB2CRegionTotals(b2cRows);
   return pack;
 }
 
@@ -3082,6 +3163,7 @@ function refreshQuinzenalCompare() {
     quinzenalPack.b2cRows.forEach(r => enrichB2cRowMesFields(r));
     quinzenalPack.b2cMonthTotals = buildB2CMonthTotals(quinzenalPack.b2cRows);
     quinzenalPack.b2cQuinzenaTotals = buildB2CQuinzenaTotals(quinzenalPack.b2cRows);
+    quinzenalPack.b2cRegionTotals = buildB2CRegionTotals(quinzenalPack.b2cRows);
   }
 }
 
@@ -3436,22 +3518,45 @@ function renderQzB2b() {
 
 function renderQzB2c() {
   const rows = quinzenalPack.b2cRows || [];
-  const totalVendas = rows.reduce((s, r) => s + r.valorNF, 0);
-  const totalFrete = rows.reduce((s, r) => s + r.pago, 0);
+  const monthTotals = quinzenalPack.b2cMonthTotals || [];
+  const yearTotals = buildB2CYearTotals(monthTotals);
+  const grandTotal = aggregateB2cMonthGroup(monthTotals);
   const kpis = $('qzB2cKpis');
-  if (kpis) kpis.innerHTML = `
-    <div class="kpi"><div class="label">Entregas B2C</div><div class="value">${rows.length}</div></div>
-    <div class="kpi"><div class="label">Vendas (Total NF)</div><div class="value">${fmtMoney(totalVendas)}</div></div>
-    <div class="kpi"><div class="label">Frete pago</div><div class="value">${fmtMoney(totalFrete)}</div></div>
-    <div class="kpi"><div class="label">% frete/vendas</div><div class="value">${fmtPct(totalVendas ? totalFrete / totalVendas : 0)}</div></div>`;
+  if (kpis) {
+    let kpiHtml = yearTotals.map(y => renderB2cKpiBlock(y.label, y)).join('');
+    if (yearTotals.length > 1) kpiHtml += renderB2cKpiBlock('Total geral', grandTotal);
+    kpis.innerHTML = kpiHtml || renderB2cKpiBlock('Total geral', { count: 0, totalVendas: 0, totalFrete: 0, pctFrete: 0 });
+  }
+
+  const regBody = $('qzB2cRegionBody');
+  if (regBody) {
+    const regions = quinzenalPack.b2cRegionTotals || buildB2CRegionTotals(rows);
+    regBody.innerHTML = regions.map(r => `<tr>
+      <td><strong>${r.regiao}</strong></td>
+      <td class="right">${r.count}</td>
+      <td class="right">${fmtMoney(r.totalVendas)}</td>
+      <td class="right">${fmtMoney(r.totalFrete)}</td>
+      <td class="right">${fmtPct(r.pctFrete)}</td>
+      <td class="right">${fmtMoney(r.precoMedio)}</td></tr>`).join('')
+      || '<tr><td colspan="6" class="empty">Sem dados por região</td></tr>';
+  }
 
   const qBody = $('qzB2cQuinzenaBody');
   if (qBody) {
-    const totals = quinzenalPack.b2cMonthTotals || [];
+    const totals = monthTotals;
+    const displayRows = buildB2cMonthDisplayRows(totals);
     const qzByMes = qzByMesKey(quinzenalPack.b2cQuinzenaTotals || buildB2CQuinzenaTotals(quinzenalPack.b2cRows || []));
-    let t = { c: 0, v: 0, f: 0 };
-    qBody.innerHTML = totals.map(b => {
-      t.c += b.count; t.v += b.totalVendas; t.f += b.totalFrete;
+    qBody.innerHTML = displayRows.map(row => {
+      if (row.type === 'year') {
+        return `<tr class="month-year-row"><td colspan="5"><strong>${row.label}</strong></td></tr>`;
+      }
+      if (row.type === 'subtotal' || row.type === 'total') {
+        const cls = row.type === 'total' ? 'month-total-row' : 'month-subtotal-row';
+        return `<tr class="${cls}"><td><strong>${row.label}</strong></td>
+          <td class="right">${row.count}</td><td class="right">${fmtMoney(row.totalVendas)}</td>
+          <td class="right">${fmtMoney(row.totalFrete)}</td><td class="right">${fmtPct(row.pctFrete)}</td></tr>`;
+      }
+      const b = row;
       const qzRows = qzByMes[b.mesKey] || [];
       const hasQz = qzRows.length > 0;
       const expanded = qzExpandedMonths.has(qzExpandKey('b2c', b.mesKey));
@@ -3462,9 +3567,7 @@ function renderQzB2c() {
         <td class="right">${fmtPct(b.pctFrete)}</td></tr>`;
       if (expanded && hasQz) html += qzRows.map(renderB2cQuinzenaRow).join('');
       return html;
-    }).join('') + `<tr class="month-total-row"><td><strong>Total geral</strong></td>
-      <td class="right">${t.c}</td><td class="right">${fmtMoney(t.v)}</td><td class="right">${fmtMoney(t.f)}</td>
-      <td class="right">${fmtPct(t.v ? t.f / t.v : 0)}</td></tr>`;
+    }).join('');
     bindQzExpandClicks(qBody, 'b2c');
   }
 
@@ -3472,17 +3575,18 @@ function renderQzB2c() {
   const search = ($('qzB2cSearch')?.value || '').toLowerCase();
   let list = rows;
   if (qFilter) list = list.filter(r => resolveB2cRowMesKey(r) === qFilter);
-  if (search) list = list.filter(r => String(r.pedido || '').includes(search) || String(r.nf || '').includes(search) ||
-    String(r.destinatario || '').toLowerCase().includes(search));
+  if (search) list = list.filter(r => String(r.nf || '').includes(search) ||
+    String(r.destinatario || '').toLowerCase().includes(search) ||
+    String(r.zona || '').toLowerCase().includes(search));
 
   const detBody = $('qzB2cDetailBody');
   if (detBody) {
     detBody.innerHTML = list.slice(0, 2000).map(r => `<tr>
-      <td>${r.pedido || '-'}</td><td>${r.nf || '-'}</td><td>${r.quinzenaLabel || '-'}</td>
+      <td>${r.nf || '-'}</td>
       <td>${fmtDate(r.dtColeta || r.dtNF)}</td><td>${r.destinatario || '-'}</td><td>${r.transportador || '-'}</td>
       <td class="right">${fmtMoney(r.valorNF)}</td><td class="right">${fmtMoney(r.pago)}</td>
       <td class="right">${fmtPct(r.valorNF ? r.pago / r.valorNF : 0)}</td><td>${r.zona || '-'}</td></tr>`).join('')
-      || '<tr><td colspan="10" class="empty">Sem dados B2C</td></tr>';
+      || '<tr><td colspan="8" class="empty">Sem dados B2C</td></tr>';
   }
 }
 
@@ -3508,8 +3612,13 @@ function exportQuinzenalWorkbook() {
     Mês: t.mesLabel, Entregas: t.count, Vendas: t.totalVendas, 'Frete pago': t.totalFrete, '% frete/vendas': t.pctFrete
   }));
   if (b2cMes.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2cMes), 'Resumo B2C mensal');
+  const b2cReg = (quinzenalPack.b2cRegionTotals || buildB2CRegionTotals(quinzenalPack.b2cRows || [])).map(r => ({
+    Região: r.regiao, Entregas: r.count, Vendas: r.totalVendas, 'Frete pago': r.totalFrete,
+    '% frete/vendas': r.pctFrete, 'Preço médio': r.precoMedio
+  }));
+  if (b2cReg.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2cReg), 'Resumo B2C região');
   const b2c = (quinzenalPack.b2cRows || []).map(r => ({
-    Pedido: r.pedido, NF: r.nf, Quinzena: r.quinzenaLabel, 'Data coleta': r.dtColeta || r.dtNF,
+    NF: r.nf, 'Data coleta': r.dtColeta || r.dtNF,
     Destinatário: r.destinatario, Transportador: r.transportador, Vendas: r.valorNF, Frete: r.pago,
     '% frete/vendas': r.valorNF ? r.pago / r.valorNF : null, Região: r.zona
   }));

@@ -294,6 +294,10 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-fretes tr.qz-month-row.expanded td{background:#f8fafc;}
 #page-fretes tr.qz-qz-row td{background:#fafbfc;font-size:11px;color:var(--text2);}
 #page-fretes .qz-chevron{display:inline-block;width:14px;color:var(--muted);font-size:10px;}
+#page-fretes .qz-year-kpi-block{margin:0 0 14px;}
+#page-fretes .qz-year-kpi-label{font-size:12px;font-weight:700;color:var(--text2);margin:0 0 6px;padding-top:4px;border-top:2px solid var(--border2);}
+#page-fretes .qz-year-kpi-block:first-child .qz-year-kpi-label{border-top:none;padding-top:0;}
+#page-fretes .qz-year-kpi-block .kpis{margin:0;}
 #page-fretes .qz-qz-file{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;}
 #page-fretes .hist-item .nums{display:flex;gap:20px;text-align:right;}
 #page-fretes .hist-item .nums .v{font-weight:700;font-size:13px;font-family:var(--mono);}
@@ -373,7 +377,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.5.8</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.5.9</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1537,7 +1541,14 @@ select.cad-inp{cursor:pointer;}
         </div>
       </div>
       <div id="fte-qzB2c" style="display:none;">
-        <div class="kpis" id="fte-qzB2cKpis"></div>
+        <div id="fte-qzB2cKpis"></div>
+        <div class="section-title">Resumo por região (B2C)</div>
+        <div class="tbl-wrap" style="max-height:240px;margin-bottom:16px;">
+          <table><thead><tr>
+            <th>Região</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th>
+            <th class="right">Frete pago</th><th class="right">% frete/vendas</th><th class="right">Preço médio</th>
+          </tr></thead><tbody id="fte-qzB2cRegionBody"></tbody></table>
+        </div>
         <div class="section-title">Resumo por mês (B2C)</div>
         <div class="tbl-wrap" style="max-height:280px;margin-bottom:16px;">
           <table><thead><tr>
@@ -1547,11 +1558,11 @@ select.cad-inp{cursor:pointer;}
         <div class="section-title">Detalhe B2C</div>
         <div class="filters">
           <select id="fte-qzB2cFilterQuinzena"><option value="">Todos os meses</option></select>
-          <input type="text" id="fte-qzB2cSearch" placeholder="Procurar pedido, destinatário…">
+          <input type="text" id="fte-qzB2cSearch" placeholder="Procurar NF, destinatário, região…">
         </div>
         <div class="tbl-wrap">
           <table><thead><tr>
-            <th>Pedido</th><th>NF</th><th>Quinzena</th><th>Data coleta</th><th>Destinatário</th><th>Transportador</th>
+            <th>NF</th><th>Data coleta</th><th>Destinatário</th><th>Transportador</th>
             <th class="right">Vendas</th><th class="right">Frete</th><th class="right">% frete</th><th>Região</th>
           </tr></thead><tbody id="fte-qzB2cDetailBody"></tbody></table>
         </div>
@@ -7083,7 +7094,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.5.8"></script>
+<script src="fretes.js?v=1.5.9"></script>
 <script>
 init();
 initMultiselects();
