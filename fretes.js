@@ -1,5 +1,5 @@
-// fretes.js v1.5.4
-const FRETES_JS_VERSION = '1.5.4';
+// fretes.js v1.5.6
+const FRETES_JS_VERSION = '1.5.6';
 
 const sb = db;
 
@@ -29,6 +29,8 @@ let fteSapBuffer = null;
 let fteQzPendingFiles = [];
 let quinzenalPack = null;
 let activeQzPanel = 'b2b';
+let _fteLoadSavedPromise = null;
+let qzExpandedMonths = new Set();
 
 function fteCompany() {
   return typeof company !== 'undefined' ? company : 'DFB';
@@ -74,7 +76,6 @@ async function applyFretesFileLabelsFromMeta() {
     const sap = m[fteSapSlot()];
     if (cte?.file_name) setCteZoneLoaded(cte.file_name);
     if (sap?.file_name) setSapZoneLoaded(sap.file_name);
-    await loadSavedQuinzenalPack(true, m);
     updateFretesFileStatus(m);
   } catch (e) { /* offline */ }
 }
@@ -2375,7 +2376,65 @@ async function loadHistory() {
   });
 }
 
+async function restoreCteFromRec(cteRec, sapRec, silent = false) {
+  if (!cteRec?.file_data) return false;
+  const co = fteCompany();
+  if (_fteLoadedCompany === co && currentNFs.length && lastCtePack?.fileName === cteRec.file_name) {
+    return true;
+  }
+  _fteSkipAutosave = true;
+  try {
+    sapNfMap = {};
+    const cteBuf = base64ToArrayBuffer(cteRec.file_data);
+    const ok = processArrayBufferCte(cteBuf, cteRec.file_name || 'cte.xlsx', { silent: true });
+    if (!ok) return false;
+    if (sapRec?.file_data) {
+      processArrayBufferSap(base64ToArrayBuffer(sapRec.file_data), sapRec.file_name || 'sap.xlsx', { silent: true });
+    }
+    _fteLoadedCompany = co;
+    fteCteFileName = cteRec.file_name || '';
+    fteCteBuffer = cteBuf;
+    setCteZoneLoaded(cteRec.file_name);
+    if (sapRec?.file_data) {
+      fteSapFileName = sapRec.file_name || '';
+      fteSapBuffer = base64ToArrayBuffer(sapRec.file_data);
+      setSapZoneLoaded(sapRec.file_name);
+    } else {
+      fteSapFileName = '';
+      fteSapBuffer = null;
+      setSapZoneLoaded('');
+    }
+    return true;
+  } catch (err) {
+    console.error('[fretes] restore cte', err);
+    if (!silent) fteToastError('Erro ao carregar ficheiros guardados.');
+    return false;
+  } finally {
+    _fteSkipAutosave = false;
+  }
+}
+
+async function ensureCteLoadedForQz(silent = true) {
+  if (currentNFs.length) return true;
+  if (typeof fetchExcelFiles !== 'function' || typeof base64ToArrayBuffer !== 'function') return false;
+  try {
+    const meta = await fetchExcelFiles([fteCteSlot(), fteSapSlot()]);
+    const ok = await restoreCteFromRec(meta[fteCteSlot()], meta[fteSapSlot()], silent);
+    if (ok) refreshQuinzenalCompare();
+    return ok;
+  } catch (err) {
+    console.error('[fretes] ensure cte for qz', err);
+    return false;
+  }
+}
+
 async function loadSavedFretesFiles(silent = false) {
+  if (_fteLoadSavedPromise) return _fteLoadSavedPromise;
+  _fteLoadSavedPromise = _loadSavedFretesFilesImpl(silent).finally(() => { _fteLoadSavedPromise = null; });
+  return _fteLoadSavedPromise;
+}
+
+async function _loadSavedFretesFilesImpl(silent = false) {
   if (typeof fetchExcelFiles !== 'function' || typeof base64ToArrayBuffer !== 'function') {
     if (!silent) fteToastError('Persistência Excel indisponível — recarrega a página.');
     return false;
@@ -2396,59 +2455,30 @@ async function loadSavedFretesFiles(silent = false) {
     return false;
   }
 
-  const qzLoaded = await loadSavedQuinzenalPack(silent, meta);
-  updateFretesFileStatus(meta);
   const cteRec = meta[fteCteSlot()];
   const sapRec = meta[fteSapSlot()];
 
-  if (!cteRec?.file_data) {
-    if (cteRec?.file_name && !silent) {
-      fteToastError('CT-e guardado só com nome — clica Processar e Guardar para persistir o ficheiro.');
-    } else if (!cteRec && !silent && !qzLoaded) {
-      fteToastError('Sem ficheiros CT-e guardados para ' + co + '.');
-    }
-    if (_fteLoadedCompany === co && currentNFs.length) return true;
-    return qzLoaded;
-  }
-  if (_fteLoadedCompany === co && currentNFs.length && lastCtePack?.fileName === cteRec.file_name) {
-    return true;
+  let cteOk = false;
+  if (cteRec?.file_data) {
+    cteOk = await restoreCteFromRec(cteRec, sapRec, silent);
+  } else if (_fteLoadedCompany === co && currentNFs.length) {
+    cteOk = true;
+  } else if (cteRec?.file_name && !silent) {
+    fteToastError('CT-e guardado só com nome — clica Processar e Guardar para persistir o ficheiro.');
   }
 
-  _fteSkipAutosave = true;
-  try {
-    sapNfMap = {};
-    const cteBuf = base64ToArrayBuffer(cteRec.file_data);
-    const ok = processArrayBufferCte(cteBuf, cteRec.file_name || 'cte.xlsx', { silent: true });
-    if (!ok) return false;
+  const qzLoaded = await loadSavedQuinzenalPack(silent, meta, { deferCompare: true, skipRender: true });
+  refreshQuinzenalCompare();
+  updateFretesFileStatus(meta);
 
-    if (sapRec?.file_data) {
-      const sapBuf = base64ToArrayBuffer(sapRec.file_data);
-      processArrayBufferSap(sapBuf, sapRec.file_name || 'sap.xlsx', { silent: true });
-    }
-
-    _fteLoadedCompany = co;
-    fteCteFileName = cteRec.file_name || '';
-    fteCteBuffer = cteBuf;
-    setCteZoneLoaded(cteRec.file_name);
-    if (sapRec?.file_data) {
-      fteSapFileName = sapRec.file_name || '';
-      fteSapBuffer = base64ToArrayBuffer(sapRec.file_data);
-      setSapZoneLoaded(sapRec.file_name);
-    } else {
-      fteSapFileName = '';
-      fteSapBuffer = null;
-      setSapZoneLoaded('');
-    }
-    updateFretesFileStatus(meta);
-    if (!silent) fteToast('Últimos ficheiros fretes carregados.');
-    return true;
-  } catch (err) {
-    console.error('[fretes] restore', err);
-    if (!silent) fteToastError('Erro ao carregar ficheiros guardados.');
-    return false;
-  } finally {
-    _fteSkipAutosave = false;
+  if (!cteOk && !silent && !qzLoaded && !cteRec) {
+    fteToastError('Sem ficheiros CT-e guardados para ' + co + '.');
+  } else if (cteOk && !silent) {
+    fteToast('Últimos ficheiros fretes carregados.');
   }
+
+  if ($('tab-quinzenal')?.style.display === 'block') renderQuinzenalTab();
+  return cteOk || qzLoaded || currentNFs.length > 0;
 }
 
 // ── QUINZENAL UNILOG (B2B diff vs CT-e · B2C vendas/fretes) ──
@@ -2684,6 +2714,118 @@ function cteNfsInMonth(ano, mes) {
   return cteNfsInQuinzena(monthDateRange(ano, mes));
 }
 
+function mergeQzB2BNf(into, r) {
+  into.valorNF = Math.max(into.valorNF, r.valorNF);
+  into.pago += r.pago;
+  into.nCte += r.nCte;
+}
+
+function quinzenaFromKey(qk) {
+  const m = String(qk || '').match(/-Q([12])$/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function parseQuinzenaKeyParts(qk) {
+  const m = String(qk || '').match(/^(\d{4})-(\d{2})-Q([12])$/);
+  if (!m) return null;
+  return { ano: parseInt(m[1], 10), mes: parseInt(m[2], 10), quinzena: parseInt(m[3], 10) };
+}
+
+function qzExpandKey(panel, mesKey) {
+  return `${panel}:${mesKey}`;
+}
+
+function qzByMesKey(qzTotals) {
+  const map = {};
+  (qzTotals || []).forEach(q => {
+    const k = q.mesKey || 'sem-mes';
+    if (!map[k]) map[k] = [];
+    map[k].push(q);
+  });
+  Object.values(map).forEach(arr => arr.sort((a, b) => (a.quinzena || 0) - (b.quinzena || 0)));
+  return map;
+}
+
+function qzQuinzenaCellLabel(q) {
+  const base = q.quinzena === 1 ? '1ª quinzena' : (q.quinzena === 2 ? '2ª quinzena' : (q.quinzenaLabel || 'Quinzena'));
+  if (q.fileName && q.fileName !== base) {
+    const safe = String(q.fileName).replace(/"/g, '&quot;');
+    return `${base}<div class="qz-qz-file" title="${safe}">${safe}</div>`;
+  }
+  return base;
+}
+
+function buildB2BQuinzenaTotals(b2bRows) {
+  const byQz = {};
+  b2bRows.forEach(r => {
+    const qk = r.quinzenaKey || 'sem-quinzena';
+    if (!byQz[qk]) {
+      byQz[qk] = {
+        mesKey: r.mesKey || mesKeyFromQuinzenaKey(qk),
+        mesLabel: r.mesLabel || (r.mesKey ? fmtMesLabel(r.mesKey) : ''),
+        quinzenaKey: qk,
+        quinzena: quinzenaFromKey(qk),
+        quinzenaLabel: r.quinzenaLabel || (quinzenaFromKey(qk) ? `${quinzenaFromKey(qk)}ªQ` : qk),
+        fileName: r.fileName || '',
+        byNf: {}
+      };
+    }
+    const nfKey = r.nfKey || normNFKey(r.nf);
+    if (!nfKey) return;
+    if (!byQz[qk].byNf[nfKey]) byQz[qk].byNf[nfKey] = { valorNF: 0, pago: 0, nCte: 0 };
+    mergeQzB2BNf(byQz[qk].byNf[nfKey], r);
+    if (r.fileName) byQz[qk].fileName = r.fileName;
+  });
+  return Object.values(byQz).map(b => {
+    const nfs = Object.values(b.byNf);
+    const out = {
+      mesKey: b.mesKey, mesLabel: b.mesLabel,
+      quinzenaKey: b.quinzenaKey, quinzena: b.quinzena,
+      quinzenaLabel: b.quinzenaLabel, fileName: b.fileName,
+      nfCountQz: nfs.length,
+      totalValorNFQz: nfs.reduce((s, x) => s + x.valorNF, 0),
+      totalPagoQz: nfs.reduce((s, x) => s + x.pago, 0),
+      totalCteQz: nfs.reduce((s, x) => s + x.nCte, 0),
+      nfCountCte: 0, totalValorNFCte: 0, totalPagoCte: 0, totalCteCte: 0
+    };
+    const pk = parseQuinzenaKeyParts(b.quinzenaKey);
+    if (pk) {
+      const cteList = cteNfsInQuinzena(quinzenaDateRange(pk));
+      out.nfCountCte = cteList.length;
+      out.totalValorNFCte = cteList.reduce((s, x) => s + x.valorNF, 0);
+      out.totalPagoCte = cteList.reduce((s, x) => s + x.pago, 0);
+      out.totalCteCte = cteList.reduce((s, x) => s + x.nCte, 0);
+    }
+    return out;
+  }).sort((a, b) => compareMesRef(a.mesKey, b.mesKey) || (a.quinzena || 0) - (b.quinzena || 0));
+}
+
+function buildB2CQuinzenaTotals(b2cRows) {
+  const byQz = {};
+  b2cRows.forEach(r => {
+    const qk = r.quinzenaKey || 'sem-quinzena';
+    if (!byQz[qk]) {
+      byQz[qk] = {
+        mesKey: r.mesKey || mesKeyFromQuinzenaKey(qk),
+        mesLabel: r.mesLabel || (r.mesKey ? fmtMesLabel(r.mesKey) : ''),
+        quinzenaKey: qk,
+        quinzena: quinzenaFromKey(qk),
+        quinzenaLabel: r.quinzenaLabel || (quinzenaFromKey(qk) ? `${quinzenaFromKey(qk)}ªQ` : qk),
+        fileName: r.fileName || '',
+        count: 0, totalVendas: 0, totalFrete: 0
+      };
+    }
+    byQz[qk].count++;
+    byQz[qk].totalVendas += r.valorNF;
+    byQz[qk].totalFrete += r.pago;
+    if (r.fileName) byQz[qk].fileName = r.fileName;
+  });
+  return Object.values(byQz).map(b => ({
+    ...b,
+    pctFrete: b.totalVendas ? b.totalFrete / b.totalVendas : 0
+  })).sort((a, b) => compareMesRef(a.mesKey, b.mesKey) || (a.quinzena || 0) - (b.quinzena || 0));
+}
+
 function buildB2BMonthTotals(b2bRows) {
   const byMes = {};
   b2bRows.forEach(r => {
@@ -2691,25 +2833,36 @@ function buildB2BMonthTotals(b2bRows) {
     if (!byMes[k]) {
       byMes[k] = {
         mesKey: k, mesLabel: r.mesLabel || (k !== 'sem-mes' ? fmtMesLabel(k) : 'Sem mês'),
-        nfCountQz: 0, totalValorNFQz: 0, totalPagoQz: 0, totalCteQz: 0,
-        nfCountCte: 0, totalValorNFCte: 0, totalPagoCte: 0, totalCteCte: 0
+        byNf: {}
       };
     }
-    const b = byMes[k];
-    b.nfCountQz++; b.totalValorNFQz += r.valorNF; b.totalPagoQz += r.pago; b.totalCteQz += r.nCte;
+    const nfKey = r.nfKey || normNFKey(r.nf);
+    if (!nfKey) return;
+    if (!byMes[k].byNf[nfKey]) byMes[k].byNf[nfKey] = { valorNF: 0, pago: 0, nCte: 0 };
+    mergeQzB2BNf(byMes[k].byNf[nfKey], r);
   });
-  Object.values(byMes).forEach(b => {
-    if (b.mesKey === 'sem-mes') return;
-    const parts = b.mesKey.split('-');
-    const ano = parseInt(parts[0], 10);
-    const mes = parseInt(parts[1], 10);
-    const cteList = cteNfsInMonth(ano, mes);
-    b.nfCountCte = cteList.length;
-    b.totalValorNFCte = cteList.reduce((s, x) => s + x.valorNF, 0);
-    b.totalPagoCte = cteList.reduce((s, x) => s + x.pago, 0);
-    b.totalCteCte = cteList.reduce((s, x) => s + x.nCte, 0);
-  });
-  return Object.values(byMes).sort((a, b) => compareMesRef(a.mesKey, b.mesKey));
+  return Object.values(byMes).map(b => {
+    const nfs = Object.values(b.byNf);
+    const out = {
+      mesKey: b.mesKey, mesLabel: b.mesLabel,
+      nfCountQz: nfs.length,
+      totalValorNFQz: nfs.reduce((s, x) => s + x.valorNF, 0),
+      totalPagoQz: nfs.reduce((s, x) => s + x.pago, 0),
+      totalCteQz: nfs.reduce((s, x) => s + x.nCte, 0),
+      nfCountCte: 0, totalValorNFCte: 0, totalPagoCte: 0, totalCteCte: 0
+    };
+    if (b.mesKey !== 'sem-mes') {
+      const parts = b.mesKey.split('-');
+      const ano = parseInt(parts[0], 10);
+      const mes = parseInt(parts[1], 10);
+      const cteList = cteNfsInMonth(ano, mes);
+      out.nfCountCte = cteList.length;
+      out.totalValorNFCte = cteList.reduce((s, x) => s + x.valorNF, 0);
+      out.totalPagoCte = cteList.reduce((s, x) => s + x.pago, 0);
+      out.totalCteCte = cteList.reduce((s, x) => s + x.nCte, 0);
+    }
+    return out;
+  }).sort((a, b) => compareMesRef(a.mesKey, b.mesKey));
 }
 
 function buildB2CMonthTotals(b2cRows) {
@@ -2728,7 +2881,7 @@ function buildB2BCompare(b2bRows) {
   b2bRows.forEach(r => {
     const k = r.nfKey;
     if (!qzMap[k]) qzMap[k] = { ...r };
-    else { qzMap[k].valorNF = Math.max(qzMap[k].valorNF, r.valorNF); qzMap[k].pago += r.pago; qzMap[k].nCte += r.nCte; }
+    else mergeQzB2BNf(qzMap[k], r);
   });
   const cteMap = {};
   currentNFs.forEach(nf => { const k = normNFKey(nf.nf); if (k) cteMap[k] = nf; });
@@ -2807,7 +2960,9 @@ function buildQuinzenalPack(fileResults, fileBinaries) {
   const pack = { version: 2, updatedAt: new Date().toISOString(), files, failedFiles, b2bRows, b2cRows, fileBinaries: binaries };
   pack.b2bCompare = buildB2BCompare(b2bRows);
   pack.b2bMonthTotals = buildB2BMonthTotals(b2bRows);
+  pack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(b2bRows);
   pack.b2cMonthTotals = buildB2CMonthTotals(b2cRows);
+  pack.b2cQuinzenaTotals = buildB2CQuinzenaTotals(b2cRows);
   return pack;
 }
 
@@ -2854,7 +3009,11 @@ function refreshQuinzenalCompare() {
   if (!quinzenalPack?.b2bRows) return;
   quinzenalPack.b2bCompare = buildB2BCompare(quinzenalPack.b2bRows);
   quinzenalPack.b2bMonthTotals = buildB2BMonthTotals(quinzenalPack.b2bRows);
-  if (quinzenalPack.b2cRows) quinzenalPack.b2cMonthTotals = buildB2CMonthTotals(quinzenalPack.b2cRows);
+  quinzenalPack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(quinzenalPack.b2bRows);
+  if (quinzenalPack.b2cRows) {
+    quinzenalPack.b2cMonthTotals = buildB2CMonthTotals(quinzenalPack.b2cRows);
+    quinzenalPack.b2cQuinzenaTotals = buildB2CQuinzenaTotals(quinzenalPack.b2cRows);
+  }
 }
 
 function updateQzProcessStatus() {
@@ -2908,7 +3067,7 @@ async function persistQuinzenalPack(pack) {
   } catch (err) { console.error('[fretes] persist quinzenal', err); }
 }
 
-async function loadSavedQuinzenalPack(silent, meta) {
+async function loadSavedQuinzenalPack(silent, meta, opts = {}) {
   if (typeof fetchExcelFiles !== 'function') return false;
   try {
     const m = meta || await fetchExcelFiles([fteQuinzenalSlot()]);
@@ -2916,11 +3075,11 @@ async function loadSavedQuinzenalPack(silent, meta) {
     if (!rec?.file_data) return false;
     quinzenalPack = parseQuinzenalPackFromRec(rec);
     if (!quinzenalPack?.files?.length) return false;
-    refreshQuinzenalCompare();
+    if (!opts?.deferCompare) refreshQuinzenalCompare();
     syncQzUploadZone();
     updateQzProcessStatus();
     if (!silent) fteToast('Relatórios quinzenais carregados.');
-    renderQuinzenalTab();
+    if (!opts?.skipRender) renderQuinzenalTab();
     return true;
   } catch (err) { console.error('[fretes] load quinzenal', err); return false; }
 }
@@ -2991,6 +3150,36 @@ function fmtQzDiff(v, threshold) {
   return `<span style="color:${v > 0 ? '#b3261e' : '#555'}">${sign}${fmtMoney(v)}</span>`;
 }
 
+function renderB2bQuinzenaRow(q) {
+  return `<tr class="qz-qz-row"><td style="padding-left:26px">${qzQuinzenaCellLabel(q)}</td>
+    <td class="right">${q.nfCountQz}</td><td class="right">${q.nfCountCte}</td><td class="right">${q.nfCountCte - q.nfCountQz}</td>
+    <td class="right">${fmtMoney(q.totalValorNFQz)}</td><td class="right">${fmtMoney(q.totalValorNFCte)}</td>
+    <td class="right">${fmtQzDiff(q.totalValorNFCte - q.totalValorNFQz, 1)}</td>
+    <td class="right">${fmtMoney(q.totalPagoQz)}</td><td class="right">${fmtMoney(q.totalPagoCte)}</td>
+    <td class="right">${fmtQzDiff(q.totalPagoCte - q.totalPagoQz, 0.5)}</td>
+    <td class="right">${q.totalCteQz}</td><td class="right">${q.totalCteCte}</td><td class="right">${q.totalCteCte - q.totalCteQz}</td></tr>`;
+}
+
+function renderB2cQuinzenaRow(q) {
+  return `<tr class="qz-qz-row"><td style="padding-left:26px">${qzQuinzenaCellLabel(q)}</td>
+    <td class="right">${q.count}</td><td class="right">${fmtMoney(q.totalVendas)}</td>
+    <td class="right">${fmtMoney(q.totalFrete)}</td><td class="right">${fmtPct(q.pctFrete)}</td></tr>`;
+}
+
+function bindQzExpandClicks(bodyEl, panel) {
+  if (!bodyEl || bodyEl._qzExpandBound) return;
+  bodyEl._qzExpandBound = true;
+  bodyEl.addEventListener('click', e => {
+    const tr = e.target.closest('tr.qz-expandable');
+    if (!tr || tr.dataset.panel !== panel) return;
+    const key = qzExpandKey(panel, tr.dataset.mes);
+    if (qzExpandedMonths.has(key)) qzExpandedMonths.delete(key);
+    else qzExpandedMonths.add(key);
+    if (panel === 'b2b') renderQzB2b();
+    else renderQzB2c();
+  });
+}
+
 function fmtQzStatus(s) {
   return { match: '<span style="color:var(--green)">OK</span>', diff: '<span style="color:#b3261e">Diferença</span>',
     onlyQz: '<span style="color:#b3261e">Só quinzenal</span>', onlyCte: '<span style="color:#b3261e">Só CT-e</span>' }[s] || s;
@@ -3020,15 +3209,18 @@ function populateQzMonthFilters() {
   }
 }
 
-function renderQuinzenalTab() {
+async function renderQuinzenalTab() {
   const empty = $('qzEmpty');
   const b2bPanel = $('qzB2b');
   const b2cPanel = $('qzB2c');
   const warn = $('qzWarn');
+  if (quinzenalPack?.b2bRows?.length && !currentNFs.length) {
+    await ensureCteLoadedForQz(true);
+  }
   if (warn) {
     if (quinzenalPack?.b2bRows?.length && !currentNFs.length) {
       warn.style.display = 'block';
-      warn.innerHTML = '<strong>Análise CT-e não carregada:</strong> processa o Excel CT-e/NF na secção acima para comparar B2B quinzenal vs CT-e.';
+      warn.innerHTML = '<strong>Export Unilog indisponível:</strong> processa o Excel CT-e/NF na secção acima (ou Processar e Guardar) para comparar B2B quinzenal vs export original.';
     } else warn.style.display = 'none';
   }
   if (!quinzenalPack?.files?.length) {
@@ -3067,24 +3259,33 @@ function renderQzB2b() {
   const qzBody = $('qzB2bQuinzenaBody');
   if (qzBody) {
     const totals = quinzenalPack.b2bMonthTotals || [];
+    const qzByMes = qzByMesKey(quinzenalPack.b2bQuinzenaTotals || buildB2BQuinzenaTotals(quinzenalPack.b2bRows || []));
     let tQz = { nf: 0, val: 0, frete: 0, cte: 0, nfC: 0, valC: 0, freteC: 0, cteC: 0 };
     qzBody.innerHTML = totals.map(t => {
       tQz.nf += t.nfCountQz; tQz.val += t.totalValorNFQz; tQz.frete += t.totalPagoQz; tQz.cte += t.totalCteQz;
       tQz.nfC += t.nfCountCte; tQz.valC += t.totalValorNFCte; tQz.freteC += t.totalPagoCte; tQz.cteC += t.totalCteCte;
-      return `<tr><td><strong>${t.mesLabel}</strong></td>
+      const qzRows = qzByMes[t.mesKey] || [];
+      const hasQz = qzRows.length > 0;
+      const expanded = qzExpandedMonths.has(qzExpandKey('b2b', t.mesKey));
+      const chev = hasQz ? `<span class="qz-chevron">${expanded ? '▾' : '▸'}</span> ` : '';
+      let html = `<tr class="qz-month-row${hasQz ? ' qz-expandable' : ''}${expanded ? ' expanded' : ''}" data-panel="b2b" data-mes="${t.mesKey}">
+        <td>${chev}<strong>${t.mesLabel}</strong></td>
         <td class="right">${t.nfCountQz}</td><td class="right">${t.nfCountCte}</td><td class="right">${t.nfCountCte - t.nfCountQz}</td>
         <td class="right">${fmtMoney(t.totalValorNFQz)}</td><td class="right">${fmtMoney(t.totalValorNFCte)}</td>
         <td class="right">${fmtQzDiff(t.totalValorNFCte - t.totalValorNFQz, 1)}</td>
         <td class="right">${fmtMoney(t.totalPagoQz)}</td><td class="right">${fmtMoney(t.totalPagoCte)}</td>
         <td class="right">${fmtQzDiff(t.totalPagoCte - t.totalPagoQz, 0.5)}</td>
         <td class="right">${t.totalCteQz}</td><td class="right">${t.totalCteCte}</td><td class="right">${t.totalCteCte - t.totalCteQz}</td></tr>`;
-    }).join('') + `<tr class="month-total-row"><td><strong>Total</strong></td>
+      if (expanded && hasQz) html += qzRows.map(renderB2bQuinzenaRow).join('');
+      return html;
+    }).join('') + `<tr class="month-total-row"><td><strong>Total geral</strong></td>
       <td class="right">${tQz.nf}</td><td class="right">${tQz.nfC}</td><td class="right">${tQz.nfC - tQz.nf}</td>
       <td class="right">${fmtMoney(tQz.val)}</td><td class="right">${fmtMoney(tQz.valC)}</td>
       <td class="right">${fmtQzDiff(tQz.valC - tQz.val, 1)}</td>
       <td class="right">${fmtMoney(tQz.frete)}</td><td class="right">${fmtMoney(tQz.freteC)}</td>
       <td class="right">${fmtQzDiff(tQz.freteC - tQz.frete, 0.5)}</td>
       <td class="right">${tQz.cte}</td><td class="right">${tQz.cteC}</td><td class="right">${tQz.cteC - tQz.cte}</td></tr>`;
+    bindQzExpandClicks(qzBody, 'b2b');
   }
 
   const qFilter = $('qzFilterQuinzena')?.value || '';
@@ -3129,15 +3330,24 @@ function renderQzB2c() {
   const qBody = $('qzB2cQuinzenaBody');
   if (qBody) {
     const totals = quinzenalPack.b2cMonthTotals || [];
+    const qzByMes = qzByMesKey(quinzenalPack.b2cQuinzenaTotals || buildB2CQuinzenaTotals(quinzenalPack.b2cRows || []));
     let t = { c: 0, v: 0, f: 0 };
     qBody.innerHTML = totals.map(b => {
       t.c += b.count; t.v += b.totalVendas; t.f += b.totalFrete;
-      return `<tr><td><strong>${b.mesLabel}</strong></td><td class="right">${b.count}</td>
+      const qzRows = qzByMes[b.mesKey] || [];
+      const hasQz = qzRows.length > 0;
+      const expanded = qzExpandedMonths.has(qzExpandKey('b2c', b.mesKey));
+      const chev = hasQz ? `<span class="qz-chevron">${expanded ? '▾' : '▸'}</span> ` : '';
+      let html = `<tr class="qz-month-row${hasQz ? ' qz-expandable' : ''}${expanded ? ' expanded' : ''}" data-panel="b2c" data-mes="${b.mesKey}">
+        <td>${chev}<strong>${b.mesLabel}</strong></td><td class="right">${b.count}</td>
         <td class="right">${fmtMoney(b.totalVendas)}</td><td class="right">${fmtMoney(b.totalFrete)}</td>
         <td class="right">${fmtPct(b.pctFrete)}</td></tr>`;
-    }).join('') + `<tr class="month-total-row"><td><strong>Total</strong></td>
+      if (expanded && hasQz) html += qzRows.map(renderB2cQuinzenaRow).join('');
+      return html;
+    }).join('') + `<tr class="month-total-row"><td><strong>Total geral</strong></td>
       <td class="right">${t.c}</td><td class="right">${fmtMoney(t.v)}</td><td class="right">${fmtMoney(t.f)}</td>
       <td class="right">${fmtPct(t.v ? t.f / t.v : 0)}</td></tr>`;
+    bindQzExpandClicks(qBody, 'b2c');
   }
 
   const qFilter = $('qzB2cFilterQuinzena')?.value || '';
@@ -3205,6 +3415,7 @@ function reloadFretesForCompany() {
   fteSapBuffer = null;
   fteQzPendingFiles = [];
   quinzenalPack = null;
+  qzExpandedMonths = new Set();
   syncQzUploadZone();
   const results = $('results');
   if (results) results.style.display = 'none';
@@ -3348,5 +3559,4 @@ function initFretes() {
 
   applyFretesFileLabelsFromMeta();
   loadSavedFretesFiles(true);
-  loadSavedQuinzenalPack(true);
 }
