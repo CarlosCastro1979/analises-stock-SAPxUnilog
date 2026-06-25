@@ -1,4 +1,4 @@
-// fretes.js v1.7.8
+// fretes.js v1.7.9
 const FRETES_JS_VERSION = '1.7.8';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
@@ -3853,10 +3853,73 @@ function computeResumoTotal() {
   };
 }
 
+function resumoMesKey(raw) {
+  return raw === 'sem-data' ? 'sem-mes' : raw;
+}
+
+function resumoMesLabel(k, cteLabel) {
+  if (k === 'sem-mes') return cteLabel || 'Sem data';
+  return cteLabel || fmtMesLabel(k);
+}
+
+function aggregateResumoMonthGroup(group) {
+  const t = { fatCte: 0, vendasB2c: 0, freteCte: 0, freteB2c: 0, freteQzB2b: 0 };
+  group.forEach(m => {
+    t.fatCte += m.fatCte;
+    t.vendasB2c += m.vendasB2c;
+    t.freteCte += m.freteCte;
+    t.freteB2c += m.freteB2c;
+    t.freteQzB2b += m.freteQzB2b;
+  });
+  t.fatTotal = t.fatCte + t.vendasB2c;
+  t.freteTotal = t.freteCte + t.freteB2c;
+  t.deltaQzB2b = t.freteCte - t.freteQzB2b;
+  return t;
+}
+
+function buildResumoMonthDisplayRows(totals) {
+  const out = [];
+  const dated = totals.filter(m => m.mesKey !== 'sem-mes');
+  const noData = totals.filter(m => m.mesKey === 'sem-mes');
+  let lastYear = null;
+  let yearGroup = [];
+
+  dated.forEach(m => {
+    const year = m.mesKey.slice(0, 4);
+    if (lastYear && year !== lastYear && yearGroup.length) {
+      out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...aggregateResumoMonthGroup(yearGroup) });
+      yearGroup = [];
+    }
+    if (year !== lastYear) {
+      out.push({ type: 'year', label: year, year });
+      lastYear = year;
+    }
+    out.push({ type: 'month', ...m });
+    yearGroup.push(m);
+  });
+  if (yearGroup.length && lastYear) {
+    out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...aggregateResumoMonthGroup(yearGroup) });
+  }
+  noData.forEach(m => out.push({ type: 'month', ...m }));
+  if (totals.length) {
+    out.push({ type: 'total', label: 'Total geral', ...aggregateResumoMonthGroup(totals) });
+  }
+  return out;
+}
+
+function renderResumoMonthTableRow(label, m, rowClass) {
+  return `<tr class="${rowClass || 'qz-month-row'}"><td><strong>${label}</strong></td>
+    <td class="right">${fmtMoney(m.fatCte)}</td><td class="right">${fmtMoney(m.vendasB2c)}</td><td class="right">${fmtMoney(m.fatTotal)}</td>
+    <td class="right">${fmtMoney(m.freteCte)}</td><td class="right">${fmtMoney(m.freteB2c)}</td><td class="right">${fmtMoney(m.freteTotal)}</td>
+    <td class="right">${fmtMoney(m.freteQzB2b)}</td>
+    <td class="right">${fmtQzDiff(m.deltaQzB2b, 0.5)}</td></tr>`;
+}
+
 function buildResumoMonthlyRows() {
   const cteByMes = {};
   (monthlyRows.length ? monthlyRows : computeMonthly(currentNFs)).forEach(m => {
-    cteByMes[m.mesRef] = { mesRef: m.mesRef, mesLabel: m.mesLabel, fatCte: m.totalValorNF, freteCte: m.totalPago };
+    const k = resumoMesKey(m.mesRef);
+    cteByMes[k] = { mesLabel: m.mesLabel, fatCte: m.totalValorNF, freteCte: m.totalPago };
   });
   const b2cByMes = {};
   (quinzenalPack?.b2cMonthTotals || []).forEach(m => {
@@ -3867,7 +3930,7 @@ function buildResumoMonthlyRows() {
     b2bQzByMes[m.mesKey] = { freteQz: m.totalPagoQz };
   });
   const keys = [...new Set([...Object.keys(cteByMes), ...Object.keys(b2cByMes), ...Object.keys(b2bQzByMes)])]
-    .filter(k => k && k !== 'sem-mes').sort(compareMesRef);
+    .filter(k => k).sort(compareMesRef);
   return keys.map(k => {
     const c = cteByMes[k] || {};
     const b2c = b2cByMes[k] || {};
@@ -3879,7 +3942,7 @@ function buildResumoMonthlyRows() {
     const freteQzB2b = b2b.freteQz || 0;
     return {
       mesKey: k,
-      mesLabel: c.mesLabel || fmtMesLabel(k),
+      mesLabel: resumoMesLabel(k, c.mesLabel),
       fatCte, vendasB2c, fatTotal: fatCte + vendasB2c,
       freteCte, freteB2c, freteTotal: freteCte + freteB2c,
       freteQzB2b, deltaQzB2b: freteCte - freteQzB2b
@@ -3917,16 +3980,24 @@ function renderResumoTotal() {
 
   const body = $('resumoMonthBody');
   if (body) {
-    const rows = buildResumoMonthlyRows();
-    body.innerHTML = rows.length ? rows.map(m => `<tr>
-      <td><strong>${m.mesLabel}</strong></td>
-      <td class="right">${fmtMoney(m.fatCte)}</td><td class="right">${fmtMoney(m.vendasB2c)}</td><td class="right">${fmtMoney(m.fatTotal)}</td>
-      <td class="right">${fmtMoney(m.freteCte)}</td><td class="right">${fmtMoney(m.freteB2c)}</td><td class="right">${fmtMoney(m.freteTotal)}</td>
-      <td class="right">${fmtMoney(m.freteQzB2b)}</td>
-      <td class="right">${fmtQzDiff(m.deltaQzB2b, 0.5)}</td></tr>`).join('')
-      : '<tr><td colspan="9" class="empty">Sem dados mensais — carrega CT-e e quinzenais</td></tr>';
+    const monthTotals = buildResumoMonthlyRows();
+    if (!monthTotals.length) {
+      body.innerHTML = '<tr><td colspan="9" class="empty">Sem dados mensais — carrega CT-e e quinzenais</td></tr>';
+    } else {
+      const displayRows = buildResumoMonthDisplayRows(monthTotals);
+      body.innerHTML = displayRows.map(row => {
+        if (row.type === 'year') {
+          return `<tr class="month-year-row"><td colspan="9"><strong>${row.label}</strong></td></tr>`;
+        }
+        if (row.type === 'subtotal' || row.type === 'total') {
+          const cls = row.type === 'total' ? 'month-total-row' : 'month-subtotal-row';
+          return renderResumoMonthTableRow(row.label, row, cls);
+        }
+        return renderResumoMonthTableRow(row.mesLabel, row, 'qz-month-row');
+      }).join('');
+    }
+    fteEnableDomSort(body);
   }
-  fteEnableDomSort(body);
 }
 
 function fmtB2bMissingQzQuinzena(r) {
