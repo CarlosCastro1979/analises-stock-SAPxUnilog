@@ -383,7 +383,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.6</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.7</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1890,7 +1890,7 @@ async function init(){
         }
       }
       if(t.dataset.page==='history')renderHistory();
-      if(t.dataset.page==='fretes'){initFretes();if(typeof loadSavedFretesFiles==='function')loadSavedFretesFiles(false);}
+      if(t.dataset.page==='fretes'){initFretes();if(typeof loadSavedFretesFiles==='function')loadSavedFretesFiles(false);if(typeof applyFretesFileLabelsFromMeta==='function')applyFretesFileLabelsFromMeta();}
       scheduleColResize();
     };
   });
@@ -7344,7 +7344,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.7.6"></script>
+<script src="fretes.js?v=1.7.7"></script>
 <script>
 init();
 initMultiselects();
