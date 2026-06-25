@@ -1,5 +1,5 @@
-// fretes.js v1.5.6
-const FRETES_JS_VERSION = '1.5.6';
+// fretes.js v1.5.7
+const FRETES_JS_VERSION = '1.5.7';
 
 const sb = db;
 
@@ -1324,7 +1324,8 @@ function fmtMesLabel(key) {
 }
 
 function mesRefSortKey(mesRef) {
-  return mesRef === 'sem-data' ? '9999-99' : (mesRef || '9999-99');
+  if (mesRef === 'sem-data' || mesRef === 'sem-mes') return '9999-99';
+  return mesRef || '9999-99';
 }
 
 function compareMesRef(a, b) {
@@ -2500,16 +2501,17 @@ const QZ_B2B_ALIASES = {
 
 const QZ_B2C_ALIASES = {
   pedido: ['numero pedido', 'número pedido', 'n pedido', 'pedido'],
-  chaveNF: ['chaves acesso nf', 'chave acesso nf', 'chave nf', 'numeros nf', 'números nf'],
+  nf: ['numeros nf', 'números nf', 'nota fiscal', 'n nota fiscal'],
+  chaveNF: ['chaves acesso nf', 'chave acesso nf', 'chave nf', 'chave da nota fiscal', 'numeros nf', 'números nf'],
   dtColeta: ['data da coleta', 'data coleta'],
-  dtNF: ['datas de emissao nf', 'datas de emissão nf', 'data emissao nf'],
-  numCte: ['numeros ct-e', 'numeros cte', 'números ct-e', 'numero ct-e'],
+  dtNF: ['datas de emissao nf', 'datas de emissão nf', 'data emissao nf', 'data ct-e', 'data cte'],
+  numCte: ['numeros ct-e', 'numeros cte', 'números ct-e', 'numero ct-e', 'numero cte'],
   transportador: ['nome transportadora', 'transportadora', 'transportador'],
   destinatario: ['nome destinatario', 'nome destinatário', 'destinatario', 'destinatário'],
-  valorProdutos: ['valor produtos', 'vl produtos'],
+  valorProdutos: ['valor produtos', 'valor produto', 'vl produtos'],
   valorNF: ['total nf', 'valor total nf'],
   pago: ['valor fatura', 'total fatura', 'frete'],
-  zona: ['zona entrega', 'regiao entrega', 'região entrega']
+  zona: ['zona entrega', 'zona de entrega', 'regiao entrega', 'região entrega']
 };
 
 function findQzField(row, field, aliasesMap) {
@@ -2541,9 +2543,10 @@ function parseQuinzenalFileName(name) {
   const quinzena = /1\s*ª?\s*Q|1aQ/i.test(name) ? 1 : (/2\s*ª?\s*Q|2aQ/i.test(name) ? 2 : null);
   let mes = null;
   let ano = null;
-  const ym = name.match(/(\d{4})\s*$/);
+  const baseName = String(name || '').replace(/\.xlsx?$/i, '');
+  const ym = baseName.match(/(\d{4})\s*$/) || String(name || '').match(/(\d{4})/);
   if (ym) ano = parseInt(ym[1], 10);
-  const norm = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const norm = baseName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   for (const [k, v] of Object.entries(QZ_MESES)) {
     const kk = k.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (norm.includes(kk)) { mes = v; break; }
@@ -2560,6 +2563,35 @@ function mesKeyFromQuinzenaKey(qk) {
   const parts = qk.split('-');
   if (parts.length >= 2 && /^\d{4}$/.test(parts[0]) && /^\d{2}$/.test(parts[1])) return `${parts[0]}-${parts[1]}`;
   return 'sem-mes';
+}
+
+function resolveB2cRowMesKey(r, fileMeta) {
+  const d = parseSapBrDate(r?.dtColeta) || parseSapBrDate(r?.dtNF);
+  if (d) {
+    const k = monthKey(d);
+    if (k && k !== 'sem-data') return k;
+  }
+  if (r?.mesKey && r.mesKey !== 'sem-mes') return r.mesKey;
+  const meta = fileMeta || r;
+  if (meta?.mesKey && meta.mesKey !== 'sem-mes') return meta.mesKey;
+  const fromQz = mesKeyFromQuinzenaKey(r?.quinzenaKey || meta?.quinzenaKey);
+  if (fromQz && fromQz !== 'sem-mes') return fromQz;
+  if (meta?.mes && meta?.ano) return `${meta.ano}-${String(meta.mes).padStart(2, '0')}`;
+  return 'sem-mes';
+}
+
+function resolveB2cRowMesLabel(r, mesKey, fileMeta) {
+  if (mesKey && mesKey !== 'sem-mes') return fmtMesLabel(mesKey);
+  const meta = fileMeta || r;
+  if (meta?.mesLabel) return meta.mesLabel;
+  return 'Sem mês';
+}
+
+function enrichB2cRowMesFields(r, fileMeta) {
+  const mesKey = resolveB2cRowMesKey(r, fileMeta);
+  r.mesKey = mesKey;
+  r.mesLabel = resolveB2cRowMesLabel(r, mesKey, fileMeta);
+  return r;
 }
 
 function quinzenaDateRange(meta) {
@@ -2603,7 +2635,9 @@ function isQzB2BHeader(cells) {
 
 function isQzB2CHeader(cells) {
   const n = cells.map(c => normCol(c));
-  return n.some(c => c.includes('total nf')) && n.some(c => c.includes('valor fatura') || c.includes('valor produtos'));
+  const hasFrete = n.some(c => c.includes('valor fatura') || c.includes('valor produto') || c.includes('valor produtos'));
+  const hasId = n.some(c => c.includes('total nf') || c.includes('pedido') || c.includes('chave') || c.includes('nota fiscal'));
+  return hasFrete && hasId;
 }
 
 function normalizeQzB2BRow(row) {
@@ -2621,8 +2655,9 @@ function normalizeQzB2BRow(row) {
 function normalizeQzB2CRow(row) {
   const chave = findQzField(row, 'chaveNF', QZ_B2C_ALIASES);
   const pedido = findQzField(row, 'pedido', QZ_B2C_ALIASES);
+  const nfDirect = findQzField(row, 'nf', QZ_B2C_ALIASES);
   const nfRaw = chave && /^\d{1,12}$/.test(String(chave).trim()) ? String(chave).trim() : null;
-  let nf = nfRaw || nfFromNfeKey(chave);
+  let nf = nfRaw || (nfDirect ? String(nfDirect).trim() : null) || nfFromNfeKey(chave);
   if (!nf && pedido) nf = String(pedido).trim();
   return {
     pedido, nf, chaveNF: chave,
@@ -2803,11 +2838,13 @@ function buildB2BQuinzenaTotals(b2bRows) {
 function buildB2CQuinzenaTotals(b2cRows) {
   const byQz = {};
   b2cRows.forEach(r => {
+    const mesKey = resolveB2cRowMesKey(r);
     const qk = r.quinzenaKey || 'sem-quinzena';
-    if (!byQz[qk]) {
-      byQz[qk] = {
-        mesKey: r.mesKey || mesKeyFromQuinzenaKey(qk),
-        mesLabel: r.mesLabel || (r.mesKey ? fmtMesLabel(r.mesKey) : ''),
+    const groupKey = `${mesKey}|${qk}`;
+    if (!byQz[groupKey]) {
+      byQz[groupKey] = {
+        mesKey,
+        mesLabel: resolveB2cRowMesLabel(r, mesKey),
         quinzenaKey: qk,
         quinzena: quinzenaFromKey(qk),
         quinzenaLabel: r.quinzenaLabel || (quinzenaFromKey(qk) ? `${quinzenaFromKey(qk)}ªQ` : qk),
@@ -2815,10 +2852,10 @@ function buildB2CQuinzenaTotals(b2cRows) {
         count: 0, totalVendas: 0, totalFrete: 0
       };
     }
-    byQz[qk].count++;
-    byQz[qk].totalVendas += r.valorNF;
-    byQz[qk].totalFrete += r.pago;
-    if (r.fileName) byQz[qk].fileName = r.fileName;
+    byQz[groupKey].count++;
+    byQz[groupKey].totalVendas += r.valorNF;
+    byQz[groupKey].totalFrete += r.pago;
+    if (r.fileName) byQz[groupKey].fileName = r.fileName;
   });
   return Object.values(byQz).map(b => ({
     ...b,
@@ -2868,8 +2905,8 @@ function buildB2BMonthTotals(b2bRows) {
 function buildB2CMonthTotals(b2cRows) {
   const byMes = {};
   b2cRows.forEach(r => {
-    const k = r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey);
-    if (!byMes[k]) byMes[k] = { mesKey: k, mesLabel: r.mesLabel || (k !== 'sem-mes' ? fmtMesLabel(k) : 'Sem mês'), count: 0, totalVendas: 0, totalFrete: 0 };
+    const k = resolveB2cRowMesKey(r);
+    if (!byMes[k]) byMes[k] = { mesKey: k, mesLabel: resolveB2cRowMesLabel(r, k), count: 0, totalVendas: 0, totalFrete: 0 };
     byMes[k].count++; byMes[k].totalVendas += r.valorNF; byMes[k].totalFrete += r.pago;
   });
   return Object.values(byMes).map(b => ({ ...b, pctFrete: b.totalVendas ? b.totalFrete / b.totalVendas : 0 }))
@@ -2940,12 +2977,11 @@ function buildQuinzenalPack(fileResults, fileBinaries) {
       });
     } else {
       rows.forEach(r => {
-        b2cRows.push({
+        const row = enrichB2cRowMesFields({
           ...r, valorNF: num(r.valorNF) || num(r.valorProdutos), pago: num(r.pago),
-          mesKey: meta.mesKey || mesKeyFromQuinzenaKey(meta.quinzenaKey),
-          mesLabel: meta.mesLabel || (meta.mesKey ? fmtMesLabel(meta.mesKey) : ''),
           quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel, fileName: meta.fileName
-        });
+        }, meta);
+        b2cRows.push(row);
       });
       files.push({
         fileName: meta.fileName, canal, mesKey: meta.mesKey, mesLabel: meta.mesLabel,
@@ -2982,8 +3018,11 @@ function qzFileCountNoteHtml() {
   if (!c.total && !c.failed) return '';
   let s = `${c.b2c} ficheiro${c.b2c !== 1 ? 's' : ''} B2C · ${c.b2b} ficheiro${c.b2b !== 1 ? 's' : ''} B2B carregados`;
   if (c.failed) {
-    const names = (quinzenalPack.failedFiles || []).map(f => f.fileName).join(', ');
-    s += ` · ${c.failed} com erro (${names})`;
+    const details = (quinzenalPack.failedFiles || []).map(f => {
+      const shortName = String(f.fileName || '').replace(/\.xlsx?$/i, '').replace(/^Gest[aã]o de frete DELTA[_ ]?B2[BC]\s*-\s*/i, '');
+      return `${shortName || f.fileName}: ${f.error || 'Erro desconhecido'}`;
+    }).join(' · ');
+    s += ` · ${c.failed} com erro (${details})`;
   }
   return s;
 }
@@ -3011,6 +3050,7 @@ function refreshQuinzenalCompare() {
   quinzenalPack.b2bMonthTotals = buildB2BMonthTotals(quinzenalPack.b2bRows);
   quinzenalPack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(quinzenalPack.b2bRows);
   if (quinzenalPack.b2cRows) {
+    quinzenalPack.b2cRows.forEach(r => enrichB2cRowMesFields(r));
     quinzenalPack.b2cMonthTotals = buildB2CMonthTotals(quinzenalPack.b2cRows);
     quinzenalPack.b2cQuinzenaTotals = buildB2CQuinzenaTotals(quinzenalPack.b2cRows);
   }
@@ -3084,6 +3124,26 @@ async function loadSavedQuinzenalPack(silent, meta, opts = {}) {
   } catch (err) { console.error('[fretes] load quinzenal', err); return false; }
 }
 
+function diagnoseQzParseFailure(wb, canal) {
+  const sheetNames = wb.SheetNames || [];
+  if (!sheetNames.length) return 'Workbook sem folhas';
+  const headerFn = canal === 'B2B' ? isQzB2BHeader : isQzB2CHeader;
+  const headerHint = canal === 'B2B'
+    ? 'Nota fiscal + Total fatura'
+    : 'Pedido/chave NF + Valor fatura ou Valor produto';
+  for (const name of sheetNames) {
+    const raw = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: null });
+    if (!raw.length) continue;
+    const headerIdx = raw.findIndex(row => Array.isArray(row) && headerFn(row));
+    if (headerIdx < 0) continue;
+    const parsed = parseQzSheetRows(wb.Sheets[name], canal);
+    if (parsed.rows.length) return null;
+    const cols = (parsed.headers || []).slice(0, 8).join(', ') || 'sem colunas';
+    return `Folha "${name}": cabeçalho ${canal} reconhecido mas 0 linhas (${cols})`;
+  }
+  return `Cabeçalho ${canal} não encontrado (${headerHint}) — folhas: ${sheetNames.join(', ')}`;
+}
+
 function processQuinzenalFile(file) {
   return new Promise((resolve) => {
     const meta = parseQuinzenalFileName(file.name);
@@ -3095,13 +3155,17 @@ function processQuinzenalFile(file) {
           const detected = detectCanalFromWorkbook(wb);
           if (detected) meta.canal = detected;
         }
-        if (!meta.canal) { resolve({ ok: false, fileName: file.name, error: 'Canal B2B/B2C não detectado' }); return; }
+        if (!meta.canal) { resolve({ ok: false, fileName: file.name, error: 'Canal B2B/B2C não detectado no nome nem nas folhas' }); return; }
         const loaded = loadQuinzenalFromWorkbook(wb, meta);
-        if (!loaded.rows.length) { resolve({ ok: false, fileName: file.name, error: 'Sem linhas de detalhe' }); return; }
+        if (!loaded.rows.length) {
+          const err = diagnoseQzParseFailure(wb, meta.canal) || 'Sem linhas de detalhe';
+          resolve({ ok: false, fileName: file.name, error: err });
+          return;
+        }
         resolve({ ok: true, ...loaded, meta, canal: meta.canal, arrayBuffer: e.target.result });
       } catch (err) { resolve({ ok: false, fileName: file.name, error: String(err.message || err) }); }
     };
-    reader.onerror = () => resolve({ ok: false, fileName: file.name, error: 'Erro de leitura' });
+    reader.onerror = () => resolve({ ok: false, fileName: file.name, error: 'Erro de leitura do ficheiro' });
     reader.readAsArrayBuffer(file);
   });
 }
@@ -3197,12 +3261,12 @@ function populateQzMonthFilters() {
     }).join('');
     sel.value = keys.includes(cur) ? cur : '';
   }
-  const keysB2c = [...new Set((quinzenalPack.b2cRows || []).map(r => r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)).filter(k => k && k !== 'sem-mes'))].sort(compareMesRef);
+  const keysB2c = [...new Set((quinzenalPack.b2cRows || []).map(r => resolveB2cRowMesKey(r)).filter(k => k && k !== 'sem-mes'))].sort(compareMesRef);
   const selB2c = $('qzB2cFilterQuinzena');
   if (selB2c) {
     const cur = selB2c.value;
     selB2c.innerHTML = '<option value="">Todos os meses</option>' + keysB2c.map(k => {
-      const lbl = quinzenalPack.b2cRows.find(r => (r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)) === k)?.mesLabel || fmtMesLabel(k);
+      const lbl = quinzenalPack.b2cRows.find(r => resolveB2cRowMesKey(r) === k)?.mesLabel || fmtMesLabel(k);
       return `<option value="${k}">${lbl}</option>`;
     }).join('');
     selB2c.value = keysB2c.includes(cur) ? cur : '';
@@ -3353,7 +3417,7 @@ function renderQzB2c() {
   const qFilter = $('qzB2cFilterQuinzena')?.value || '';
   const search = ($('qzB2cSearch')?.value || '').toLowerCase();
   let list = rows;
-  if (qFilter) list = list.filter(r => (r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)) === qFilter);
+  if (qFilter) list = list.filter(r => resolveB2cRowMesKey(r) === qFilter);
   if (search) list = list.filter(r => String(r.pedido || '').includes(search) || String(r.nf || '').includes(search) ||
     String(r.destinatario || '').toLowerCase().includes(search));
 
