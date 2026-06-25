@@ -377,7 +377,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.6.0</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.0</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1364,150 +1364,185 @@ select.cad-inp{cursor:pointer;}
     <div class="ch"><div class="ct">Conciliação CT-e × Nota Fiscal</div></div>
 
     <div class="fte-tabs">
-      <div class="fte-tab active" data-tab="analise">Análise atual</div>
-      <div class="fte-tab" data-tab="mensal">Por mês</div>
-      <div class="fte-tab" data-tab="historico">Histórico</div>
-      <div class="fte-tab" data-tab="quinzenal">Dif. Unilog</div>
+      <div class="fte-tab active" data-tab="carregamento">Carregamento de dados</div>
+      <div class="fte-tab" data-tab="analise-cte">Análise CT-e</div>
+      <div class="fte-tab" data-tab="analise-b2c">Análise B2C</div>
+      <div class="fte-tab" data-tab="cte-vs-qz">CT-e vs Unilog Qz</div>
+      <div class="fte-tab" data-tab="resumo-total">Resumo total</div>
     </div>
 
-    <div id="fte-tab-analise">
-      <div id="fte-uploadSection">
-        <div class="ch" style="border:none;padding:0 0 8px;margin:0"><div class="ct" style="font-size:13px">Carregar Ficheiros de Fretes</div></div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Validação da cobrança de frete (6% do valor da NF). Selecciona o Excel CT-e/NF (Unilog) e, opcionalmente, o Excel SAP de notas fiscais — depois clica <strong>Processar e Guardar</strong>.</p>
-        <div class="upload-grid">
-          <div>
-            <div class="sl">Excel CT-e / NF (Unilog)</div>
-            <div class="uz" id="fte-cteZone">
-              <div style="font-size:26px;margin-bottom:8px">📊</div>
-              <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel CT-e × NF</div>
-              <div style="font-size:11px;color:var(--muted)">Folha Export — col. E = qtd. CT-e por cobrança/NF</div>
-              <div id="fte-cteFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
-              <input type="file" id="fte-fileInput" accept=".xlsx,.xls">
-            </div>
-          </div>
-          <div>
-            <div class="sl">Excel SAP NF (opcional)</div>
-            <div class="uz" id="fte-sapZone">
-              <div style="font-size:26px;margin-bottom:8px">🗄️</div>
-              <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel SAP</div>
-              <div style="font-size:11px;color:var(--muted)">NF · data emissão · cliente · valor</div>
-              <div id="fte-sapFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
-              <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
-            </div>
+    <!-- Tab 1: Carregamento de dados -->
+    <div id="fte-tab-carregamento">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega todos os ficheiros aqui — Excel CT-e/NF (Unilog), SAP NF (opcional) e relatórios quinzenais B2B/B2C. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud.</p>
+      <div class="upload-grid">
+        <div>
+          <div class="sl">Excel CT-e / NF (Unilog)</div>
+          <div class="uz" id="fte-cteZone">
+            <div style="font-size:26px;margin-bottom:8px">📊</div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel CT-e × NF</div>
+            <div style="font-size:11px;color:var(--muted)">Folha Export — col. E = qtd. CT-e por cobrança/NF</div>
+            <div id="fte-cteFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+            <input type="file" id="fte-fileInput" accept=".xlsx,.xls">
           </div>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
-          <button class="btn bp" id="fte-procBtn" type="button" disabled>⚡ Processar e Guardar</button>
-          <button class="btn bg" id="fte-loadLastBtn" type="button">☁️ Carregar último guardado</button>
-          <span id="fte-procSpin" style="display:none"><span class="spin"></span></span>
-        </div>
-        <div id="fte-fileStatus" style="display:none;font-size:11px;color:var(--muted);margin-top:10px"></div>
-
-        <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border);">
-          <div class="ch" style="border:none;padding:0 0 8px;margin:0"><div class="ct" style="font-size:13px">Relatórios quinzenais Unilog</div></div>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Ficheiros <strong>Gestão de Frete DELTA B2B/B2C</strong> (1ªQ/2ªQ). Selecciona vários Excels — depois clica <strong>Processar quinzenais</strong>. B2B compara com a análise CT-e; B2C mostra vendas e fretes (sem regra 6%).</p>
-          <div class="uz" id="fte-qzZone" style="padding:20px;">
-            <div style="font-size:26px;margin-bottom:8px">📅</div>
-            <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta os Excels quinzenais (multi-selecção)</div>
-            <div style="font-size:11px;color:var(--muted)">B2B + B2C · padrão: Gestão de Frete DELTA_B2B/B2C - 1ªQ Abril 2026.xlsx</div>
-            <div id="fte-qzFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
-            <div id="fte-qzFileList" class="qz-file-list" style="display:none"></div>
-            <input type="file" id="fte-qzFileInput" accept=".xlsx,.xls" multiple>
-          </div>
-          <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;">
-            <button class="btn bp" id="fte-qzProcBtn" type="button" disabled>⚡ Processar quinzenais</button>
-            <span id="fte-qzSpin" style="display:none"><span class="spin"></span></span>
-            <span id="fte-qzStatus" style="font-size:11px;color:var(--muted);"></span>
+        <div>
+          <div class="sl">Excel SAP NF (opcional)</div>
+          <div class="uz" id="fte-sapZone">
+            <div style="font-size:26px;margin-bottom:8px">🗄️</div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel SAP</div>
+            <div style="font-size:11px;color:var(--muted)">NF · data emissão · cliente · valor</div>
+            <div id="fte-sapFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+            <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
           </div>
         </div>
       </div>
+      <div style="margin-top:20px;">
+        <div class="sl">Relatórios quinzenais Unilog (B2B + B2C)</div>
+        <div class="uz" id="fte-qzZone" style="padding:20px;">
+          <div style="font-size:26px;margin-bottom:8px">📅</div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta os Excels quinzenais (multi-selecção)</div>
+          <div style="font-size:11px;color:var(--muted)">Gestão de Frete DELTA B2B/B2C — 1ªQ/2ªQ</div>
+          <div id="fte-qzFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+          <div id="fte-qzFileList" class="qz-file-list" style="display:none"></div>
+          <input type="file" id="fte-qzFileInput" accept=".xlsx,.xls" multiple>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
+        <button class="btn bp" id="fte-procBtn" type="button" disabled>⚡ Processar e Guardar</button>
+        <button class="btn bg" id="fte-loadLastBtn" type="button">☁️ Carregar último guardado</button>
+        <span id="fte-procSpin" style="display:none"><span class="spin"></span></span>
+      </div>
+      <div id="fte-fileStatus" style="display:none;font-size:11px;color:var(--muted);margin-top:10px"></div>
       <div id="fte-loadbar" class="loadbar" style="display:none;"></div>
+    </div>
 
-      <div id="fte-results" style="display:none;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px;flex-wrap:wrap;gap:8px;">
+    <!-- Tab 2: Análise CT-e -->
+    <div id="fte-tab-analise-cte" style="display:none;">
+      <div id="fte-cteEmpty" class="empty"><div class="empty-i">📊</div><div>Carrega o Excel CT-e/NF na aba <strong>Carregamento de dados</strong></div></div>
+      <div id="fte-cteContent" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 8px;flex-wrap:wrap;gap:8px;">
           <div id="fte-periodoLabel" style="font-size:12px;color:var(--muted);"></div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <span id="fte-saveStatus" style="font-size:11px;color:var(--muted);"></span>
             <button class="btn bg bs" id="fte-exportBtn" type="button">Exportar Excel</button>
-            <button class="btn bg bs" id="fte-newFileBtn" type="button">Carregar outro</button>
+            <button class="btn bg bs" id="fte-newFileBtn" type="button">Carregar ficheiros</button>
           </div>
         </div>
         <div id="fte-dataWarning" style="display:none;"></div>
-        <div class="kpis" id="fte-kpis"></div>
-        <div id="fte-reconcileBox"></div>
-        <div class="section-title">Decomposição por categoria — clica para ver detalhe</div>
-        <div class="breakdown" id="fte-breakdown"></div>
-        <div id="fte-subPanels"></div>
-        <div id="fte-anomaliesHint" class="anomalies-hint" style="display:none;">Carrega o Excel SAP para detectar anomalias (NFs no Unilog sem correspondência no SAP).</div>
-        <div id="fte-anomaliesSection" style="display:none;">
-          <div class="section-title">Anomalias SAP <span id="fte-anomaliesCount" class="muted" style="font-weight:400;"></span>
-            <button class="btn bg bs" id="fte-exportAnomaliesBtn" type="button" style="margin-left:auto">Exportar anomalias</button>
+        <div class="qz-subtabs fte-cte-subtabs">
+          <div class="qz-subtab active" data-cte-sub="resumo">Resumo</div>
+          <div class="qz-subtab" data-cte-sub="detalhe">Detalhe NF</div>
+          <div class="qz-subtab" data-cte-sub="anomalias">Anomalias SAP</div>
+          <div class="qz-subtab" data-cte-sub="mensal">Por mês</div>
+        </div>
+        <div id="fte-cte-sub-resumo">
+          <div class="kpis" id="fte-kpis"></div>
+          <div id="fte-reconcileBox"></div>
+          <div class="section-title">Decomposição por categoria — clica para ver detalhe</div>
+          <div class="breakdown" id="fte-breakdown"></div>
+          <div id="fte-subPanels"></div>
+        </div>
+        <div id="fte-cte-sub-detalhe" style="display:none;">
+          <div class="section-title" style="margin-top:0;">Detalhe por Nota Fiscal <button class="btn bg bs" id="fte-exportFilteredBtn" type="button" style="margin-left:auto">Exportar vista filtrada</button></div>
+          <div class="filters">
+            <select id="fte-filterStatus">
+              <option value="">Todos os estados</option>
+              <option value="ok">Conforme (~6%)</option>
+              <option value="min">Tarifa mínima</option>
+              <option value="dev">Múltiplos CT-e — com devolução</option>
+              <option value="flag">Múltiplos CT-e — SEM devolução ⚠️</option>
+              <option value="low">Abaixo do esperado</option>
+            </select>
+            <select id="fte-filterTransp"><option value="">Todos os transportadores</option></select>
+            <select id="fte-filterMes"><option value="">Todos os meses</option></select>
+            <input type="text" id="fte-searchNF" placeholder="Procurar NF ou cliente…">
+            <label class="filter-chk"><input type="checkbox" id="fte-filterValorDiff"> Só Δ valor SAP≠Unilog</label>
+            <label class="filter-chk"><input type="checkbox" id="fte-filterSapMissing"> Só anomalias SAP</label>
           </div>
-          <p class="anomaly-help">NFs presentes no Unilog que não existem no export SAP (após normalização de série/zeros). Exemplos: Unilog emitiu CT-e e cobrou frete mas a NF não está no SAP; ou Unilog não transportou mas emitiu CT-e associado a NF inexistente. Investigar com logística e fiscal antes de validar o frete.</p>
-          <div class="tbl-wrap" style="max-height:360px;">
-            <table id="fte-anomaliesTable">
-              <thead><tr>
-                <th>Nota Fiscal</th><th>Cliente (Unilog)</th><th>Data</th><th class="right">Valor NF Unilog</th>
-                <th>Transportador</th><th class="right">Qtd CT-e</th><th class="right">Valor pago</th><th>Estado frete</th>
-                <th>Tipo anomalia</th><th>Explicação</th>
-              </tr></thead>
-              <tbody id="fte-anomaliesTableBody"></tbody>
+          <div class="tbl-wrap">
+            <table id="fte-nfTable">
+              <thead><tr id="fte-nfTableHead"></tr></thead>
+              <tbody id="fte-nfTableBody"></tbody>
             </table>
           </div>
         </div>
-        <div class="section-title">Detalhe por Nota Fiscal <button class="btn bg bs" id="fte-exportFilteredBtn" type="button" style="margin-left:auto">Exportar vista filtrada</button></div>
+        <div id="fte-cte-sub-anomalias" style="display:none;">
+          <div id="fte-anomaliesHint" class="anomalies-hint" style="display:none;">Carrega o Excel SAP para detectar anomalias (NFs no Unilog sem correspondência no SAP).</div>
+          <div id="fte-anomaliesSection">
+            <div class="section-title" style="margin-top:0;">Anomalias SAP <span id="fte-anomaliesCount" class="muted" style="font-weight:400;"></span>
+              <button class="btn bg bs" id="fte-exportAnomaliesBtn" type="button" style="margin-left:auto">Exportar anomalias</button>
+            </div>
+            <p class="anomaly-help">NFs presentes no Unilog que não existem no export SAP (após normalização de série/zeros). Exemplos: Unilog emitiu CT-e e cobrou frete mas a NF não está no SAP; ou Unilog não transportou mas emitiu CT-e associado a NF inexistente. Investigar com logística e fiscal antes de validar o frete.</p>
+            <div class="tbl-wrap" style="max-height:520px;">
+              <table id="fte-anomaliesTable">
+                <thead><tr>
+                  <th>Nota Fiscal</th><th>Cliente (Unilog)</th><th>Data</th><th class="right">Valor NF Unilog</th>
+                  <th>Transportador</th><th class="right">Qtd CT-e</th><th class="right">Valor pago</th><th>Estado frete</th>
+                  <th>Tipo anomalia</th><th>Explicação</th>
+                </tr></thead>
+                <tbody id="fte-anomaliesTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div id="fte-cte-sub-mensal" style="display:none;">
+          <div class="section-title" style="margin-top:0;">Resumo mês a mês <button class="btn bg bs" id="fte-exportMensalBtn" type="button" style="margin-left:auto">Exportar por mês</button></div>
+          <p style="font-size:11px;color:var(--muted);margin:-4px 0 12px;">Usa data de emissão SAP quando disponível. Clica num mês para filtrar no detalhe NF.</p>
+          <div class="tbl-wrap">
+            <table id="fte-monthTable">
+              <thead><tr id="fte-monthTableHead"></tr></thead>
+              <tbody id="fte-monthTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 3: Análise B2C -->
+    <div id="fte-tab-analise-b2c" style="display:none;">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+        <button class="btn bg bs" id="fte-exportQzB2cBtn" type="button">Exportar Excel B2C</button>
+      </div>
+      <div id="fte-b2cEmpty" class="empty"><div class="empty-i">📅</div><div>Carrega relatórios quinzenais B2C na aba <strong>Carregamento de dados</strong></div></div>
+      <p id="fte-b2cFileNote" style="display:none;font-size:11px;color:var(--muted);margin:0 0 12px;"></p>
+      <div id="fte-b2cContent" style="display:none;">
+        <div id="fte-qzB2cKpis"></div>
+        <div class="section-title">Resumo por região (B2C)</div>
+        <div class="tbl-wrap" style="max-height:240px;margin-bottom:16px;">
+          <table><thead><tr>
+            <th>Região</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th>
+            <th class="right">Frete pago</th><th class="right">% frete/vendas</th><th class="right">Preço médio</th>
+          </tr></thead><tbody id="fte-qzB2cRegionBody"></tbody></table>
+        </div>
+        <div class="section-title">Resumo por mês (B2C)</div>
+        <div class="tbl-wrap" style="max-height:280px;margin-bottom:16px;">
+          <table><thead><tr>
+            <th>Mês</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th><th class="right">Frete pago</th><th class="right">% frete/vendas</th>
+          </tr></thead><tbody id="fte-qzB2cQuinzenaBody"></tbody></table>
+        </div>
+        <div class="section-title">Detalhe B2C</div>
         <div class="filters">
-          <select id="fte-filterStatus">
-            <option value="">Todos os estados</option>
-            <option value="ok">Conforme (~6%)</option>
-            <option value="min">Tarifa mínima</option>
-            <option value="dev">Múltiplos CT-e — com devolução</option>
-            <option value="flag">Múltiplos CT-e — SEM devolução ⚠️</option>
-            <option value="low">Abaixo do esperado</option>
-          </select>
-          <select id="fte-filterTransp"><option value="">Todos os transportadores</option></select>
-          <select id="fte-filterMes"><option value="">Todos os meses</option></select>
-          <input type="text" id="fte-searchNF" placeholder="Procurar NF ou cliente…">
-          <label class="filter-chk"><input type="checkbox" id="fte-filterValorDiff"> Só Δ valor SAP≠Unilog</label>
-          <label class="filter-chk"><input type="checkbox" id="fte-filterSapMissing"> Só anomalias SAP</label>
+          <select id="fte-qzB2cFilterQuinzena"><option value="">Todos os meses</option></select>
+          <input type="text" id="fte-qzB2cSearch" placeholder="Procurar NF, destinatário, região…">
         </div>
         <div class="tbl-wrap">
-          <table id="fte-nfTable">
-            <thead><tr id="fte-nfTableHead"></tr></thead>
-            <tbody id="fte-nfTableBody"></tbody>
-          </table>
+          <table><thead><tr>
+            <th>NF</th><th>Data coleta</th><th>Destinatário</th><th>Transportador</th>
+            <th class="right">Vendas</th><th class="right">Frete</th><th class="right">% frete</th><th>Região</th>
+          </tr></thead><tbody id="fte-qzB2cDetailBody"></tbody></table>
         </div>
       </div>
     </div>
 
-    <div id="fte-tab-mensal" style="display:none;">
-      <div class="section-title" style="margin-top:0;">Resumo mês a mês <button class="btn bg bs" id="fte-exportMensalBtn" type="button" style="margin-left:auto">Exportar por mês</button></div>
-      <p style="font-size:11px;color:var(--muted);margin:-4px 0 12px;">Usa data de emissão SAP quando disponível. Clica num mês para filtrar na análise.</p>
-      <div class="tbl-wrap">
-        <table id="fte-monthTable">
-          <thead><tr id="fte-monthTableHead"></tr></thead>
-          <tbody id="fte-monthTableBody"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div id="fte-tab-historico" style="display:none;">
-      <div class="section-title" style="margin-top:0;">Histórico de análises <button class="btn bg bs" id="fte-exportHistoryBtn" type="button" style="margin-left:auto">Exportar histórico</button></div>
-      <div id="fte-historyList" class="history-list"></div>
-    </div>
-
-    <div id="fte-tab-quinzenal" style="display:none;">
+    <!-- Tab 4: CT-e vs Unilog Qz (B2B) -->
+    <div id="fte-tab-cte-vs-qz" style="display:none;">
       <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
-        <button class="btn bg bs" id="fte-exportQzBtn" type="button">Exportar Excel quinzenal</button>
+        <button class="btn bg bs" id="fte-exportQzBtn" type="button">Exportar Excel comparação</button>
       </div>
       <div id="fte-qzWarn" class="data-warn" style="display:none;"></div>
-      <div class="qz-subtabs">
-        <div class="qz-subtab active" data-qz="b2b">B2B — vs CT-e</div>
-        <div class="qz-subtab" data-qz="b2c">B2C — vendas e fretes</div>
-      </div>
-      <div id="fte-qzEmpty" class="empty"><div class="empty-i">📅</div><div>Carrega os relatórios quinzenais Unilog na secção acima</div></div>
+      <div id="fte-b2bEmpty" class="empty"><div class="empty-i">📅</div><div>Carrega quinzenais B2B e Excel CT-e/NF para comparar</div></div>
       <p id="fte-qzFileNote" style="display:none;font-size:11px;color:var(--muted);margin:0 0 12px;"></p>
-      <div id="fte-qzB2b" style="display:none;">
+      <div id="fte-b2bContent" style="display:none;">
         <div id="fte-qzB2bKpis"></div>
         <div class="section-title">Resumo por mês (B2B)</div>
         <div class="tbl-wrap" style="max-height:280px;margin-bottom:16px;">
@@ -1540,31 +1575,22 @@ select.cad-inp{cursor:pointer;}
           </tr></thead><tbody id="fte-qzB2bDetailBody"></tbody></table>
         </div>
       </div>
-      <div id="fte-qzB2c" style="display:none;">
-        <div id="fte-qzB2cKpis"></div>
-        <div class="section-title">Resumo por região (B2C)</div>
-        <div class="tbl-wrap" style="max-height:240px;margin-bottom:16px;">
-          <table><thead><tr>
-            <th>Região</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th>
-            <th class="right">Frete pago</th><th class="right">% frete/vendas</th><th class="right">Preço médio</th>
-          </tr></thead><tbody id="fte-qzB2cRegionBody"></tbody></table>
-        </div>
-        <div class="section-title">Resumo por mês (B2C)</div>
-        <div class="tbl-wrap" style="max-height:280px;margin-bottom:16px;">
-          <table><thead><tr>
-            <th>Mês</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th><th class="right">Frete pago</th><th class="right">% frete/vendas</th>
-          </tr></thead><tbody id="fte-qzB2cQuinzenaBody"></tbody></table>
-        </div>
-        <div class="section-title">Detalhe B2C</div>
-        <div class="filters">
-          <select id="fte-qzB2cFilterQuinzena"><option value="">Todos os meses</option></select>
-          <input type="text" id="fte-qzB2cSearch" placeholder="Procurar NF, destinatário, região…">
-        </div>
+    </div>
+
+    <!-- Tab 5: Resumo total -->
+    <div id="fte-tab-resumo-total" style="display:none;">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Visão consolidada B2B (CT-e) + B2C (quinzenal) — faturação, custo de frete e comparação com o débito Unilog.</p>
+      <div id="fte-resumoEmpty" class="empty"><div class="empty-i">📈</div><div>Carrega CT-e e/ou quinzenais na aba <strong>Carregamento de dados</strong></div></div>
+      <div id="fte-resumoContent" style="display:none;">
+        <div class="kpis fte-kpis" id="fte-resumoKpis"></div>
+        <div id="fte-resumoReconcile" class="reconcile" style="margin-bottom:16px;"></div>
+        <div class="section-title">Resumo mensal consolidado</div>
         <div class="tbl-wrap">
           <table><thead><tr>
-            <th>NF</th><th>Data coleta</th><th>Destinatário</th><th>Transportador</th>
-            <th class="right">Vendas</th><th class="right">Frete</th><th class="right">% frete</th><th>Região</th>
-          </tr></thead><tbody id="fte-qzB2cDetailBody"></tbody></table>
+            <th>Mês</th><th class="right">Faturação CT-e</th><th class="right">Vendas B2C</th><th class="right">Faturação total</th>
+            <th class="right">Frete CT-e</th><th class="right">Frete B2C</th><th class="right">Frete total</th>
+            <th class="right">Frete QZ B2B</th><th class="right">Δ CT-e vs QZ B2B</th>
+          </tr></thead><tbody id="fte-resumoMonthBody"></tbody></table>
         </div>
       </div>
     </div>
@@ -7094,7 +7120,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.6.0"></script>
+<script src="fretes.js?v=1.7.0"></script>
 <script>
 init();
 initMultiselects();

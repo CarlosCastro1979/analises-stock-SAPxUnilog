@@ -1,5 +1,5 @@
-// fretes.js v1.6.0
-const FRETES_JS_VERSION = '1.6.0';
+// fretes.js v1.7.0
+const FRETES_JS_VERSION = '1.7.0';
 
 const sb = db;
 
@@ -19,16 +19,15 @@ let subTableSort = { col: 'diff', dir: -1 };
 let monthSort = { col: 'mesRef', dir: 1 };
 let selectedMonth = '';
 let monthlyRows = [];
-let historyCache = [];
 let _fteSkipAutosave = false;
 let _fteLoadedCompany = null;
+let activeCteSub = 'resumo';
 let fteCteFileName = '';
 let fteCteBuffer = null;
 let fteSapFileName = '';
 let fteSapBuffer = null;
 let fteQzPendingFiles = [];
 let quinzenalPack = null;
-let activeQzPanel = 'b2b';
 let _fteLoadSavedPromise = null;
 let qzExpandedMonths = new Set();
 
@@ -65,7 +64,46 @@ function setSapZoneLoaded(name) {
 
 function checkFteBtn() {
   const btn = $('procBtn');
-  if (btn) btn.disabled = !fteCteBuffer;
+  if (btn) btn.disabled = !(fteCteBuffer || fteQzPendingFiles.length);
+}
+
+const FTE_TAB_IDS = ['carregamento', 'analise-cte', 'analise-b2c', 'cte-vs-qz', 'resumo-total'];
+
+function switchFteTab(tab) {
+  document.querySelectorAll('.fte-tab').forEach(x => {
+    x.classList.toggle('active', x.dataset.tab === tab);
+  });
+  FTE_TAB_IDS.forEach(id => {
+    const el = $('tab-' + id);
+    if (el) el.style.display = id === tab ? 'block' : 'none';
+  });
+  if (tab === 'analise-cte') renderCteSubPanels();
+  if (tab === 'analise-b2c') renderB2cAnalysisTab();
+  if (tab === 'cte-vs-qz') renderB2bCompareTab();
+  if (tab === 'resumo-total') renderResumoTotal();
+}
+
+function switchCteSub(sub) {
+  activeCteSub = sub || 'resumo';
+  document.querySelectorAll('.fte-cte-subtabs .qz-subtab').forEach(x => {
+    x.classList.toggle('active', x.dataset.cteSub === activeCteSub);
+  });
+  renderCteSubPanels();
+  if (activeCteSub === 'mensal') renderMonthlyTable();
+}
+
+function renderCteSubPanels() {
+  const hasData = currentNFs.length > 0;
+  const empty = $('cteEmpty');
+  const content = $('cteContent');
+  if (empty) empty.style.display = hasData ? 'none' : 'block';
+  if (content) content.style.display = hasData ? 'block' : 'none';
+  if (!hasData) return;
+  ['resumo', 'detalhe', 'anomalias', 'mensal'].forEach(sub => {
+    const el = $('cte-sub-' + sub);
+    if (el) el.style.display = activeCteSub === sub ? 'block' : 'none';
+  });
+  if (activeCteSub === 'mensal') renderMonthlyTable();
 }
 
 async function applyFretesFileLabelsFromMeta() {
@@ -327,11 +365,11 @@ function updateSaveStatus(msg, ok) {
   el.style.color = ok === false ? 'var(--redflag)' : 'var(--gray)';
 }
 
-function showResultsView() {
+function showResultsView(opts = {}) {
   $('loadbar').style.display = 'none';
-  const us = $('uploadSection');
-  if (us) us.style.display = 'none';
-  $('results').style.display = 'block';
+  renderCteSubPanels();
+  const shouldSwitch = opts.switchTab !== false && !_fteSkipAutosave && currentNFs.length;
+  if (shouldSwitch) switchFteTab('analise-cte');
 }
 
 function fmtMoney(v) { return 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -977,9 +1015,36 @@ function selectSapFile(file) {
   reader.readAsArrayBuffer(file);
 }
 
+async function processQuinzenalPending() {
+  if (!fteQzPendingFiles.length) return true;
+  const results = await Promise.all(fteQzPendingFiles.map(f => processQuinzenalFile(f)));
+  const ok = results.filter(r => r.ok);
+  const fail = results.filter(r => !r.ok);
+  if (!ok.length) {
+    fteToastError('Nenhum ficheiro quinzenal processado.');
+    return false;
+  }
+  const fileBinaries = { ...(quinzenalPack?.fileBinaries || {}) };
+  ok.forEach(r => {
+    if (r.arrayBuffer && typeof arrayBufferToBase64 === 'function') {
+      fileBinaries[r.meta.fileName] = arrayBufferToBase64(r.arrayBuffer);
+    }
+  });
+  quinzenalPack = buildQuinzenalPack(results, fileBinaries);
+  refreshQuinzenalCompare();
+  fteQzPendingFiles = [];
+  const qzInput = $('qzFileInput');
+  if (qzInput) qzInput.value = '';
+  syncQzUploadZone();
+  if (fail.length) fteToast(`${ok.length} quinzenais OK, ${fail.length} com erro`);
+  return true;
+}
+
 async function processAndSaveFretes() {
-  if (!fteCteBuffer || !fteCteFileName) {
-    fteToastError('Selecciona o Excel CT-e/NF primeiro.');
+  const hasCte = !!(fteCteBuffer && fteCteFileName);
+  const hasQz = fteQzPendingFiles.length > 0;
+  if (!hasCte && !hasQz) {
+    fteToastError('Selecciona pelo menos um ficheiro (CT-e/NF ou quinzenais).');
     return;
   }
   const spin = $('procSpin');
@@ -988,27 +1053,44 @@ async function processAndSaveFretes() {
   if (procBtn) procBtn.disabled = true;
 
   try {
-    sapNfMap = {};
-    const ok = processArrayBufferCte(fteCteBuffer, fteCteFileName);
-    if (!ok) return;
+    if (hasCte) {
+      sapNfMap = {};
+      const ok = processArrayBufferCte(fteCteBuffer, fteCteFileName);
+      if (!ok) return;
 
-    if (fteSapBuffer && fteSapFileName) {
-      processArrayBufferSap(fteSapBuffer, fteSapFileName);
+      if (fteSapBuffer && fteSapFileName) {
+        processArrayBufferSap(fteSapBuffer, fteSapFileName);
+      }
+
+      const cteSaved = await persistFretesFile(fteCteSlot(), fteCteFileName, fteCteBuffer);
+      let sapSaved = true;
+      if (fteSapBuffer && fteSapFileName) {
+        sapSaved = await persistFretesFile(fteSapSlot(), fteSapFileName, fteSapBuffer);
+      }
+      if (!cteSaved || !sapSaved) {
+        fteToastError('CT-e processado em memória, mas falhou guardar na cloud — verifica a consola.');
+        return;
+      }
+      _fteLoadedCompany = fteCompany();
     }
 
-    const cteSaved = await persistFretesFile(fteCteSlot(), fteCteFileName, fteCteBuffer);
-    let sapSaved = true;
-    if (fteSapBuffer && fteSapFileName) {
-      sapSaved = await persistFretesFile(fteSapSlot(), fteSapFileName, fteSapBuffer);
-    }
-    if (!cteSaved || !sapSaved) {
-      fteToastError('Processado em memória, mas falhou guardar na cloud — verifica a consola.');
-      return;
+    if (hasQz) {
+      const qzProcessed = await processQuinzenalPending();
+      if (!qzProcessed) return;
+      const qzSaved = await persistQuinzenalPack(quinzenalPack);
+      if (!qzSaved) {
+        fteToastError('Quinzenais processados em memória, mas falhou guardar na cloud.');
+        return;
+      }
     }
 
-    _fteLoadedCompany = fteCompany();
     updateFretesFileStatus();
-    fteToast('Processado e guardado na cloud.');
+    const parts = [];
+    if (hasCte) parts.push('CT-e' + (fteSapBuffer ? ' + SAP' : ''));
+    if (hasQz) parts.push('quinzenais');
+    fteToast('Processado e guardado na cloud: ' + parts.join(', ') + '.');
+    if (hasCte && hasQz) switchFteTab('analise-cte');
+    else if (hasQz && !hasCte) switchFteTab('analise-b2c');
   } catch (err) {
     console.error('[fretes] processAndSave', err);
     fteToastError('Erro: ' + (err.message || err));
@@ -1235,9 +1317,7 @@ function processRows(rows, fileName, sheetName, headers) {
     $('loadbar').style.display = 'block';
     $('loadbar').textContent =
       '0 notas fiscais encontradas na folha "' + sheetName + '". Colunas: ' + cols;
-    const us = $('uploadSection');
-    if (us) us.style.display = 'block';
-    $('results').style.display = 'none';
+    switchFteTab('carregamento');
     fteToast('Não foi possível ler notas fiscais — verifica se o ficheiro tem a coluna "Nota Fiscal".');
     return;
   }
@@ -1718,33 +1798,6 @@ function exportMonthlyWorkbook() {
   fteToast('Exportação mensal concluída.');
 }
 
-async function exportHistoryWorkbook() {
-  if (!historyCache.length) {
-    const { data, error } = await sb.from('cte_nf_uploads').select('*').order('criado_em', { ascending: false }).limit(50);
-    if (error) { fteToast('Erro ao carregar histórico: ' + error.message); return; }
-    historyCache = data || [];
-  }
-  if (!historyCache.length) { fteToast('Histórico vazio.'); return; }
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(historyCache.map(u => ({
-    'Ficheiro': u.ficheiro_nome,
-    'Data': new Date(u.criado_em),
-    'Período início': u.periodo_inicio ? new Date(u.periodo_inicio) : '',
-    'Período fim': u.periodo_fim ? new Date(u.periodo_fim) : '',
-    'Total NFs': u.total_nf,
-    'Total pago': u.total_pago,
-    'Esperado': u.total_esperado,
-    'Excesso': u.excesso,
-    'Conformes': u.qtd_ok,
-    'Tarifa mínima': u.qtd_min,
-    'Com devolução': u.qtd_dev,
-    'A investigar': u.qtd_flag,
-    'Abaixo': u.qtd_low
-  }))), 'Histórico');
-  downloadWorkbook(wb, `Historico_analises_${new Date().toISOString().slice(0, 10)}.xlsx`);
-  fteToast('Histórico exportado.');
-}
-
 function getFilteredNFs() {
   const statusF = $('filterStatus').value;
   const transpF = $('filterTransp').value;
@@ -1813,13 +1866,10 @@ function renderMonthlyTable() {
     tr.addEventListener('click', () => {
       selectedMonth = tr.dataset.mes;
       $('filterMes').value = selectedMonth;
-      document.querySelectorAll('.fte-tab').forEach(x => x.classList.remove('active'));
-      document.querySelector('.fte-tab[data-tab="analise"]').classList.add('active');
-      $('tab-analise').style.display = 'block';
-      $('tab-mensal').style.display = 'none';
-      $('tab-historico').style.display = 'none';
+      switchFteTab('analise-cte');
+      switchCteSub('detalhe');
       renderTable();
-      $('nfTable').scrollIntoView({ behavior: 'smooth' });
+      $('nfTable')?.scrollIntoView({ behavior: 'smooth' });
       fteToast('Filtrado por ' + fmtMesLabel(selectedMonth));
     });
   });
@@ -1908,9 +1958,12 @@ function renderAll() {
   renderAnomaliesPanel();
   renderTable();
   renderMonthlyTable();
-  if (quinzenalPack?.b2bRows?.length) {
+  renderCteSubPanels();
+  if (quinzenalPack?.files?.length) {
     refreshQuinzenalCompare();
-    if ($('tab-quinzenal')?.style.display === 'block') renderQuinzenalTab();
+    if ($('tab-analise-b2c')?.style.display === 'block') renderB2cAnalysisTab();
+    if ($('tab-cte-vs-qz')?.style.display === 'block') renderB2bCompareTab();
+    if ($('tab-resumo-total')?.style.display === 'block') renderResumoTotal();
   }
 }
 
@@ -1921,13 +1974,17 @@ function renderAnomaliesPanel() {
 
   const s = currentSummary;
   if (!s?.sapLoaded) {
-    section.style.display = 'none';
     hint.style.display = currentNFs.length ? 'block' : 'none';
+    const body = $('anomaliesTableBody');
+    if (body && currentNFs.length) {
+      body.innerHTML = '<tr><td colspan="10" class="empty">Carrega o Excel SAP para detectar anomalias.</td></tr>';
+    }
+    const countEl = $('anomaliesCount');
+    if (countEl) countEl.textContent = '';
     return;
   }
 
   hint.style.display = 'none';
-  section.style.display = 'block';
 
   const anomalies = getSapAnomalies(currentNFs);
   const countEl = $('anomaliesCount');
@@ -2353,43 +2410,6 @@ async function loadLatestFromCloud() {
   return ok;
 }
 
-async function loadHistory() {
-  const el = $('historyList');
-  el.innerHTML = '<p class="muted">A carregar...</p>';
-  const { data, error } = await sb.from('cte_nf_uploads').select('*').order('criado_em', { ascending: false }).limit(50);
-  if (error) { el.innerHTML = '<p class="muted">Erro a carregar histórico: ' + error.message + '</p>'; return; }
-  historyCache = data || [];
-  if (!historyCache.length) { el.innerHTML = '<div class="empty">Ainda não há análises guardadas.</div>'; return; }
-  el.innerHTML = historyCache.map(u => `
-    <div class="hist-item${u.id === currentUploadId ? ' active-hist' : ''}" data-id="${u.id}">
-      <div>
-        <div><strong>${u.ficheiro_nome || '(sem nome)'}</strong>${u.id === currentUploadId ? ' · <span style="color:var(--green);">activa</span>' : ''}</div>
-        <div class="meta">${new Date(u.criado_em).toLocaleString('pt-BR')}
-        ${u.periodo_inicio ? ` · período ${new Date(u.periodo_inicio).toLocaleDateString('pt-BR')} a ${new Date(u.periodo_fim).toLocaleDateString('pt-BR')}` : ''}
-        · ${u.total_nf} NFs</div>
-      </div>
-      <div class="nums">
-        <div><div class="v">${fmtMoney(u.total_pago)}</div><div class="l">Pago</div></div>
-        <div><div class="v" style="color:#b3261e;">${fmtMoney(u.excesso)}</div><div class="l">Excesso</div></div>
-        <div><div class="v">${u.qtd_flag || 0}</div><div class="l">A investigar</div></div>
-      </div>
-    </div>
-  `).join('');
-
-  el.querySelectorAll('.hist-item').forEach(item => {
-    item.addEventListener('click', async () => {
-      const ok = await loadUploadById(item.dataset.id);
-      if (ok) {
-        document.querySelectorAll('.fte-tab').forEach(x => x.classList.remove('active'));
-        document.querySelector('.fte-tab[data-tab="analise"]').classList.add('active');
-        $('tab-analise').style.display = 'block';
-        $('tab-historico').style.display = 'none';
-        fteToast('Análise do histórico carregada.');
-      }
-    });
-  });
-}
-
 async function restoreCteFromRec(cteRec, sapRec, silent = false) {
   if (!cteRec?.file_data) return false;
   const co = fteCompany();
@@ -2500,14 +2520,17 @@ async function _loadSavedFretesFilesImpl(silent = false) {
 
   if (!cteOk && !silent && !qzLoaded && !cteRec) {
     fteToastError('Sem ficheiros CT-e guardados para ' + co + '.');
-  } else if ((freshCte || freshQz) && !silent) {
+  } else   if ((freshCte || freshQz) && !silent) {
     const parts = [];
     if (freshCte) parts.push('CT-e' + (sapRec?.file_data ? ' + SAP' : ''));
     if (freshQz) parts.push('quinzenais');
     fteToast('Ficheiros fretes restaurados: ' + parts.join(', ') + ' (' + co + ').');
   }
 
-  if ($('tab-quinzenal')?.style.display === 'block') renderQuinzenalTab();
+  const activeTab = document.querySelector('.fte-tab.active')?.dataset?.tab;
+  if (activeTab === 'analise-b2c') renderB2cAnalysisTab();
+  else if (activeTab === 'cte-vs-qz') renderB2bCompareTab();
+  else if (activeTab === 'resumo-total') renderResumoTotal();
   return cteOk || qzLoaded || currentNFs.length > 0;
 }
 
@@ -3248,16 +3271,13 @@ function refreshQuinzenalCompare() {
 }
 
 function updateQzProcessStatus() {
-  const st = $('qzStatus');
-  if (!st) return;
-  st.textContent = quinzenalPack?.files?.length ? quinzenalStatusFromPack(quinzenalPack) : '';
+  /* qz status shown in fileStatus */
 }
 
 function syncQzUploadZone() {
   const fn = $('qzFn');
   const zone = $('qzZone');
   const list = $('qzFileList');
-  const btn = $('qzProcBtn');
   const pending = fteQzPendingFiles.length;
   const saved = quinzenalPack?.files?.length || 0;
   if (pending) {
@@ -3267,7 +3287,6 @@ function syncQzUploadZone() {
       list.style.display = 'block';
       list.innerHTML = fteQzPendingFiles.map(f => `<div>${f.name}</div>`).join('');
     }
-    if (btn) btn.disabled = false;
   } else if (saved) {
     if (fn) fn.textContent = `✓ ${saved} ficheiro(s) guardado(s)`;
     zone?.classList.add('loaded');
@@ -3275,13 +3294,12 @@ function syncQzUploadZone() {
       list.style.display = 'block';
       list.innerHTML = quinzenalPack.files.map(f => `<div>${f.fileName}</div>`).join('');
     }
-    if (btn) btn.disabled = true;
   } else {
     if (fn) fn.textContent = '';
     zone?.classList.remove('loaded');
     if (list) { list.style.display = 'none'; list.innerHTML = ''; }
-    if (btn) btn.disabled = true;
   }
+  checkFteBtn();
 }
 
 function setQzZoneLoaded(count) {
@@ -3327,7 +3345,12 @@ async function loadSavedQuinzenalPack(silent, meta, opts = {}) {
     syncQzUploadZone();
     updateQzProcessStatus();
     if (!silent) fteToast('Relatórios quinzenais carregados.');
-    if (!opts?.skipRender) renderQuinzenalTab();
+    if (!opts?.skipRender) {
+      const activeTab = document.querySelector('.fte-tab.active')?.dataset?.tab;
+      if (activeTab === 'analise-b2c') renderB2cAnalysisTab();
+      else if (activeTab === 'cte-vs-qz') renderB2bCompareTab();
+      else if (activeTab === 'resumo-total') renderResumoTotal();
+    }
     return true;
   } catch (err) {
     console.error('[fretes] load quinzenal', fteCompany(), err);
@@ -3380,48 +3403,6 @@ function processQuinzenalFile(file) {
     reader.onerror = () => resolve({ ok: false, fileName: file.name, error: 'Erro de leitura do ficheiro' });
     reader.readAsArrayBuffer(file);
   });
-}
-
-async function processAndSaveQuinzenal() {
-  if (!fteQzPendingFiles.length) { fteToastError('Selecciona ficheiros quinzenais primeiro.'); return; }
-  const spin = $('qzSpin');
-  const btn = $('qzProcBtn');
-  if (spin) spin.style.display = '';
-  if (btn) btn.disabled = true;
-  try {
-    const results = await Promise.all(fteQzPendingFiles.map(f => processQuinzenalFile(f)));
-    const ok = results.filter(r => r.ok);
-    const fail = results.filter(r => !r.ok);
-    if (!ok.length) { fteToastError('Nenhum ficheiro processado.'); return; }
-    const fileBinaries = {};
-    ok.forEach(r => {
-      if (!r.arrayBuffer || typeof arrayBufferToBase64 !== 'function') return;
-      fileBinaries[r.meta.fileName] = arrayBufferToBase64(r.arrayBuffer);
-    });
-    quinzenalPack = buildQuinzenalPack(results, fileBinaries);
-    const qzSaved = await persistQuinzenalPack(quinzenalPack);
-    if (!qzSaved) {
-      fteToastError('Quinzenais processados em memória, mas falhou guardar na cloud.');
-      return;
-    }
-    fteQzPendingFiles = [];
-    const qzInput = $('qzFileInput');
-    if (qzInput) qzInput.value = '';
-    syncQzUploadZone();
-    const fc = qzFileCounts();
-    const st = $('qzStatus');
-    if (st) st.textContent = quinzenalStatusFromPack(quinzenalPack) ||
-      `${fc.total} ficheiro(s) · ${quinzenalPack.b2bRows.length} NFs B2B · ${quinzenalPack.b2cRows.length} linhas B2C`;
-    if (fail.length) fteToast(`${ok.length} OK, ${fail.length} com erro`);
-    else fteToast('Quinzenais processados e guardados.');
-    renderQuinzenalTab();
-  } catch (err) {
-    console.error('[fretes] quinzenal', err);
-    fteToastError('Erro: ' + (err.message || err));
-  } finally {
-    if (spin) spin.style.display = 'none';
-    if (btn) btn.disabled = !fteQzPendingFiles.length;
-  }
 }
 
 function fmtQzDiff(v, threshold) {
@@ -3489,10 +3470,9 @@ function populateQzMonthFilters() {
   }
 }
 
-async function renderQuinzenalTab() {
-  const empty = $('qzEmpty');
-  const b2bPanel = $('qzB2b');
-  const b2cPanel = $('qzB2c');
+async function renderB2bCompareTab() {
+  const empty = $('b2bEmpty');
+  const content = $('b2bContent');
   const warn = $('qzWarn');
   if (quinzenalPack?.b2bRows?.length && !currentNFs.length) {
     await ensureCteLoadedForQz(true);
@@ -3500,27 +3480,129 @@ async function renderQuinzenalTab() {
   if (warn) {
     if (quinzenalPack?.b2bRows?.length && !currentNFs.length) {
       warn.style.display = 'block';
-      warn.innerHTML = '<strong>Export Unilog indisponível:</strong> processa o Excel CT-e/NF na secção acima (ou Processar e Guardar) para comparar B2B quinzenal vs export original.';
+      warn.innerHTML = '<strong>Export Unilog indisponível:</strong> processa o Excel CT-e/NF em <strong>Carregamento de dados</strong> para comparar B2B quinzenal vs export original.';
     } else warn.style.display = 'none';
   }
-  if (!quinzenalPack?.files?.length) {
-    if (empty) empty.style.display = 'block';
-    if (b2bPanel) b2bPanel.style.display = 'none';
-    if (b2cPanel) b2cPanel.style.display = 'none';
-    return;
-  }
-  if (empty) empty.style.display = 'none';
+  const hasB2b = !!(quinzenalPack?.b2bRows?.length);
+  if (empty) empty.style.display = hasB2b ? 'none' : 'block';
+  if (content) content.style.display = hasB2b ? 'block' : 'none';
+  if (!hasB2b) return;
   updateQzFileNote();
   populateQzMonthFilters();
   refreshQuinzenalCompare();
-  if (activeQzPanel === 'b2b') {
-    if (b2bPanel) b2bPanel.style.display = 'block';
-    if (b2cPanel) b2cPanel.style.display = 'none';
-    renderQzB2b();
-  } else {
-    if (b2bPanel) b2bPanel.style.display = 'none';
-    if (b2cPanel) b2cPanel.style.display = 'block';
-    renderQzB2c();
+  renderQzB2b();
+}
+
+async function renderB2cAnalysisTab() {
+  const empty = $('b2cEmpty');
+  const content = $('b2cContent');
+  const hasB2c = !!(quinzenalPack?.b2cRows?.length);
+  if (empty) empty.style.display = hasB2c ? 'none' : 'block';
+  if (content) content.style.display = hasB2c ? 'block' : 'none';
+  if (!hasB2c) return;
+  const note = $('b2cFileNote');
+  if (note) {
+    const fc = qzFileCounts();
+    if (fc.b2c) {
+      note.style.display = 'block';
+      note.textContent = `${fc.b2c} ficheiro(s) B2C carregado(s)` + (fc.failed ? ` · ${fc.failed} com erro` : '');
+    } else note.style.display = 'none';
+  }
+  populateQzMonthFilters();
+  renderQzB2c();
+}
+
+function computeResumoTotal() {
+  const cte = currentSummary;
+  const b2cRows = quinzenalPack?.b2cRows || [];
+  const b2bRows = quinzenalPack?.b2bRows || [];
+  const fatCte = cte?.totalValorNF || 0;
+  const b2cVendas = b2cRows.reduce((s, r) => s + num(r.valorNF), 0);
+  const freteCte = cte?.totalPago || 0;
+  const freteB2c = b2cRows.reduce((s, r) => s + num(r.pago), 0);
+  const freteQzB2b = b2bRows.reduce((s, r) => s + num(r.pago), 0);
+  const freteTotal = freteCte + freteB2c;
+  const debitoUnilog = freteTotal;
+  const deltaQzB2b = freteCte - freteQzB2b;
+  return {
+    fatCte, b2cVendas, fatTotal: fatCte + b2cVendas,
+    freteCte, freteB2c, freteQzB2b, freteTotal, debitoUnilog, deltaQzB2b,
+    hasCte: !!cte, hasB2c: b2cRows.length > 0, hasB2bQz: b2bRows.length > 0
+  };
+}
+
+function buildResumoMonthlyRows() {
+  const cteByMes = {};
+  (monthlyRows.length ? monthlyRows : computeMonthly(currentNFs)).forEach(m => {
+    cteByMes[m.mesRef] = { mesRef: m.mesRef, mesLabel: m.mesLabel, fatCte: m.totalValorNF, freteCte: m.totalPago };
+  });
+  const b2cByMes = {};
+  (quinzenalPack?.b2cMonthTotals || []).forEach(m => {
+    b2cByMes[m.mesKey] = { vendas: m.totalVendas, frete: m.totalFrete };
+  });
+  const b2bQzByMes = {};
+  (quinzenalPack?.b2bMonthTotals || []).forEach(m => {
+    b2bQzByMes[m.mesKey] = { freteQz: m.totalPagoQz };
+  });
+  const keys = [...new Set([...Object.keys(cteByMes), ...Object.keys(b2cByMes), ...Object.keys(b2bQzByMes)])]
+    .filter(k => k && k !== 'sem-mes').sort(compareMesRef);
+  return keys.map(k => {
+    const c = cteByMes[k] || {};
+    const b2c = b2cByMes[k] || {};
+    const b2b = b2bQzByMes[k] || {};
+    const fatCte = c.fatCte || 0;
+    const vendasB2c = b2c.vendas || 0;
+    const freteCte = c.freteCte || 0;
+    const freteB2c = b2c.frete || 0;
+    const freteQzB2b = b2b.freteQz || 0;
+    return {
+      mesKey: k,
+      mesLabel: c.mesLabel || fmtMesLabel(k),
+      fatCte, vendasB2c, fatTotal: fatCte + vendasB2c,
+      freteCte, freteB2c, freteTotal: freteCte + freteB2c,
+      freteQzB2b, deltaQzB2b: freteCte - freteQzB2b
+    };
+  });
+}
+
+function renderResumoTotal() {
+  const r = computeResumoTotal();
+  const hasData = r.hasCte || r.hasB2c || r.hasB2bQz;
+  const empty = $('resumoEmpty');
+  const content = $('resumoContent');
+  if (empty) empty.style.display = hasData ? 'none' : 'block';
+  if (content) content.style.display = hasData ? 'block' : 'none';
+  if (!hasData) return;
+
+  const kpis = $('resumoKpis');
+  if (kpis) {
+    kpis.innerHTML = `
+      <div class="kpi"><div class="label">Faturação total</div><div class="value">${fmtMoney(r.fatTotal)}</div>
+        <div class="sub">CT-e ${fmtMoney(r.fatCte)}${r.hasB2c ? ' + B2C ' + fmtMoney(r.b2cVendas) : ''}</div></div>
+      <div class="kpi"><div class="label">Custo frete total</div><div class="value">${fmtMoney(r.freteTotal)}</div>
+        <div class="sub">CT-e ${fmtMoney(r.freteCte)}${r.hasB2c ? ' + B2C ' + fmtMoney(r.freteB2c) : ''}</div></div>
+      <div class="kpi"><div class="label">Débito Unilog</div><div class="value">${fmtMoney(r.debitoUnilog)}</div>
+        <div class="sub">Soma fretes cobrados (CT-e + B2C)</div></div>
+      <div class="kpi${Math.abs(r.deltaQzB2b) > 1 ? ' flag' : ''}"><div class="label">Δ CT-e vs QZ B2B</div>
+        <div class="value">${fmtMoney(r.deltaQzB2b)}</div><div class="sub">Frete CT-e − frete quinzenal B2B</div></div>`;
+  }
+
+  const rec = $('resumoReconcile');
+  if (rec) {
+    rec.innerHTML = `<strong>Consolidação:</strong> Faturação ${fmtMoney(r.fatTotal)} · Frete total ${fmtMoney(r.freteTotal)} = Débito Unilog ${fmtMoney(r.debitoUnilog)}
+      ${r.hasB2bQz ? ` · Frete quinzenal B2B ${fmtMoney(r.freteQzB2b)} (Δ ${fmtMoney(r.deltaQzB2b)} vs CT-e)` : ''}`;
+  }
+
+  const body = $('resumoMonthBody');
+  if (body) {
+    const rows = buildResumoMonthlyRows();
+    body.innerHTML = rows.length ? rows.map(m => `<tr>
+      <td><strong>${m.mesLabel}</strong></td>
+      <td class="right">${fmtMoney(m.fatCte)}</td><td class="right">${fmtMoney(m.vendasB2c)}</td><td class="right">${fmtMoney(m.fatTotal)}</td>
+      <td class="right">${fmtMoney(m.freteCte)}</td><td class="right">${fmtMoney(m.freteB2c)}</td><td class="right">${fmtMoney(m.freteTotal)}</td>
+      <td class="right">${fmtMoney(m.freteQzB2b)}</td>
+      <td class="right">${fmtQzDiff(m.deltaQzB2b, 0.5)}</td></tr>`).join('')
+      : '<tr><td colspan="9" class="empty">Sem dados mensais — carrega CT-e e quinzenais</td></tr>';
   }
 }
 
@@ -3692,6 +3774,7 @@ function reloadFretesForCompany() {
   sapNfMap = {};
   lastCtePack = null;
   activeSubPanel = null;
+  activeCteSub = 'resumo';
   selectedMonth = '';
   fteCteFileName = '';
   fteCteBuffer = null;
@@ -3701,15 +3784,12 @@ function reloadFretesForCompany() {
   quinzenalPack = null;
   qzExpandedMonths = new Set();
   syncQzUploadZone();
-  const results = $('results');
-  if (results) results.style.display = 'none';
-  const us = $('uploadSection');
-  if (us) us.style.display = 'block';
   setCteZoneLoaded('');
   setSapZoneLoaded('');
   setLoadbar('');
   updateSaveStatus('');
   updateFretesFileStatus();
+  switchFteTab('carregamento');
   if (typeof loadSavedFretesFiles === 'function') loadSavedFretesFiles(true);
 }
 
@@ -3718,17 +3798,11 @@ function initFretes() {
   fteInited = true;
 
   document.querySelectorAll('.fte-tab').forEach(t => {
-    t.addEventListener('click', () => {
-      document.querySelectorAll('.fte-tab').forEach(x => x.classList.remove('active'));
-      t.classList.add('active');
-      $('tab-analise').style.display = t.dataset.tab === 'analise' ? 'block' : 'none';
-      $('tab-mensal').style.display = t.dataset.tab === 'mensal' ? 'block' : 'none';
-      $('tab-historico').style.display = t.dataset.tab === 'historico' ? 'block' : 'none';
-      $('tab-quinzenal').style.display = t.dataset.tab === 'quinzenal' ? 'block' : 'none';
-      if (t.dataset.tab === 'historico') loadHistory();
-      if (t.dataset.tab === 'mensal') renderMonthlyTable();
-      if (t.dataset.tab === 'quinzenal') renderQuinzenalTab();
-    });
+    t.addEventListener('click', () => switchFteTab(t.dataset.tab));
+  });
+
+  document.querySelectorAll('.fte-cte-subtabs .qz-subtab').forEach(st => {
+    st.addEventListener('click', () => switchCteSub(st.dataset.cteSub));
   });
 
   const cteZone = $('cteZone');
@@ -3758,16 +3832,10 @@ function initFretes() {
   }
 
   $('procBtn')?.addEventListener('click', () => processAndSaveFretes());
-  $('loadLastBtn')?.addEventListener('click', () => loadSavedFretesFiles(false));
-  $('qzProcBtn')?.addEventListener('click', () => processAndSaveQuinzenal());
-
-  document.querySelectorAll('.qz-subtab').forEach(st => {
-    st.addEventListener('click', () => {
-      document.querySelectorAll('.qz-subtab').forEach(x => x.classList.remove('active'));
-      st.classList.add('active');
-      activeQzPanel = st.dataset.qz || 'b2b';
-      renderQuinzenalTab();
-    });
+  $('loadLastBtn')?.addEventListener('click', async () => {
+    const ok = await loadSavedFretesFiles(false);
+    if (ok && currentNFs.length) switchFteTab('analise-cte');
+    else if (ok && quinzenalPack?.files?.length) switchFteTab(quinzenalPack.b2cRows?.length ? 'analise-b2c' : 'cte-vs-qz');
   });
 
   const qzZone = $('qzZone');
@@ -3791,24 +3859,27 @@ function initFretes() {
     });
   }
 
-  ['qzFilterQuinzena', 'qzFilterDiff', 'qzSearchNF', 'qzB2cFilterQuinzena', 'qzB2cSearch'].forEach(id => {
+  ['qzFilterQuinzena', 'qzFilterDiff', 'qzSearchNF'].forEach(id => {
     const el = $(id);
     if (!el) return;
-    const fn = () => renderQuinzenalTab();
+    const fn = () => renderB2bCompareTab();
+    el.addEventListener('input', fn);
+    el.addEventListener('change', fn);
+  });
+  ['qzB2cFilterQuinzena', 'qzB2cSearch'].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    const fn = () => renderB2cAnalysisTab();
     el.addEventListener('input', fn);
     el.addEventListener('change', fn);
   });
 
-  $('newFileBtn').addEventListener('click', () => {
-    $('results').style.display = 'none';
-    const us = $('uploadSection');
-    if (us) us.style.display = 'block';
-  });
-  $('exportBtn').addEventListener('click', () => exportFullWorkbook());
-  $('exportFilteredBtn').addEventListener('click', () => exportFilteredView());
-  $('exportHistoryBtn').addEventListener('click', () => exportHistoryWorkbook());
-  $('exportMensalBtn').addEventListener('click', () => exportMonthlyWorkbook());
+  $('newFileBtn')?.addEventListener('click', () => switchFteTab('carregamento'));
+  $('exportBtn')?.addEventListener('click', () => exportFullWorkbook());
+  $('exportFilteredBtn')?.addEventListener('click', () => exportFilteredView());
+  $('exportMensalBtn')?.addEventListener('click', () => exportMonthlyWorkbook());
   $('exportQzBtn')?.addEventListener('click', () => exportQuinzenalWorkbook());
+  $('exportQzB2cBtn')?.addEventListener('click', () => exportQuinzenalWorkbook());
 
   ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff', 'filterSapMissing'].forEach(id => {
     const el = $(id);
@@ -3842,4 +3913,5 @@ function initFretes() {
   });
 
   applyFretesFileLabelsFromMeta();
+  loadSavedFretesFiles(true);
 }
