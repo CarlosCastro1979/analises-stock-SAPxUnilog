@@ -1,5 +1,5 @@
-// fretes.js v1.7.2
-const FRETES_JS_VERSION = '1.7.2';
+// fretes.js v1.7.3
+const FRETES_JS_VERSION = '1.7.3';
 
 const sb = db;
 
@@ -64,7 +64,7 @@ function setSapZoneLoaded(name) {
 
 function checkFteBtn() {
   const btn = $('procBtn');
-  if (btn) btn.disabled = !(fteCteBuffer || fteQzPendingFiles.length);
+  if (btn) btn.disabled = !(fteCteBuffer || fteQzPendingFiles.length || quinzenalPack?.files?.length);
 }
 
 const FTE_TAB_IDS = ['carregamento', 'analise-cte', 'analise-b2c', 'cte-vs-qz', 'resumo-total'];
@@ -117,24 +117,60 @@ async function applyFretesFileLabelsFromMeta() {
     else if (cte?.file_name) setCteZoneLoaded('');
     if (sap?.file_data || fteSapBuffer) setSapZoneLoaded(sap?.file_name || fteSapFileName);
     else if (sap?.file_name) setSapZoneLoaded('');
+    const qzRec = m[fteQuinzenalSlot()];
+    if (qzRec?.file_data && !quinzenalPack?.files?.length) {
+      quinzenalPack = parseQuinzenalPackFromRec(qzRec);
+      if (quinzenalPack?.files?.length) refreshQuinzenalCompare();
+    }
+    syncQzUploadZone();
+    updateQzFileNote();
     updateFretesFileStatus(m);
   } catch (e) { /* offline */ }
 }
 
-function quinzenalStatusFromPack(pack) {
-  if (!pack?.files?.length) return '';
-  const b2c = pack.files.filter(f => f.canal === 'B2C').length;
-  const b2b = pack.files.filter(f => f.canal === 'B2B').length;
-  return `Últimos quinzenais: ${b2c} B2C · ${b2b} B2B`;
+function quinzenalPackCounts(pack) {
+  if (!pack?.files?.length) return null;
+  return {
+    total: pack.files.length,
+    b2c: pack.files.filter(f => f.canal === 'B2C').length,
+    b2b: pack.files.filter(f => f.canal === 'B2B').length
+  };
+}
+
+function quinzenalExcelStatusPart(rec) {
+  const pack = (quinzenalPack?.files?.length ? quinzenalPack : null) ||
+    parseQuinzenalPackFromRec(rec);
+  const counts = quinzenalPackCounts(pack);
+  if (!counts && !rec?.file_name) return '';
+  const n = counts?.total || 0;
+  const dt = typeof fmtExcelFileDate === 'function' ? fmtExcelFileDate(rec?.uploaded_at) : '';
+  if (n) return `Quinzenais: ${n} ficheiro${n !== 1 ? 's' : ''}${dt ? ' (' + dt + ')' : ''}`;
+  if (rec?.file_name) return `Quinzenais: ${rec.file_name}${dt ? ' (' + dt + ')' : ''}`;
+  return '';
 }
 
 function parseQuinzenalPackFromRec(rec) {
   if (!rec?.file_data || typeof base64ToArrayBuffer !== 'function') return null;
   try {
-    return JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(rec.file_data)));
-  } catch (_) {
+    const pack = JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(rec.file_data)));
+    if (pack?.fileBinaries) delete pack.fileBinaries;
+    return pack;
+  } catch (err) {
+    console.error('[fretes] parse quinzenal pack', err);
     return null;
   }
+}
+
+function slimQuinzenalPackForPersist(pack) {
+  if (!pack) return null;
+  return {
+    version: pack.version || 2,
+    updatedAt: new Date().toISOString(),
+    files: pack.files || [],
+    failedFiles: pack.failedFiles || [],
+    b2bRows: pack.b2bRows || [],
+    b2cRows: pack.b2cRows || []
+  };
 }
 
 function updateFretesFileStatus(meta) {
@@ -153,8 +189,7 @@ function updateFretesFileStatus(meta) {
       if (cte?.file_name) parts.push('CT-e: ' + cte.file_name);
       if (sap?.file_name) parts.push('SAP: ' + sap.file_name);
     }
-    const qzPart = quinzenalStatusFromPack(quinzenalPack) ||
-      quinzenalStatusFromPack(parseQuinzenalPackFromRec(m?.[fteQuinzenalSlot()]));
+    const qzPart = quinzenalExcelStatusPart(m?.[fteQuinzenalSlot()]);
     if (qzPart) parts.push(qzPart);
     if (parts.length) {
       el.textContent = parts.join(' · ');
@@ -1042,8 +1077,9 @@ async function processQuinzenalPending() {
 
 async function processAndSaveFretes() {
   const hasCte = !!(fteCteBuffer && fteCteFileName);
-  const hasQz = fteQzPendingFiles.length > 0;
-  if (!hasCte && !hasQz) {
+  const hasQzPending = fteQzPendingFiles.length > 0;
+  const hasQzInMem = !!(quinzenalPack?.files?.length);
+  if (!hasCte && !hasQzPending && !hasQzInMem) {
     fteToastError('Selecciona pelo menos um ficheiro (CT-e/NF ou quinzenais).');
     return;
   }
@@ -1074,12 +1110,15 @@ async function processAndSaveFretes() {
       _fteLoadedCompany = fteCompany();
     }
 
-    if (hasQz) {
+    if (hasQzPending) {
       const qzProcessed = await processQuinzenalPending();
       if (!qzProcessed) return;
-      const qzSaved = await persistQuinzenalPack(quinzenalPack);
+    }
+
+    if (hasQzPending || hasQzInMem) {
+      const qzSaved = await persistQuinzenalPack(quinzenalPack, { silent: true });
       if (!qzSaved) {
-        fteToastError('Quinzenais processados em memória, mas falhou guardar na cloud.');
+        fteToastError('Quinzenais processados em memória, mas falhou guardar na cloud — verifica a consola.');
         return;
       }
     }
@@ -1087,10 +1126,13 @@ async function processAndSaveFretes() {
     updateFretesFileStatus();
     const parts = [];
     if (hasCte) parts.push('CT-e' + (fteSapBuffer ? ' + SAP' : ''));
-    if (hasQz) parts.push('quinzenais');
+    if (hasQzPending || hasQzInMem) {
+      const c = qzFileCounts();
+      parts.push(`quinzenais (${c.b2c} B2C · ${c.b2b} B2B)`);
+    }
     fteToast('Processado e guardado na cloud: ' + parts.join(', ') + '.');
-    if (hasCte && hasQz) switchFteTab('analise-cte');
-    else if (hasQz && !hasCte) switchFteTab('analise-b2c');
+    if (hasCte && (hasQzPending || hasQzInMem)) switchFteTab('analise-cte');
+    else if ((hasQzPending || hasQzInMem) && !hasCte) switchFteTab(quinzenalPack?.b2cRows?.length ? 'analise-b2c' : 'cte-vs-qz');
   } catch (err) {
     console.error('[fretes] processAndSave', err);
     fteToastError('Erro: ' + (err.message || err));
@@ -3343,7 +3385,8 @@ function syncQzUploadZone() {
       list.innerHTML = fteQzPendingFiles.map(f => `<div>${f.name}</div>`).join('');
     }
   } else if (saved) {
-    if (fn) fn.textContent = `✓ ${saved} ficheiro(s) guardado(s)`;
+    const c = qzFileCounts();
+    if (fn) fn.textContent = `✓ ${c.b2c} B2C · ${c.b2b} B2B carregados`;
     zone?.classList.add('loaded');
     if (list) {
       list.style.display = 'block';
@@ -3361,26 +3404,38 @@ function setQzZoneLoaded(count) {
   syncQzUploadZone();
 }
 
-async function persistQuinzenalPack(pack) {
+async function persistQuinzenalPack(pack, opts = {}) {
   if (typeof upsertExcelBinary !== 'function') {
     fteToastError('Persistência Excel indisponível — recarrega a página.');
     return false;
   }
-  const buf = new TextEncoder().encode(JSON.stringify(pack)).buffer;
+  if (!pack?.files?.length) {
+    console.warn('[fretes] persist quinzenal skip — empty pack');
+    return false;
+  }
+  const slim = slimQuinzenalPackForPersist(pack);
+  const json = JSON.stringify(slim);
+  const buf = new TextEncoder().encode(json).buffer;
   const slot = fteQuinzenalSlot();
-  console.log('[fretes] persist quinzenal', fteCompany(), slot, pack?.files?.length || 0, 'files', 'bytes', buf.byteLength);
+  const counts = qzFileCounts();
+  const fileName = `quinzenal_${counts.total}_${counts.b2c}B2C_${counts.b2b}B2B.json`;
+  console.log('[fretes] persist quinzenal', fteCompany(), slot, counts.total, 'files',
+  counts.b2c, 'B2C', counts.b2b, 'B2B', 'jsonBytes', buf.byteLength);
   try {
-    await upsertExcelBinary(slot, `quinzenal_${pack.files.length}_files.json`, buf);
+    await upsertExcelBinary(slot, fileName, buf);
+    syncQzUploadZone();
+    updateQzFileNote();
     updateQzProcessStatus();
     updateFretesFileStatus();
-    console.log('[fretes] persist quinzenal ok', fteCompany(), slot);
+    console.log('[fretes] persist quinzenal ok', fteCompany(), slot, fileName, 'jsonBytes', buf.byteLength);
+    if (!opts.silent) fteToast(`Quinzenais guardados: ${counts.b2c} B2C · ${counts.b2b} B2B`);
     return true;
   } catch (err) {
-    console.error('[fretes] persist quinzenal', fteCompany(), slot, err);
+    console.error('[fretes] persist quinzenal', fteCompany(), slot, 'jsonBytes', buf.byteLength, err);
     if (typeof isExcelFilesTableMissing === 'function' && isExcelFilesTableMissing(err)) {
       fteToastError('Tabela logistica_excel_files em falta no Supabase.');
     } else {
-      fteToastError('Erro ao guardar quinzenais: ' + (err.message || err));
+      fteToastError(`Erro ao guardar quinzenais (${counts.b2c} B2C · ${counts.b2b} B2B): ${err.message || err}`);
     }
     return false;
   }
@@ -3392,14 +3447,26 @@ async function loadSavedQuinzenalPack(silent, meta, opts = {}) {
     if (typeof syncCompanyDepotMap === 'function') syncCompanyDepotMap();
     const m = meta || await fetchExcelFiles([fteQuinzenalSlot()]);
     const rec = m[fteQuinzenalSlot()];
-    if (!rec?.file_data) return false;
+    if (!rec?.file_data) {
+      if (rec?.file_name) {
+        console.warn('[fretes] quinzenal metadata only', fteCompany(), rec.file_name);
+        if (!silent) fteToastError('Quinzenais guardados só com nome — clica Processar e Guardar para persistir os dados.');
+      }
+      return false;
+    }
     quinzenalPack = parseQuinzenalPackFromRec(rec);
-    if (!quinzenalPack?.files?.length) return false;
-    console.log('[fretes] load quinzenal', fteCompany(), rec.file_name, 'dataLen', rec.file_data.length, 'files', quinzenalPack.files.length);
+    if (!quinzenalPack?.files?.length) {
+      console.warn('[fretes] quinzenal parse empty', fteCompany(), rec.file_name);
+      if (!silent) fteToastError('Quinzenais guardados corrompidos — volta a processar os ficheiros.');
+      return false;
+    }
+    const c = quinzenalPackCounts(quinzenalPack);
+    console.log('[fretes] load quinzenal', fteCompany(), rec.file_name, 'dataLen', rec.file_data.length, 'files', c.total, c.b2c, 'B2C', c.b2b, 'B2B');
     if (!opts?.deferCompare) refreshQuinzenalCompare();
     syncQzUploadZone();
+    updateQzFileNote();
     updateQzProcessStatus();
-    if (!silent) fteToast('Relatórios quinzenais carregados.');
+    if (!silent) fteToast(`Quinzenais restaurados: ${c.b2c} B2C · ${c.b2b} B2B`);
     if (!opts?.skipRender) {
       const activeTab = document.querySelector('.fte-tab.active')?.dataset?.tab;
       if (activeTab === 'analise-b2c') renderB2cAnalysisTab();
@@ -3954,6 +4021,5 @@ function initFretes() {
     });
   });
 
-  applyFretesFileLabelsFromMeta();
-  loadSavedFretesFiles(true);
+  loadSavedFretesFiles(true).catch(() => {});
 }
