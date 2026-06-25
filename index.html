@@ -293,6 +293,8 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-fretes tr.qz-diff-row td{background:#fff5f5;}
 #page-fretes tr.qz-ok-row td{background:#f0fdf4;}
 #page-fretes tr.qz-only-row td{background:#fffbeb;}
+#page-fretes .qz-kpi-filter{cursor:pointer;}
+#page-fretes .qz-kpi-filter:hover .value{text-decoration:underline;color:var(--red);}
 #page-fretes tr.qz-month-row.qz-expandable{cursor:pointer;}
 #page-fretes tr.qz-month-row.qz-expandable:hover td{background:var(--bg3);}
 #page-fretes tr.qz-month-row.expanded td{background:#f8fafc;}
@@ -381,7 +383,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.4</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.5</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1564,6 +1566,7 @@ select.cad-inp{cursor:pointer;}
             <option value="">Todos</option>
             <option value="onlyQz">Só quinzenal</option>
             <option value="onlyCte">Só CT-e</option>
+            <option value="diff">Com diferença</option>
             <option value="valor">Δ valor NF</option>
             <option value="frete">Δ frete</option>
             <option value="cte">Δ qtd CT-e</option>
@@ -1571,11 +1574,12 @@ select.cad-inp{cursor:pointer;}
           <input type="text" id="fte-qzSearchNF" placeholder="Procurar NF…">
         </div>
         <div class="tbl-wrap">
-          <table><thead><tr>
-            <th>NF</th><th class="right">Valor NF (QZ)</th><th class="right">Valor NF (CT-e)</th><th class="right">Δ NF</th>
+          <table id="fte-qzB2bDetailTable"><thead><tr>
+            <th>NF</th><th>Mês</th><th title="Data NF quinzenal · data CT-e/SAP">Data</th>
+            <th class="right">Valor NF (QZ)</th><th class="right">Valor NF (CT-e)</th><th class="right">Δ NF</th>
             <th class="right">Frete (QZ)</th><th class="right">Frete (CT-e)</th><th class="right">Δ frete</th>
             <th class="right">Qtd CT-e (QZ)</th><th class="right">Qtd CT-e (CT-e)</th><th class="right">Δ CT-e</th>
-            <th>Estado</th><th>% pago (6%)</th>
+            <th>Estado</th><th class="right">% pago (6%)</th>
           </tr></thead><tbody id="fte-qzB2bDetailBody"></tbody></table>
         </div>
       </div>

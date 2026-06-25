@@ -1,5 +1,5 @@
-// fretes.js v1.7.4
-const FRETES_JS_VERSION = '1.7.4';
+// fretes.js v1.7.5
+const FRETES_JS_VERSION = '1.7.5';
 
 const sb = db;
 
@@ -2847,6 +2847,7 @@ function aggregateQzB2BRows(rows, fileMeta) {
     g.pago += num(r.pago);
     if (r.numCte) g.nCteSet.add(String(r.numCte).trim());
     if (r.transportador && g.transportador === '') g.transportador = r.transportador;
+    if (r.dtNF && !g.dtNF) g.dtNF = r.dtNF;
   });
   return Object.values(byNf).map(g => ({ ...g, nCte: g.nCteSet.size || 1, nCteSet: undefined }));
 }
@@ -2905,6 +2906,7 @@ function mergeQzB2BNf(into, r) {
   into.valorNF = Math.max(into.valorNF, r.valorNF);
   into.pago += r.pago;
   into.nCte += r.nCte;
+  if (r.dtNF && !into.dtNF) into.dtNF = r.dtNF;
 }
 
 function quinzenaFromKey(qk) {
@@ -3204,10 +3206,11 @@ function renderB2cKpiBlock(label, stats) {
   </div>`;
 }
 
-function renderB2bCompareKpis(monthTotals, cteGrand) {
+function renderB2bCompareKpis(monthTotals, cteGrand, compareRows) {
   const t = aggregateB2bMonthGroup(monthTotals || []);
   const fatCte = cteGrand?.totalValorNF ?? t.totalValorNFCte;
   const freteCte = cteGrand?.totalPago ?? t.totalPagoCte;
+  const s = qzCompareSummary(compareRows || []);
   return `<div class="qz-year-kpi-block">
     <div class="qz-year-kpi-label">Faturação (valor NF)</div>
     <div class="kpis">
@@ -3222,6 +3225,21 @@ function renderB2bCompareKpis(monthTotals, cteGrand) {
       <div class="kpi"><div class="label">Frete QZ</div><div class="value">${fmtMoney(t.totalPagoQz)}</div></div>
       <div class="kpi"><div class="label">Frete CT-e</div><div class="value">${fmtMoney(freteCte)}</div></div>
       <div class="kpi flag"><div class="label">Δ total</div><div class="value">${fmtQzDiff(freteCte - t.totalPagoQz, 0.5)}</div></div>
+    </div>
+  </div>
+  <div class="qz-year-kpi-block">
+    <div class="qz-year-kpi-label">Confronto NF (quinzenal vs CT-e) <span style="font-weight:400;font-size:10px;color:var(--muted)">— clica para filtrar</span></div>
+    <div class="kpis">
+      <div class="kpi qz-kpi-filter" data-qz-filter="onlyQz" role="button" tabindex="0" title="NFs só no quinzenal B2B">
+        <div class="label">Só quinzenal</div><div class="value">${s.onlyQz}</div>
+      </div>
+      <div class="kpi qz-kpi-filter" data-qz-filter="onlyCte" role="button" tabindex="0" title="NFs só no export CT-e">
+        <div class="label">Só CT-e</div><div class="value">${s.onlyCte}</div>
+      </div>
+      <div class="kpi qz-kpi-filter" data-qz-filter="diff" role="button" tabindex="0" title="NFs em ambos com diferença de valor/frete/CT-e">
+        <div class="label">Com diferença</div><div class="value">${s.diff}</div>
+      </div>
+      <div class="kpi"><div class="label">OK (match)</div><div class="value">${s.match}</div></div>
     </div>
   </div>`;
 }
@@ -3244,6 +3262,39 @@ function renderB2cMonthTableRow(label, m, rowClass) {
     <td class="right">${fmtMoney(freteMedio)}</td></tr>`;
 }
 
+function parseB2bQzDtNF(v) {
+  if (!v) return null;
+  const d = parseSapBrDate(v);
+  if (d && !isNaN(d) && isPlausibleSapDate(d)) return d;
+  if (v instanceof Date && !isNaN(v) && isPlausibleSapDate(v)) return v;
+  return null;
+}
+
+function parseB2bCteDtNF(cte) {
+  if (!cte) return null;
+  enrichNF(cte);
+  return cte.dtRef || parseB2bQzDtNF(cte.dtNF);
+}
+
+function fmtB2bCompareMesCell(r) {
+  const qz = r.mesLabelQz || r.mesLabel || '';
+  const cte = r.mesLabelCte || '';
+  if (qz && cte && qz !== cte) return `${qz} · ${cte}`;
+  return qz || cte || '-';
+}
+
+function fmtB2bCompareDateCell(r) {
+  const qz = fmtDate(r.dtNFQz);
+  const cte = fmtDate(r.dtNFCte);
+  if (r.status === 'onlyQz') return qz;
+  if (r.status === 'onlyCte') return cte;
+  if (qz !== '-' && cte !== '-' && qz !== cte) {
+    return `<span style="color:#b3261e" title="Data QZ vs CT-e/SAP">${qz} · ${cte}</span>`;
+  }
+  if (qz !== '-' && cte !== '-') return qz;
+  return qz !== '-' ? qz : cte;
+}
+
 function buildB2BCompare(b2bRows) {
   const qzMap = {};
   b2bRows.forEach(r => {
@@ -3264,14 +3315,28 @@ function buildB2BCompare(b2bRows) {
     const pagoCte = cte?.pago || 0;
     const nCteQz = qz?.nCte || 0;
     const nCteCte = cte?.nCte || 0;
+    const dtNFQz = parseB2bQzDtNF(qz?.dtNF);
+    const dtNFCte = parseB2bCteDtNF(cte);
+    const mesKeyQz = qz?.mesKey || mesKeyFromQuinzenaKey(qz?.quinzenaKey) || '';
+    const mesLabelQz = qz?.mesLabel || (mesKeyQz ? fmtMesLabel(mesKeyQz) : '');
+    let mesKeyCte = '';
+    let mesLabelCte = '';
+    if (cte) {
+      enrichNF(cte);
+      mesKeyCte = cte.mesRef && cte.mesRef !== 'sem-data' ? cte.mesRef : '';
+      mesLabelCte = mesKeyCte ? fmtMesLabel(mesKeyCte) : '';
+    }
     let status = 'match';
     if (qz && !cte) status = 'onlyQz';
     else if (!qz && cte) status = 'onlyCte';
     else if (Math.abs(valorNFQz - valorNFCte) > 1 || Math.abs(pagoQz - pagoCte) > 0.5 || nCteQz !== nCteCte) status = 'diff';
     rows.push({
       nfKey: k, nf: qz?.nf || cte?.nf || k,
-      mesKey: qz?.mesKey || mesKeyFromQuinzenaKey(qz?.quinzenaKey),
-      mesLabel: qz?.mesLabel || (qz?.mesKey ? fmtMesLabel(qz.mesKey) : ''),
+      mesKey: mesKeyQz || mesKeyCte,
+      mesKeyQz, mesKeyCte,
+      mesLabel: mesLabelQz || mesLabelCte,
+      mesLabelQz, mesLabelCte,
+      dtNFQz, dtNFCte,
       quinzenaKey: qz?.quinzenaKey || '', quinzenaLabel: qz?.quinzenaLabel || '',
       valorNFQz, valorNFCte, diffValorNF: valorNFCte - valorNFQz,
       pagoQz, pagoCte, diffPago: pagoCte - pagoQz,
@@ -3756,7 +3821,7 @@ function renderQzB2b() {
   const monthTotals = quinzenalPack.b2bMonthTotals || [];
   const cteGrand = cteGrandTotalsFromNFs();
   const kpis = $('qzB2bKpis');
-  if (kpis) kpis.innerHTML = renderB2bCompareKpis(monthTotals, cteGrand);
+  if (kpis) kpis.innerHTML = renderB2bCompareKpis(monthTotals, cteGrand, rows);
 
   const qzBody = $('qzB2bQuinzenaBody');
   if (qzBody) {
@@ -3777,9 +3842,15 @@ function renderQzB2b() {
   const dFilter = $('qzFilterDiff')?.value || '';
   const search = ($('qzSearchNF')?.value || '').trim();
   let list = rows;
-  if (qFilter) list = list.filter(r => (r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)) === qFilter);
+  if (qFilter) {
+    list = list.filter(r =>
+      (r.mesKeyQz || r.mesKey || mesKeyFromQuinzenaKey(r.quinzenaKey)) === qFilter ||
+      r.mesKeyCte === qFilter
+    );
+  }
   if (dFilter === 'onlyQz') list = list.filter(r => r.status === 'onlyQz');
   else if (dFilter === 'onlyCte') list = list.filter(r => r.status === 'onlyCte');
+  else if (dFilter === 'diff') list = list.filter(r => r.status === 'diff');
   else if (dFilter === 'valor') list = list.filter(r => Math.abs(r.diffValorNF) > 1);
   else if (dFilter === 'frete') list = list.filter(r => Math.abs(r.diffPago) > 0.5);
   else if (dFilter === 'cte') list = list.filter(r => r.diffCte !== 0);
@@ -3791,13 +3862,14 @@ function renderQzB2b() {
       const cls = r.status === 'onlyQz' || r.status === 'onlyCte' ? 'qz-only-row' : (r.status === 'diff' ? 'qz-diff-row' : '');
       const pctNote = r.valorNFQz > 0 && r.pagoQz > 0 ? fmtPct(r.pagoQz / r.valorNFQz) : '-';
       return `<tr class="${cls}"><td>${r.nf}</td>
+        <td>${fmtB2bCompareMesCell(r)}</td><td>${fmtB2bCompareDateCell(r)}</td>
         <td class="right">${r.valorNFQz ? fmtMoney(r.valorNFQz) : '-'}</td><td class="right">${r.valorNFCte ? fmtMoney(r.valorNFCte) : '-'}</td>
         <td class="right">${fmtQzDiff(r.diffValorNF, 1)}</td>
         <td class="right">${r.pagoQz ? fmtMoney(r.pagoQz) : '-'}</td><td class="right">${r.pagoCte ? fmtMoney(r.pagoCte) : '-'}</td>
         <td class="right">${fmtQzDiff(r.diffPago, 0.5)}</td>
         <td class="right">${r.nCteQz || '-'}</td><td class="right">${r.nCteCte || '-'}</td><td class="right">${r.diffCte || 0}</td>
         <td>${fmtQzStatus(r.status)}</td><td class="right">${pctNote}</td></tr>`;
-    }).join('') || '<tr><td colspan="12" class="empty">Sem dados B2B — carrega quinzenais B2B e análise CT-e</td></tr>';
+    }).join('') || '<tr><td colspan="14" class="empty">Sem dados B2B — carrega quinzenais B2B e análise CT-e</td></tr>';
   }
   fteEnableDomSort(qzBody);
   fteEnableDomSort(detBody);
@@ -3877,7 +3949,10 @@ function exportQuinzenalWorkbook() {
   }));
   if (resumo.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), 'Resumo B2B mensal');
   const b2b = (quinzenalPack.b2bCompare || []).map(r => ({
-    NF: r.nf, Mês: r.mesLabel || r.mesKey, 'Valor NF QZ': r.valorNFQz, 'Valor NF CT-e': r.valorNFCte, 'Δ valor NF': r.diffValorNF,
+    NF: r.nf, Mês: fmtB2bCompareMesCell(r),
+    'Data QZ': r.dtNFQz ? new Date(r.dtNFQz) : '',
+    'Data CT-e': r.dtNFCte ? new Date(r.dtNFCte) : '',
+    'Valor NF QZ': r.valorNFQz, 'Valor NF CT-e': r.valorNFCte, 'Δ valor NF': r.diffValorNF,
     'Frete QZ': r.pagoQz, 'Frete CT-e': r.pagoCte, 'Δ frete': r.diffPago,
     'Qtd CT-e QZ': r.nCteQz, 'Qtd CT-e CT-e': r.nCteCte, 'Δ CT-e': r.diffCte, Estado: r.status,
     '% pago QZ (6%)': r.valorNFQz > 0 ? r.pagoQz / r.valorNFQz : null
@@ -4003,6 +4078,28 @@ function initFretes() {
     el.addEventListener('input', fn);
     el.addEventListener('change', fn);
   });
+  const qzKpiRoot = $('qzB2bKpis');
+  if (qzKpiRoot && !qzKpiRoot._qzFilterBound) {
+    qzKpiRoot._qzFilterBound = true;
+    const applyKpiFilter = filter => {
+      const sel = $('qzFilterDiff');
+      if (!sel) return;
+      sel.value = sel.value === filter ? '' : filter;
+      renderQzB2b();
+    };
+    qzKpiRoot.addEventListener('click', e => {
+      const kpi = e.target.closest('.qz-kpi-filter');
+      if (!kpi?.dataset.qzFilter) return;
+      applyKpiFilter(kpi.dataset.qzFilter);
+    });
+    qzKpiRoot.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const kpi = e.target.closest('.qz-kpi-filter');
+      if (!kpi?.dataset.qzFilter) return;
+      e.preventDefault();
+      applyKpiFilter(kpi.dataset.qzFilter);
+    });
+  }
   ['qzB2cFilterQuinzena', 'qzB2cSearch'].forEach(id => {
     const el = $(id);
     if (!el) return;
