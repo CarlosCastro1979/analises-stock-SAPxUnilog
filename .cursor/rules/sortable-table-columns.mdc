@@ -1,0 +1,54 @@
+---
+description: All data tables must have sortable column headers (click asc/desc)
+globs: index.html,fretes.js
+alwaysApply: true
+---
+
+# Sortable table columns
+
+Every **information** column in data tables must be sortable (click header → asc/desc toggle). Action/button columns may use `class="no-sort"`.
+
+## Shared utility (`index.html` → `window.TableSort`)
+
+- `enableTableSort(tableOrId, options?)` — DOM sort after render; use for static/dynamic HTML tables.
+- `TableSort.renderDataHead(containerId, columns, sortState, onSort)` — column-definition headers (Fretes NF/mês/anomalias).
+- `TableSort.decorateDoSortHeaders(table)` — adds ▲/▼ indicators to `doSort` / `cadSort` / `vencDoSort` headers.
+- `scheduleTableSort()` — auto-binds `.tw2 table` and `#page-fretes .tbl-wrap table` (called from `scheduleColResize`).
+
+## Data-driven tables (re-render on sort)
+
+Pattern: `sorts[tableId]` + `doSort(table, col)` + `applySort(table, rows)` + `updateSortHeaders(table)`.
+
+```javascript
+if (sorts['myTable']) applySort('myTable', rows);
+else rows.sort(defaultComparator);
+updateSortHeaders('myTable');
+```
+
+Add `onclick="doSort('myTable','fieldKey')"` on every info `<th>`. Enrich row objects with computed sort keys before `applySort`.
+
+## DOM tables (sort existing rows)
+
+After filling `<tbody>`, call `enableTableSort('tableId')` or rely on `scheduleTableSort()`.
+
+```javascript
+body.innerHTML = rows.map(...).join('');
+enableTableSort(table); // or scheduleTableSort()
+```
+
+## Special rows (do not break)
+
+- **Ocupação**: `occ-product-row` + following `occ-moves-sub` move as one group.
+- **Fretes mês/QZ**: skip `month-year-row`, `month-subtotal-row`, `month-total-row`; sort only `qz-month-row` / `month-row-clickable`.
+- Nested `.occ-moves-tbl` — never bind sort.
+
+## Visual indicator
+
+Active column: `sorted-asc` / `sorted-desc` + `<span class="sort-ind">▲</span>` or `▼`. Inactive: `↕`.
+
+## New tables checklist
+
+1. `<thead>` with one `<th>` per info column (or `renderDataHead` for Fretes).
+2. Data table: `doSort` + `applySort` + `updateSortHeaders`, or DOM: `enableTableSort` after render.
+3. Call `scheduleTableSort()` after DOM updates.
+4. Exclude actions with `class="no-sort"`.

@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260624203000 -->
+<!DOCTYPE html><!-- v20260625120000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -125,9 +125,13 @@ th{padding:10px 10px;text-align:left;font-family:var(--mono);font-size:10px;font
 th:hover{color:#fff;}
 .kpi-sep{width:1px;height:16px;background:var(--border2);margin:0 4px;}
 #loadBanner{display:none;padding:12px 20px 16px;background:var(--navy2);border-bottom:1px solid var(--border);}
-th.desc::after{content:' ↓';color:#fca5a5;}
-th[onclick]{cursor:pointer;user-select:none;}
-th[onclick]:hover{color:var(--red);}
+th.sortable,th[onclick],th[data-col]{cursor:pointer;user-select:none;}
+th.sortable:hover,th[onclick]:hover,th[data-col]:hover{color:var(--red);}
+th.sortable .sort-ind,th[onclick] .sort-ind,th[data-col] .sort-ind{font-size:9px;margin-left:3px;opacity:.35;}
+th.sorted-asc .sort-ind,th.sorted-desc .sort-ind,th.asc .sort-ind,th.desc .sort-ind{opacity:1;color:#fca5a5;}
+th.no-sort{cursor:default;}
+th.no-sort:hover{color:#e2e8f0;}
+th.no-sort .sort-ind{display:none;}
 td{padding:8px 10px;border-bottom:1px solid #edf0f5;vertical-align:middle;color:var(--text);}
 tbody tr:nth-child(even) td{background:#f7f9fc;}
 tr:hover td{background:#ebf4ff !important;}
@@ -377,7 +381,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.3</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.4</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -495,11 +499,11 @@ select.cad-inp{cursor:pointer;}
         <th onclick="doSort('recon','qt_sap')" class="num">SAP</th>
         <th onclick="doSort('recon','qt_uni')" class="num">Unilog</th>
         <th onclick="doSort('recon','diff')" class="num">Diferença</th>
-        <th>Estado</th>
-        <th>Localização Unilog</th>
-        <th>Recomendação</th>
-        <th>Noutros depósitos</th>
-        <th>Acção / Notas</th>
+        <th onclick="doSort('recon','_estado')">Estado</th>
+        <th onclick="doSort('recon','_localizacao')">Localização Unilog</th>
+        <th onclick="doSort('recon','_recomendacao')">Recomendação</th>
+        <th onclick="doSort('recon','_outrosDeps')">Noutros depósitos</th>
+        <th onclick="doSort('recon','_nota')">Acção / Notas</th>
       </tr></thead>
       <tbody id="reconBody"></tbody>
     </table></div>
@@ -547,7 +551,7 @@ select.cad-inp{cursor:pointer;}
         <th class="num" onclick="doSort('ean','preco')">Preço SAP</th>
         <th class="num" onclick="doSort('ean','valorDifLiq')">Valor Dif.</th>
         <th onclick="doSort('ean','estado')">Estado</th>
-        <th>Depósitos com dif.</th>
+        <th onclick="doSort('ean','_depsDif')">Depósitos com dif.</th>
       </tr></thead>
       <tbody id="eanBody"></tbody>
     </table></div>
@@ -595,9 +599,9 @@ select.cad-inp{cursor:pointer;}
         <th onclick="doSort('susp','Lote_norm')">Lote</th>
         <th onclick="doSort('susp','qt')" class="num">Quantidade</th>
         <th onclick="doSort('susp','sistema')">Sistema</th>
-        <th>Detalhe</th>
-        <th>Recomendação</th>
-        <th>Acção</th>
+        <th onclick="doSort('susp','_detalhe')">Detalhe</th>
+        <th onclick="doSort('susp','_recomendacao')">Recomendação</th>
+        <th class="no-sort">Acção</th>
       </tr></thead>
       <tbody id="suspBody"></tbody>
     </table></div>
@@ -656,7 +660,7 @@ select.cad-inp{cursor:pointer;}
         <th onclick="doSort('poscl','nClasses')">Classes</th>
         <th onclick="doSort('poscl','eans')">EANs / Lotes</th>
         <th onclick="doSort('poscl','totalQt')" class="num">Qtd Total</th>
-        <th>Descrições</th>
+        <th onclick="doSort('poscl','_descricoes')">Descrições</th>
       </tr></thead>
       <tbody id="posBody"></tbody>
     </table></div>
@@ -825,7 +829,7 @@ select.cad-inp{cursor:pointer;}
           <th onclick="cadSort('sapCode')" id="cadTh_sapCode">Cód. SAP</th>
           <th onclick="cadSort('ean')" id="cadTh_ean">EAN</th>
           <th onclick="cadSort('desc')" id="cadTh_desc">Descrição SAP</th>
-          <th>Depósitos</th>
+          <th onclick="cadSort('depositos')" id="cadTh_depositos">Depósitos</th>
           <th onclick="cadSort('stockTotal')" id="cadTh_stockTotal" class="num" title="Stock total SAP em todos os depósitos">Stock SAP</th>
           <th onclick="cadSort('stockUni')" id="cadTh_stockUni" class="num" title="Stock total Unilog em todas as classes">Stock WMS</th>
           <th onclick="cadSort('qty_per_pos')" id="cadTh_qty_per_pos" style="min-width:80px">Un/Posição</th>
@@ -833,7 +837,7 @@ select.cad-inp{cursor:pointer;}
           <th onclick="cadSort('lote_obrigatorio')" id="cadTh_lote_obrigatorio">Lote Obrig.</th>
           <th onclick="cadSort('b2c')" id="cadTh_b2c">B2C</th>
           <th onclick="cadSort('descontinuado')" id="cadTh_descontinuado">Desc.</th>
-          <th style="min-width:120px">Notas</th>
+          <th onclick="cadSort('notes')" id="cadTh_notes" style="min-width:120px">Notas</th>
         </tr></thead>
         <tbody id="cadBody"></tbody>
       </table></div>
@@ -850,7 +854,7 @@ select.cad-inp{cursor:pointer;}
       <div class="kr" id="dupKpis"></div>
       <div class="tw2"><table id="dupTable">
         <thead><tr>
-          <th>EAN</th><th>Descrição</th><th class="num">Nº Materiais</th><th>Materiais SAP</th><th>Depósitos</th>
+          <th>EAN</th><th>Descrição</th><th class="num">Nº Materiais</th><th>Materiais SAP</th><th>Depósitos</th><!-- sort via enableTableSort -->
         </tr></thead>
         <tbody id="dupBody"></tbody>
       </table></div>
@@ -968,12 +972,12 @@ select.cad-inp{cursor:pointer;}
           <th onclick="doSort('rec','criado_em')">Data</th>
           <th onclick="doSort('rec','area')">Área</th>
           <th onclick="doSort('rec','tipo_nome')">Tipo</th>
-          <th>Descrição</th>
+          <th onclick="doSort('rec','descricao')">Descrição</th>
           <th onclick="doSort('rec','nf_numero')">NF / Dias</th>
           <th onclick="doSort('rec','estado')">Estado</th>
           <th onclick="doSort('rec','criado_por_nome')">Criado por</th>
-          <th>Prazo</th>
-          <th>Acções</th>
+          <th onclick="doSort('rec','_prazoHoras')">Prazo</th>
+          <th class="no-sort">Acções</th>
         </tr></thead>
         <tbody id="recBody"></tbody>
       </table></div>
@@ -3200,6 +3204,7 @@ function _renderPosClasse(){
     r.descs.some(d=>d.toLowerCase().includes(srch))||
     r.lotes.some(l=>l.toLowerCase().includes(srch))
   );
+  rows.forEach(r=>{r._descricoes=(r.descs||[]).join(' ');});
   applySort('poscl',rows);updateSortHeaders('poscl');
   const mixClasses=rows.reduce((s,r)=>s+r.nClasses,0);
   const totalQt=rows.reduce((s,r)=>s+r.totalQt,0);
@@ -4356,6 +4361,7 @@ function _renderEanView(){
   else if(estadoValsE.has('only_sap'))rows=rows.filter(r=>r.qt_uni===0&&r.qt_sap>0);
   else if(estadoValsE.has('only_uni'))rows=rows.filter(r=>r.qt_sap===0&&r.qt_uni>0);
 
+  rows.forEach(r=>{r._depsDif=(r.depDiffs||[]).map(d=>d.dep).join(', ');});
   if(sorts['ean'])applySort('ean',rows);
   else rows.sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
   updateSortHeaders('ean');
@@ -4538,6 +4544,13 @@ function _renderRecon(){
       r.cat=p?.cat||'';r.subcat=p?.subcat||'';
     }
     r.sapCode=getSapCode(r.EAN_norm);
+    const notaKey=activeDepot+'|'+r.EAN_norm+'|'+r.Lote_norm;
+    const hasDiff=r.diff!==0;
+    r._estado=r.qt_uni===0&&r.qt_sap>0?'Só SAP':r.qt_sap===0&&r.qt_uni>0?'Só Unilog':hasDiff?'Divergência':'OK';
+    r._localizacao=(r.uni_enderecos||[]).slice(0,3).join(', ');
+    r._recomendacao=autoRecomendacao(r)||'';
+    r._outrosDeps=findOther(r.EAN_norm,r.Lote_norm,activeDepot).length;
+    r._nota=reconNotas[notaKey]?.nota||'';
   });
   if(!sorts['recon']){rows.sort((a,b)=>String(a.desc||'').localeCompare(String(b.desc||'')));}
   else applySort('recon',rows);
@@ -4647,6 +4660,19 @@ function _renderSusp(){
     if(!r.tipoLabel)r.tipoLabel=r.tipo==='multi_ean'?'Lote em múltiplos EANs':'Lote só no WMS';
     if(!r.cat&&r.tipo!=='multi_ean'){const p=occParams.find(x=>x.ean===r.EAN_norm);r.cat=p?.cat||autoCat(r.desc).cat||'';}
     if(!r.sapCode)r.sapCode=r.tipo==='multi_ean'?(r.eans||[]).map(e=>getSapCode(e.EAN_norm)).filter(Boolean).join(', '):getSapCode(r.EAN_norm);
+    if(r.tipo==='multi_ean'){
+      r._detalhe=(r.eans||[]).map(e=>e.EAN_norm).join(' ');
+      r._recomendacao='Verificar cadastro';
+    }else{
+      r._detalhe=r.similar?`Lote SAP:${r.similar.lote} ${Math.round(r.similar.ratio*100)}%`:(r.depots||[]).join(' ');
+      if(r.similar)r._recomendacao=`Corrigir lote:${r.similar.lote}`;
+      else{
+        const param=occParams.find(p=>p.ean===r.EAN_norm);
+        if(param&&param.lote_obrigatorio===false)r._recomendacao='Sem lote obrigatório';
+        else if(sapData&&sapData.find(x=>x.EAN_norm===r.EAN_norm&&x.Lote_norm===''))r._recomendacao='Corrigir lote WMS';
+        else r._recomendacao='Investigar';
+      }
+    }
   });
   applySort('susp',rows);updateSortHeaders('susp');
 
@@ -4729,9 +4755,14 @@ function _renderSusp(){
 let cadSortState={col:'desc',dir:1};
 function cadSort(col){
   if(cadSortState.col===col)cadSortState.dir*=-1;else cadSortState={col,dir:1};
-  document.querySelectorAll('[id^="cadTh_"]').forEach(th=>{th.classList.remove('asc','desc');});
-  const th=document.getElementById('cadTh_'+col);
-  if(th)th.classList.add(cadSortState.dir===1?'asc':'desc');
+  document.querySelectorAll('[id^="cadTh_"]').forEach(th=>{
+    th.classList.remove('asc','desc','sorted-asc','sorted-desc');
+    const ind=TableSort.ensureIndicator(th);
+    if(th.id==='cadTh_'+col){
+      th.classList.add(cadSortState.dir===1?'sorted-asc':'sorted-desc');
+      if(ind)ind.textContent=cadSortState.dir===1?'▲':'▼';
+    }else if(ind)ind.textContent='↕';
+  });
   renderCadastro();
 }
 function cadTab(name,el){
@@ -5771,6 +5802,162 @@ function gerarPedidoPecas(){
   toast('Pedido gerado: '+rows.length+' peças','success');
 }
 
+// ── TABLE SORT (shared index.html + fretes.js) ──
+const TableSort={
+  states:new WeakMap(),
+  SKIP_ROWS:'tr.occ-moves-sub,tr.month-year-row,tr.month-subtotal-row,tr.month-total-row,tr.detail-row',
+  parseCellValue(text,th){
+    const t=String(text||'').trim();
+    if(!t||t==='—'||t==='-')return'';
+    const isNum=th&&(th.classList.contains('num')||th.classList.contains('right'));
+    if(isNum){
+      const n=parseFloat(t.replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'));
+      if(!isNaN(n))return n;
+    }
+    const pct=parseFloat(t.replace('%','').replace(',','.'));
+    if(isNum&&/%/.test(t)&&!isNaN(pct))return pct;
+    const dm=t.match(/^(\d{2})[./](\d{2})[./](\d{4})/);
+    if(dm)return new Date(+dm[3],+dm[2]-1,+dm[1]).getTime()||t.toLowerCase();
+    const iso=t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(iso)return new Date(+iso[1],+iso[2]-1,+iso[3]).getTime()||t.toLowerCase();
+    if(/^-?[\d.,]+$/.test(t.replace(/\s/g,''))){
+      const n=parseFloat(t.replace(/\./g,'').replace(',','.'));
+      if(!isNaN(n))return n;
+    }
+    return t.toLowerCase();
+  },
+  compare(va,vb,dir){
+    if(va===vb)return 0;
+    if(va===''||va===null||va===undefined)return 1;
+    if(vb===''||vb===null||vb===undefined)return-1;
+    if(typeof va==='number'&&typeof vb==='number')return dir*(va-vb);
+    return dir*String(va).localeCompare(String(vb),'pt',{numeric:true,sensitivity:'base'});
+  },
+  ensureIndicator(th){
+    if(!th||th.classList.contains('no-sort'))return null;
+    let ind=th.querySelector('.sort-ind');
+    if(!ind){ind=document.createElement('span');ind.className='sort-ind';ind.textContent='↕';th.appendChild(ind);}
+    return ind;
+  },
+  updateIndicators(table,colIdx,dir){
+    if(!table)return;
+    table.querySelectorAll('thead th').forEach((th,i)=>{
+      th.classList.remove('sorted-asc','sorted-desc','asc','desc');
+      const ind=this.ensureIndicator(th);
+      if(!ind)return;
+      if(i===colIdx&&dir){
+        th.classList.add(dir===1?'sorted-asc':'sorted-desc');
+        ind.textContent=dir===1?'▲':'▼';
+      }else{
+        ind.textContent='↕';
+      }
+    });
+  },
+  rowGroups(tbody,opts={}){
+    const skip=opts.skipSelector||this.SKIP_ROWS;
+    const dataSel=opts.dataRowSelector||null;
+    const groups=[];
+    const rows=[...tbody.children];
+    for(let i=0;i<rows.length;i++){
+      const tr=rows[i];
+      if(tr.matches(skip))continue;
+      const td0=tr.children[0];
+      if(td0&&td0.colSpan>1&&!tr.classList.contains('occ-product-row'))continue;
+      if(dataSel&&!tr.matches(dataSel))continue;
+      const group=[tr];
+      if(tr.classList.contains('occ-product-row')){
+        while(i+1<rows.length&&rows[i+1].classList.contains('occ-moves-sub'))group.push(rows[++i]);
+      }
+      groups.push(group);
+    }
+    return groups;
+  },
+  sortDomTable(table,colIdx,dir,opts={}){
+    const tbody=table.tBodies[0];
+    if(!tbody)return;
+    const th=table.querySelectorAll('thead th')[colIdx];
+    const groups=this.rowGroups(tbody,opts);
+    groups.sort((ga,gb)=>{
+      const va=this.parseCellValue((ga[0].children[colIdx]?.innerText||'').trim(),th);
+      const vb=this.parseCellValue((gb[0].children[colIdx]?.innerText||'').trim(),th);
+      return this.compare(va,vb,dir);
+    });
+    groups.forEach(g=>g.forEach(tr=>tbody.appendChild(tr)));
+  },
+  enableTableSort(tableOrId,opts={}){
+    const table=typeof tableOrId==='string'?document.getElementById(tableOrId):tableOrId;
+    if(!table||table.classList.contains('occ-moves-tbl')||table.dataset.managedSort)return;
+    const thead=table.querySelector('thead');
+    if(!thead)return;
+    if(table.dataset.domSortBound){
+      const st=this.states.get(table);
+      if(st&&st.col>=0)this.updateIndicators(table,st.col,st.dir);
+      return;
+    }
+    table.dataset.domSortBound='1';
+    const state={col:-1,dir:1};
+    this.states.set(table,state);
+    const monthOpts=opts.dataRowSelector?opts:null;
+    const tbodyId=table.querySelector('tbody[id]')?.id||'';
+    const autoMonth=tbodyId==='fte-qzB2cQuinzenaBody'||tbodyId==='fte-qzB2bQuinzenaBody';
+    const sortOpts=monthOpts||(autoMonth?{dataRowSelector:'tr.qz-month-row,tr.month-row-clickable'}:opts);
+    thead.querySelectorAll('th').forEach((th,colIdx)=>{
+      if(th.classList.contains('no-sort'))return;
+      this.ensureIndicator(th);
+      th.classList.add('sortable');
+      th.addEventListener('click',e=>{
+        if(e.target.classList.contains('resizer'))return;
+        e.stopPropagation();
+        if(state.col===colIdx)state.dir*=-1;
+        else{state.col=colIdx;state.dir=1;}
+        this.sortDomTable(table,colIdx,state.dir,sortOpts);
+        this.updateIndicators(table,colIdx,state.dir);
+      });
+    });
+  },
+  renderDataHead(containerId,columns,sortState,onSort){
+    const tr=typeof containerId==='string'?document.getElementById(containerId):containerId;
+    if(!tr)return;
+    const table=tr.closest('table');
+    if(table)table.dataset.managedSort='fretes';
+    tr.innerHTML=columns.map(c=>{
+      const sorted=sortState.col===c.key;
+      const cls=['sortable',c.right?'right':'',sorted?(sortState.dir===1?'sorted-asc':'sorted-desc'):''].filter(Boolean).join(' ');
+      const ind=sorted?(sortState.dir===1?'▲':'▼'):'↕';
+      const titleAttr=c.title?` title="${c.title.replace(/"/g,'&quot;')}"`:'';
+      return`<th class="${cls}" data-col="${c.key}"${titleAttr}>${c.label}<span class="sort-ind">${ind}</span></th>`;
+    }).join('');
+    tr.querySelectorAll('th.sortable').forEach(th=>{
+      th.addEventListener('click',e=>{
+        e.stopPropagation();
+        const col=th.dataset.col;
+        if(sortState.col===col)sortState.dir*=-1;
+        else{sortState.col=col;sortState.dir=1;}
+        onSort();
+      });
+    });
+  },
+  updateDataHeadIndicators(containerId,sortState){
+    const tr=typeof containerId==='string'?document.getElementById(containerId):containerId;
+    if(!tr)return;
+    tr.querySelectorAll('th.sortable').forEach(th=>{
+      const sorted=sortState.col===th.dataset.col;
+      th.classList.remove('sorted-asc','sorted-desc');
+      if(sorted)th.classList.add(sortState.dir===1?'sorted-asc':'sorted-desc');
+      const ind=th.querySelector('.sort-ind');
+      if(ind)ind.textContent=sorted?(sortState.dir===1?'▲':'▼'):'↕';
+    });
+  },
+  decorateDoSortHeaders(table){
+    if(!table)return;
+    table.querySelectorAll('th[onclick*="doSort"],th[onclick*="cadSort"],th[onclick*="vencDoSort"]').forEach(th=>{
+      if(!th.classList.contains('no-sort')){this.ensureIndicator(th);th.classList.add('sortable');}
+    });
+  }
+};
+window.TableSort=TableSort;
+window.enableTableSort=(id,opts)=>TableSort.enableTableSort(id,opts);
+
 // ── SORT ──
 function doSort(table,col){
   const s=sorts[table];
@@ -5803,12 +5990,37 @@ function applySort(table,rows){
 }
 function updateSortHeaders(table){
   const s=sorts[table];
+  const tableEl=document.getElementById({recon:'reconTable',ean:'eanTable',susp:'suspTable',su:'suTable',poscl:'posTable',semval:'semValTable',valconfl:'valConflTable',occ:'ovTable',transEc:'transEcTable',transQb:'transQbTable',audit:'auditTable',rec:'recTable',hist:'histTable',pecas:'pecasTable',vencforadep:'vencTable',vencforadepSap:'vencTable'}[table]);
   document.querySelectorAll('th[onclick]').forEach(th=>{
     const oc=th.getAttribute('onclick')||'';
-    const m=oc.match(/doSort\(['"]([^'"]+)['"],\s*['"]([^'"]+)['"]\)/);
-    if(!m||m[1]!==table)return;
-    th.classList.remove('asc','desc');
-    if(s&&s.col===m[2])th.classList.add(s.dir===1?'asc':'desc');
+    let t=table,col;
+    let m=oc.match(/(?:doSort|cadSort)\(['"]([^'"]+)['"],\s*['"]([^'"]+)['"]\)/);
+    if(m){t=m[1];col=m[2];}
+    else{
+      m=oc.match(/vencDoSort\(['"]([^'"]+)['"]\)/);
+      if(m){t=typeof vencSortKey==='function'?vencSortKey():table;col=m[1];}
+    }
+    if(t!==table)return;
+    th.classList.remove('asc','desc','sorted-asc','sorted-desc');
+    const ind=TableSort.ensureIndicator(th);
+    if(s&&s.col===col){
+      th.classList.add(s.dir===1?'sorted-asc':'sorted-desc');
+      if(ind)ind.textContent=s.dir===1?'▲':'▼';
+    }else if(ind)ind.textContent='↕';
+  });
+  if(tableEl)TableSort.decorateDoSortHeaders(tableEl);
+}
+function scheduleTableSort(){
+  document.querySelectorAll('.tw2 table, #page-fretes .tbl-wrap table').forEach(table=>{
+    if(table.classList.contains('occ-moves-tbl'))return;
+    if(table.querySelector('th[onclick*="doSort"], th[onclick*="cadSort"], th[onclick*="vencDoSort"]')){
+      TableSort.decorateDoSortHeaders(table);
+      const sKey=Object.keys(sorts).find(k=>table.id&&table.id.includes(k));
+      if(sKey&&sorts[sKey])updateSortHeaders(sKey);
+      return;
+    }
+    if(table.dataset.managedSort)return;
+    TableSort.enableTableSort(table);
   });
 }
 
@@ -5879,6 +6091,13 @@ function renderRecLista(){
   if(areaVals.size)rows=rows.filter(r=>areaVals.has(r.area));
   if(estadoVals2.size)rows=rows.filter(r=>estadoVals2.has(r.estado));
   if(mesVals.size)rows=rows.filter(r=>[...mesVals].some(m=>r.criado_em?.startsWith(m)));
+  rows.forEach(r=>{
+    const dt=new Date(r.criado_em);
+    const horasAberta=(new Date()-dt)/3600000;
+    const tipo=recTipos.find(t=>t.id===r.tipo_id);
+    const prazo=tipo?.prazo_horas||48;
+    r._prazoHoras=r.estado==='encerrada'?-1:(horasAberta>prazo?horasAberta+10000:prazo-horasAberta);
+  });
   applySort('rec',rows);updateSortHeaders('rec');
 
   const abertas=rows.filter(r=>r.estado==='aberta').length;
@@ -7115,12 +7334,13 @@ function scheduleColResize(){
       if(table.dataset.colResizeInit&&ths.length)applyColClasses(table,colProfileFor(table,ths));
       initColResize(table);
     });
+    scheduleTableSort();
   },0);
 }
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.7.3"></script>
+<script src="fretes.js?v=1.7.4"></script>
 <script>
 init();
 initMultiselects();

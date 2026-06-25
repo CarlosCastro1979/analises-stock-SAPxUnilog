@@ -1,5 +1,5 @@
-// fretes.js v1.7.3
-const FRETES_JS_VERSION = '1.7.3';
+// fretes.js v1.7.4
+const FRETES_JS_VERSION = '1.7.4';
 
 const sb = db;
 
@@ -1651,8 +1651,26 @@ function sortRows(list, columns, sortState) {
   });
 }
 
+function fteScheduleTableSort() {
+  if (typeof scheduleTableSort === 'function') scheduleTableSort();
+  else if (typeof enableTableSort === 'function') {
+    document.querySelectorAll('#page-fretes .tbl-wrap table').forEach(t => {
+      if (!t.dataset.managedSort) enableTableSort(t);
+    });
+  }
+}
+
+function fteEnableDomSort(bodyEl) {
+  const table = bodyEl?.closest?.('table');
+  if (table && typeof enableTableSort === 'function') enableTableSort(table);
+}
+
 function renderSortableHead(containerId, columns, sortState, onSort) {
   const tr = $(containerId);
+  if (window.TableSort) {
+    window.TableSort.renderDataHead(tr, columns, sortState, onSort);
+    return;
+  }
   if (!tr) return;
   tr.innerHTML = columns.map(c => {
     const sorted = sortState.col === c.key;
@@ -1673,6 +1691,10 @@ function renderSortableHead(containerId, columns, sortState, onSort) {
 }
 
 function updateSortHeadIndicators(containerId, sortState) {
+  if (window.TableSort) {
+    window.TableSort.updateDataHeadIndicators($(containerId), sortState);
+    return;
+  }
   const tr = $(containerId);
   if (!tr) return;
   tr.querySelectorAll('th.sortable').forEach(th => {
@@ -1915,6 +1937,7 @@ function renderMonthlyTable() {
       fteToast('Filtrado por ' + fmtMesLabel(selectedMonth));
     });
   });
+  fteScheduleTableSort();
 }
 
 function renderAll() {
@@ -2078,9 +2101,8 @@ function renderAnomaliesPanel() {
       fteToast('Anomalias SAP exportadas.');
     });
   }
+  fteEnableDomSort(body);
 }
-
-const CATEGORY_META = {
   ok: { title: 'Conforme (~6%)', cls: 'b-ok' },
   min: { title: 'Tarifa mínima (provável)', cls: 'b-min' },
   dev: { title: 'Com devolução', cls: 'b-dev' },
@@ -3726,6 +3748,7 @@ function renderResumoTotal() {
       <td class="right">${fmtQzDiff(m.deltaQzB2b, 0.5)}</td></tr>`).join('')
       : '<tr><td colspan="9" class="empty">Sem dados mensais — carrega CT-e e quinzenais</td></tr>';
   }
+  fteEnableDomSort(body);
 }
 
 function renderQzB2b() {
@@ -3776,6 +3799,8 @@ function renderQzB2b() {
         <td>${fmtQzStatus(r.status)}</td><td class="right">${pctNote}</td></tr>`;
     }).join('') || '<tr><td colspan="12" class="empty">Sem dados B2B — carrega quinzenais B2B e análise CT-e</td></tr>';
   }
+  fteEnableDomSort(qzBody);
+  fteEnableDomSort(detBody);
 }
 
 function renderQzB2c() {
@@ -3835,6 +3860,9 @@ function renderQzB2c() {
       <td class="right">${fmtPct(r.valorNF ? r.pago / r.valorNF : 0)}</td><td>${r.zona || '-'}</td></tr>`).join('')
       || '<tr><td colspan="8" class="empty">Sem dados B2C</td></tr>';
   }
+  fteEnableDomSort(regBody);
+  fteEnableDomSort(qBody);
+  fteEnableDomSort(detBody);
 }
 
 function exportQuinzenalWorkbook() {
