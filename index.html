@@ -377,7 +377,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.5.9</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.6.0</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1508,7 +1508,7 @@ select.cad-inp{cursor:pointer;}
       <div id="fte-qzEmpty" class="empty"><div class="empty-i">📅</div><div>Carrega os relatórios quinzenais Unilog na secção acima</div></div>
       <p id="fte-qzFileNote" style="display:none;font-size:11px;color:var(--muted);margin:0 0 12px;"></p>
       <div id="fte-qzB2b" style="display:none;">
-        <div class="kpis" id="fte-qzB2bKpis"></div>
+        <div id="fte-qzB2bKpis"></div>
         <div class="section-title">Resumo por mês (B2B)</div>
         <div class="tbl-wrap" style="max-height:280px;margin-bottom:16px;">
           <table><thead><tr>
@@ -1533,7 +1533,7 @@ select.cad-inp{cursor:pointer;}
         </div>
         <div class="tbl-wrap">
           <table><thead><tr>
-            <th>NF</th><th>Quinzena</th><th class="right">Valor NF (QZ)</th><th class="right">Valor NF (CT-e)</th><th class="right">Δ NF</th>
+            <th>NF</th><th class="right">Valor NF (QZ)</th><th class="right">Valor NF (CT-e)</th><th class="right">Δ NF</th>
             <th class="right">Frete (QZ)</th><th class="right">Frete (CT-e)</th><th class="right">Δ frete</th>
             <th class="right">Qtd CT-e (QZ)</th><th class="right">Qtd CT-e (CT-e)</th><th class="right">Δ CT-e</th>
             <th>Estado</th><th>% pago (6%)</th>
@@ -7094,7 +7094,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.5.9"></script>
+<script src="fretes.js?v=1.6.0"></script>
 <script>
 init();
 initMultiselects();

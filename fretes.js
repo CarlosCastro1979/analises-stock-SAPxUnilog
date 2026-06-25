@@ -1,5 +1,5 @@
-// fretes.js v1.5.9
-const FRETES_JS_VERSION = '1.5.9';
+// fretes.js v1.6.0
+const FRETES_JS_VERSION = '1.6.0';
 
 const sb = db;
 
@@ -2949,6 +2949,56 @@ function aggregateB2cMonthGroup(group) {
   return t;
 }
 
+function aggregateB2bMonthGroup(group) {
+  const t = {
+    nfCountQz: 0, nfCountCte: 0,
+    totalValorNFQz: 0, totalValorNFCte: 0,
+    totalPagoQz: 0, totalPagoCte: 0,
+    totalCteQz: 0, totalCteCte: 0
+  };
+  group.forEach(m => {
+    t.nfCountQz += m.nfCountQz;
+    t.nfCountCte += m.nfCountCte;
+    t.totalValorNFQz += m.totalValorNFQz;
+    t.totalValorNFCte += m.totalValorNFCte;
+    t.totalPagoQz += m.totalPagoQz;
+    t.totalPagoCte += m.totalPagoCte;
+    t.totalCteQz += m.totalCteQz;
+    t.totalCteCte += m.totalCteCte;
+  });
+  return t;
+}
+
+function buildB2bMonthDisplayRows(totals) {
+  const out = [];
+  const dated = totals.filter(m => m.mesKey !== 'sem-mes');
+  const noData = totals.filter(m => m.mesKey === 'sem-mes');
+  let lastYear = null;
+  let yearGroup = [];
+
+  dated.forEach(m => {
+    const year = m.mesKey.slice(0, 4);
+    if (lastYear && year !== lastYear && yearGroup.length) {
+      out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...aggregateB2bMonthGroup(yearGroup) });
+      yearGroup = [];
+    }
+    if (year !== lastYear) {
+      out.push({ type: 'year', label: year, year });
+      lastYear = year;
+    }
+    out.push({ type: 'month', ...m });
+    yearGroup.push(m);
+  });
+  if (yearGroup.length && lastYear) {
+    out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...aggregateB2bMonthGroup(yearGroup) });
+  }
+  noData.forEach(m => out.push({ type: 'month', ...m }));
+  if (totals.length) {
+    out.push({ type: 'total', label: 'Total geral', ...aggregateB2bMonthGroup(totals) });
+  }
+  return out;
+}
+
 function buildB2cMonthDisplayRows(totals) {
   const out = [];
   const dated = totals.filter(m => m.mesKey !== 'sem-mes');
@@ -3020,6 +3070,36 @@ function renderB2cKpiBlock(label, stats) {
       <div class="kpi"><div class="label">% frete/vendas</div><div class="value">${fmtPct(stats.pctFrete)}</div></div>
     </div>
   </div>`;
+}
+
+function renderB2bCompareKpis(monthTotals) {
+  const t = aggregateB2bMonthGroup(monthTotals || []);
+  return `<div class="qz-year-kpi-block">
+    <div class="qz-year-kpi-label">Faturação (valor NF)</div>
+    <div class="kpis">
+      <div class="kpi"><div class="label">Faturação QZ</div><div class="value">${fmtMoney(t.totalValorNFQz)}</div></div>
+      <div class="kpi"><div class="label">Faturação CT-e</div><div class="value">${fmtMoney(t.totalValorNFCte)}</div></div>
+      <div class="kpi flag"><div class="label">Δ total</div><div class="value">${fmtQzDiff(t.totalValorNFCte - t.totalValorNFQz, 1)}</div></div>
+    </div>
+  </div>
+  <div class="qz-year-kpi-block">
+    <div class="qz-year-kpi-label">Fretes cobrados</div>
+    <div class="kpis">
+      <div class="kpi"><div class="label">Frete QZ</div><div class="value">${fmtMoney(t.totalPagoQz)}</div></div>
+      <div class="kpi"><div class="label">Frete CT-e</div><div class="value">${fmtMoney(t.totalPagoCte)}</div></div>
+      <div class="kpi flag"><div class="label">Δ total</div><div class="value">${fmtQzDiff(t.totalPagoCte - t.totalPagoQz, 0.5)}</div></div>
+    </div>
+  </div>`;
+}
+
+function renderB2bMonthTableRow(label, m, rowClass) {
+  return `<tr class="${rowClass || 'qz-month-row'}"><td><strong>${label}</strong></td>
+    <td class="right">${m.nfCountQz}</td><td class="right">${m.nfCountCte}</td><td class="right">${m.nfCountCte - m.nfCountQz}</td>
+    <td class="right">${fmtMoney(m.totalValorNFQz)}</td><td class="right">${fmtMoney(m.totalValorNFCte)}</td>
+    <td class="right">${fmtQzDiff(m.totalValorNFCte - m.totalValorNFQz, 1)}</td>
+    <td class="right">${fmtMoney(m.totalPagoQz)}</td><td class="right">${fmtMoney(m.totalPagoCte)}</td>
+    <td class="right">${fmtQzDiff(m.totalPagoCte - m.totalPagoQz, 0.5)}</td>
+    <td class="right">${m.totalCteQz}</td><td class="right">${m.totalCteCte}</td><td class="right">${m.totalCteCte - m.totalCteQz}</td></tr>`;
 }
 
 function buildB2BCompare(b2bRows) {
@@ -3446,46 +3526,23 @@ async function renderQuinzenalTab() {
 
 function renderQzB2b() {
   const rows = quinzenalPack.b2bCompare || [];
-  const sum = qzCompareSummary(rows);
+  const monthTotals = quinzenalPack.b2bMonthTotals || [];
   const kpis = $('qzB2bKpis');
-  if (kpis) kpis.innerHTML = `
-    <div class="kpi"><div class="label">NFs comparadas</div><div class="value">${sum.total}</div></div>
-    <div class="kpi flag"><div class="label">Só quinzenal</div><div class="value">${sum.onlyQz}</div></div>
-    <div class="kpi flag"><div class="label">Só CT-e</div><div class="value">${sum.onlyCte}</div></div>
-    <div class="kpi"><div class="label">Com diferença</div><div class="value">${sum.diff}</div></div>
-    <div class="kpi"><div class="label">Δ valor NF</div><div class="value">${sum.diffValor}</div></div>
-    <div class="kpi"><div class="label">Conformes</div><div class="value">${sum.match}</div></div>`;
+  if (kpis) kpis.innerHTML = renderB2bCompareKpis(monthTotals);
 
   const qzBody = $('qzB2bQuinzenaBody');
   if (qzBody) {
-    const totals = quinzenalPack.b2bMonthTotals || [];
-    const qzByMes = qzByMesKey(quinzenalPack.b2bQuinzenaTotals || buildB2BQuinzenaTotals(quinzenalPack.b2bRows || []));
-    let tQz = { nf: 0, val: 0, frete: 0, cte: 0, nfC: 0, valC: 0, freteC: 0, cteC: 0 };
-    qzBody.innerHTML = totals.map(t => {
-      tQz.nf += t.nfCountQz; tQz.val += t.totalValorNFQz; tQz.frete += t.totalPagoQz; tQz.cte += t.totalCteQz;
-      tQz.nfC += t.nfCountCte; tQz.valC += t.totalValorNFCte; tQz.freteC += t.totalPagoCte; tQz.cteC += t.totalCteCte;
-      const qzRows = qzByMes[t.mesKey] || [];
-      const hasQz = qzRows.length > 0;
-      const expanded = qzExpandedMonths.has(qzExpandKey('b2b', t.mesKey));
-      const chev = hasQz ? `<span class="qz-chevron">${expanded ? '▾' : '▸'}</span> ` : '';
-      let html = `<tr class="qz-month-row${hasQz ? ' qz-expandable' : ''}${expanded ? ' expanded' : ''}" data-panel="b2b" data-mes="${t.mesKey}">
-        <td>${chev}<strong>${t.mesLabel}</strong></td>
-        <td class="right">${t.nfCountQz}</td><td class="right">${t.nfCountCte}</td><td class="right">${t.nfCountCte - t.nfCountQz}</td>
-        <td class="right">${fmtMoney(t.totalValorNFQz)}</td><td class="right">${fmtMoney(t.totalValorNFCte)}</td>
-        <td class="right">${fmtQzDiff(t.totalValorNFCte - t.totalValorNFQz, 1)}</td>
-        <td class="right">${fmtMoney(t.totalPagoQz)}</td><td class="right">${fmtMoney(t.totalPagoCte)}</td>
-        <td class="right">${fmtQzDiff(t.totalPagoCte - t.totalPagoQz, 0.5)}</td>
-        <td class="right">${t.totalCteQz}</td><td class="right">${t.totalCteCte}</td><td class="right">${t.totalCteCte - t.totalCteQz}</td></tr>`;
-      if (expanded && hasQz) html += qzRows.map(renderB2bQuinzenaRow).join('');
-      return html;
-    }).join('') + `<tr class="month-total-row"><td><strong>Total geral</strong></td>
-      <td class="right">${tQz.nf}</td><td class="right">${tQz.nfC}</td><td class="right">${tQz.nfC - tQz.nf}</td>
-      <td class="right">${fmtMoney(tQz.val)}</td><td class="right">${fmtMoney(tQz.valC)}</td>
-      <td class="right">${fmtQzDiff(tQz.valC - tQz.val, 1)}</td>
-      <td class="right">${fmtMoney(tQz.frete)}</td><td class="right">${fmtMoney(tQz.freteC)}</td>
-      <td class="right">${fmtQzDiff(tQz.freteC - tQz.frete, 0.5)}</td>
-      <td class="right">${tQz.cte}</td><td class="right">${tQz.cteC}</td><td class="right">${tQz.cteC - tQz.cte}</td></tr>`;
-    bindQzExpandClicks(qzBody, 'b2b');
+    const displayRows = buildB2bMonthDisplayRows(monthTotals);
+    qzBody.innerHTML = displayRows.map(row => {
+      if (row.type === 'year') {
+        return `<tr class="month-year-row"><td colspan="13"><strong>${row.label}</strong></td></tr>`;
+      }
+      if (row.type === 'subtotal' || row.type === 'total') {
+        const cls = row.type === 'total' ? 'month-total-row' : 'month-subtotal-row';
+        return renderB2bMonthTableRow(row.label, row, cls);
+      }
+      return renderB2bMonthTableRow(row.mesLabel, row, 'qz-month-row');
+    }).join('');
   }
 
   const qFilter = $('qzFilterQuinzena')?.value || '';
@@ -3505,14 +3562,14 @@ function renderQzB2b() {
     detBody.innerHTML = list.slice(0, 2000).map(r => {
       const cls = r.status === 'onlyQz' || r.status === 'onlyCte' ? 'qz-only-row' : (r.status === 'diff' ? 'qz-diff-row' : '');
       const pctNote = r.valorNFQz > 0 && r.pagoQz > 0 ? fmtPct(r.pagoQz / r.valorNFQz) : '-';
-      return `<tr class="${cls}"><td>${r.nf}</td><td>${r.quinzenaLabel || '-'}</td>
+      return `<tr class="${cls}"><td>${r.nf}</td>
         <td class="right">${r.valorNFQz ? fmtMoney(r.valorNFQz) : '-'}</td><td class="right">${r.valorNFCte ? fmtMoney(r.valorNFCte) : '-'}</td>
         <td class="right">${fmtQzDiff(r.diffValorNF, 1)}</td>
         <td class="right">${r.pagoQz ? fmtMoney(r.pagoQz) : '-'}</td><td class="right">${r.pagoCte ? fmtMoney(r.pagoCte) : '-'}</td>
         <td class="right">${fmtQzDiff(r.diffPago, 0.5)}</td>
         <td class="right">${r.nCteQz || '-'}</td><td class="right">${r.nCteCte || '-'}</td><td class="right">${r.diffCte || 0}</td>
         <td>${fmtQzStatus(r.status)}</td><td class="right">${pctNote}</td></tr>`;
-    }).join('') || '<tr><td colspan="13" class="empty">Sem dados B2B — carrega quinzenais B2B e análise CT-e</td></tr>';
+    }).join('') || '<tr><td colspan="12" class="empty">Sem dados B2B — carrega quinzenais B2B e análise CT-e</td></tr>';
   }
 }
 
@@ -3602,7 +3659,7 @@ function exportQuinzenalWorkbook() {
   }));
   if (resumo.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), 'Resumo B2B mensal');
   const b2b = (quinzenalPack.b2bCompare || []).map(r => ({
-    NF: r.nf, Quinzena: r.quinzenaLabel, 'Valor NF QZ': r.valorNFQz, 'Valor NF CT-e': r.valorNFCte, 'Δ valor NF': r.diffValorNF,
+    NF: r.nf, Mês: r.mesLabel || r.mesKey, 'Valor NF QZ': r.valorNFQz, 'Valor NF CT-e': r.valorNFCte, 'Δ valor NF': r.diffValorNF,
     'Frete QZ': r.pagoQz, 'Frete CT-e': r.pagoCte, 'Δ frete': r.diffPago,
     'Qtd CT-e QZ': r.nCteQz, 'Qtd CT-e CT-e': r.nCteCte, 'Δ CT-e': r.diffCte, Estado: r.status,
     '% pago QZ (6%)': r.valorNFQz > 0 ? r.pagoQz / r.valorNFQz : null
