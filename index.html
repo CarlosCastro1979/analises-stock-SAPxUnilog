@@ -1487,6 +1487,10 @@ select.cad-inp{cursor:pointer;}
     </div>
 
     <div id="fte-tab-quinzenal" style="display:none;">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+        <button class="btn bg bs" id="fte-exportQzBtn" type="button">Exportar Excel quinzenal</button>
+      </div>
+      <div id="fte-qzWarn" class="data-warn" style="display:none;"></div>
       <div class="qz-subtabs">
         <div class="qz-subtab active" data-qz="b2b">B2B — vs CT-e</div>
         <div class="qz-subtab" data-qz="b2c">B2C — vendas e fretes</div>
@@ -7061,7 +7065,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.5.1"></script>
+<script src="fretes.js?v=1.5.2"></script>
 <script>
 init();
 initMultiselects();

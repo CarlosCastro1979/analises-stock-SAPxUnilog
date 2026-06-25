@@ -1,5 +1,5 @@
-// fretes.js v1.5.1
-const FRETES_JS_VERSION = '1.5.1';
+// fretes.js v1.5.2
+const FRETES_JS_VERSION = '1.5.2';
 
 const sb = db;
 
@@ -2537,7 +2537,8 @@ function normalizeQzB2BRow(row) {
 function normalizeQzB2CRow(row) {
   const chave = findQzField(row, 'chaveNF', QZ_B2C_ALIASES);
   const pedido = findQzField(row, 'pedido', QZ_B2C_ALIASES);
-  let nf = nfFromNfeKey(chave);
+  const nfRaw = chave && /^\d{1,12}$/.test(String(chave).trim()) ? String(chave).trim() : null;
+  let nf = nfRaw || nfFromNfeKey(chave);
   if (!nf && pedido) nf = String(pedido).trim();
   return {
     pedido, nf, chaveNF: chave,
@@ -2879,6 +2880,13 @@ function renderQuinzenalTab() {
   const empty = $('qzEmpty');
   const b2bPanel = $('qzB2b');
   const b2cPanel = $('qzB2c');
+  const warn = $('qzWarn');
+  if (warn) {
+    if (quinzenalPack?.b2bRows?.length && !currentNFs.length) {
+      warn.style.display = 'block';
+      warn.innerHTML = '<strong>Análise CT-e não carregada:</strong> processa o Excel CT-e/NF na secção acima para comparar B2B quinzenal vs CT-e.';
+    } else warn.style.display = 'none';
+  }
   if (!quinzenalPack?.files?.length) {
     if (empty) empty.style.display = 'block';
     if (b2bPanel) b2bPanel.style.display = 'none';
@@ -3007,6 +3015,34 @@ function renderQzB2c() {
   }
 }
 
+function exportQuinzenalWorkbook() {
+  if (!quinzenalPack?.files?.length) { fteToast('Sem dados quinzenais.'); return; }
+  refreshQuinzenalCompare();
+  const wb = XLSX.utils.book_new();
+  const resumo = (quinzenalPack.b2bQuinzenaTotals || []).map(t => ({
+    Quinzena: t.quinzenaLabel, 'NFs QZ': t.nfCountQz, 'NFs CT-e': t.nfCountCte, 'Δ NFs': t.nfCountCte - t.nfCountQz,
+    'Faturação QZ': t.totalValorNFQz, 'Faturação CT-e': t.totalValorNFCte, 'Δ valor NF': t.totalValorNFCte - t.totalValorNFQz,
+    'Frete QZ': t.totalPagoQz, 'Frete CT-e': t.totalPagoCte, 'Δ frete': t.totalPagoCte - t.totalPagoQz,
+    'CT-e QZ': t.totalCteQz, 'CT-e CT-e': t.totalCteCte, 'Δ CT-e': t.totalCteCte - t.totalCteQz
+  }));
+  if (resumo.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), 'Resumo B2B');
+  const b2b = (quinzenalPack.b2bCompare || []).map(r => ({
+    NF: r.nf, Quinzena: r.quinzenaLabel, 'Valor NF QZ': r.valorNFQz, 'Valor NF CT-e': r.valorNFCte, 'Δ valor NF': r.diffValorNF,
+    'Frete QZ': r.pagoQz, 'Frete CT-e': r.pagoCte, 'Δ frete': r.diffPago,
+    'Qtd CT-e QZ': r.nCteQz, 'Qtd CT-e CT-e': r.nCteCte, 'Δ CT-e': r.diffCte, Estado: r.status,
+    '% pago QZ (6%)': r.valorNFQz > 0 ? r.pagoQz / r.valorNFQz : null
+  }));
+  if (b2b.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2b), 'Diff B2B');
+  const b2c = (quinzenalPack.b2cRows || []).map(r => ({
+    Pedido: r.pedido, NF: r.nf, Quinzena: r.quinzenaLabel, 'Data coleta': r.dtColeta || r.dtNF,
+    Destinatário: r.destinatario, Transportador: r.transportador, Vendas: r.valorNF, Frete: r.pago,
+    '% frete/vendas': r.valorNF ? r.pago / r.valorNF : null, Região: r.zona
+  }));
+  if (b2c.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(b2c), 'B2C');
+  downloadWorkbook(wb, `Unilog_quinzenal_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  fteToast('Excel quinzenal exportado.');
+}
+
 function reloadFretesForCompany() {
   _fteLoadedCompany = null;
   currentNFs = [];
@@ -3131,6 +3167,7 @@ function initFretes() {
   $('exportFilteredBtn').addEventListener('click', () => exportFilteredView());
   $('exportHistoryBtn').addEventListener('click', () => exportHistoryWorkbook());
   $('exportMensalBtn').addEventListener('click', () => exportMonthlyWorkbook());
+  $('exportQzBtn')?.addEventListener('click', () => exportQuinzenalWorkbook());
 
   ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff', 'filterSapMissing'].forEach(id => {
     const el = $(id);
