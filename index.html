@@ -377,7 +377,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.0</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.1</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1511,13 +1511,13 @@ select.cad-inp{cursor:pointer;}
         <div class="tbl-wrap" style="max-height:240px;margin-bottom:16px;">
           <table><thead><tr>
             <th>Região</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th>
-            <th class="right">Frete pago</th><th class="right">% frete/vendas</th><th class="right">Preço médio</th>
+            <th class="right">Frete pago</th><th class="right">% frete/vendas</th><th class="right">Frete médio</th>
           </tr></thead><tbody id="fte-qzB2cRegionBody"></tbody></table>
         </div>
         <div class="section-title">Resumo por mês (B2C)</div>
         <div class="tbl-wrap" style="max-height:280px;margin-bottom:16px;">
           <table><thead><tr>
-            <th>Mês</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th><th class="right">Frete pago</th><th class="right">% frete/vendas</th>
+            <th>Mês</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th><th class="right">Frete pago</th><th class="right">% frete/vendas</th><th class="right">Frete médio</th>
           </tr></thead><tbody id="fte-qzB2cQuinzenaBody"></tbody></table>
         </div>
         <div class="section-title">Detalhe B2C</div>
@@ -7120,7 +7120,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.7.0"></script>
+<script src="fretes.js?v=1.7.1"></script>
 <script>
 init();
 initMultiselects();
