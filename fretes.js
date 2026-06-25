@@ -1,5 +1,5 @@
-// fretes.js v1.4.8
-const FRETES_JS_VERSION = '1.4.8';
+// fretes.js v1.4.9
+const FRETES_JS_VERSION = '1.4.9';
 
 const sb = db;
 
@@ -16,7 +16,7 @@ let currentUploadId = null;
 let isSaving = false;
 let tableSort = { col: 'diff', dir: -1 };
 let subTableSort = { col: 'diff', dir: -1 };
-let monthSort = { col: 'excesso', dir: -1 };
+let monthSort = { col: 'mesRef', dir: 1 };
 let selectedMonth = '';
 let monthlyRows = [];
 let historyCache = [];
@@ -163,7 +163,7 @@ const ANOMALY_COLUMNS = [
 ];
 
 const MONTH_COLUMNS = [
-  { key: 'mesLabel', label: 'Mês', type: 'string' },
+  { key: 'mesRef', label: 'Mês', type: 'mesRef' },
   { key: 'totalNF', label: 'NFs', type: 'number', right: true },
   { key: 'totalValorNF', label: 'Faturação', type: 'number', right: true },
   { key: 'totalPago', label: 'Pago', type: 'number', right: true },
@@ -1287,6 +1287,135 @@ function fmtMesLabel(key) {
   return `${MESES_PT[Number(m) - 1]}/${y}`;
 }
 
+function mesRefSortKey(mesRef) {
+  return mesRef === 'sem-data' ? '9999-99' : (mesRef || '9999-99');
+}
+
+function compareMesRef(a, b) {
+  return mesRefSortKey(a).localeCompare(mesRefSortKey(b));
+}
+
+function sortMonthlyRows(rows, sortState) {
+  const colDef = MONTH_COLUMNS.find(c => c.key === sortState.col) || MONTH_COLUMNS[0];
+  if (colDef.key === 'mesRef') {
+    const dir = sortState.dir;
+    return [...rows].sort((a, b) => compareMesRef(a.mesRef, b.mesRef) * dir);
+  }
+  return sortRows(rows, MONTH_COLUMNS, sortState);
+}
+
+function aggregateMonthTotals(rows) {
+  const t = {
+    totalNF: 0, totalValorNF: 0, totalPago: 0, totalEsperado: 0, excesso: 0,
+    qtd_ok: 0, qtd_min: 0, qtd_dev: 0, qtd_flag: 0, qtd_low: 0
+  };
+  rows.forEach(m => {
+    t.totalNF += m.totalNF;
+    t.totalValorNF += m.totalValorNF;
+    t.totalPago += m.totalPago;
+    t.totalEsperado += m.totalEsperado;
+    t.excesso += m.excesso;
+    t.qtd_ok += m.qtd_ok;
+    t.qtd_min += m.qtd_min;
+    t.qtd_dev += m.qtd_dev;
+    t.qtd_flag += m.qtd_flag;
+    t.qtd_low += m.qtd_low;
+  });
+  t.pctPagoSobreNF = t.totalValorNF ? t.totalPago / t.totalValorNF : 0;
+  t.excessoPct = t.totalEsperado ? t.excesso / t.totalEsperado : 0;
+  return t;
+}
+
+function buildMonthlyDisplayRows(sorted) {
+  const out = [];
+  const dated = sorted.filter(m => m.mesRef !== 'sem-data');
+  const noData = sorted.filter(m => m.mesRef === 'sem-data');
+  let lastYear = null;
+  let yearGroup = [];
+
+  dated.forEach(m => {
+    const year = m.mesRef.slice(0, 4);
+    if (lastYear && year !== lastYear && yearGroup.length) {
+      out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...aggregateMonthTotals(yearGroup) });
+      yearGroup = [];
+    }
+    if (year !== lastYear) {
+      out.push({ type: 'year', label: year, year });
+      lastYear = year;
+    }
+    out.push({ type: 'month', ...m });
+    yearGroup.push(m);
+  });
+  if (yearGroup.length && lastYear) {
+    out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...aggregateMonthTotals(yearGroup) });
+  }
+  noData.forEach(m => out.push({ type: 'month', ...m }));
+  if (sorted.length) {
+    out.push({ type: 'total', label: 'Total geral', ...aggregateMonthTotals(sorted) });
+  }
+  return out;
+}
+
+
+function monthExportRowFull(m, label) {
+  return {
+    'Mês': label || m.mesLabel,
+    'NFs': m.totalNF,
+    'Faturação': m.totalValorNF,
+    'Pago': m.totalPago,
+    'Esperado (6%)': m.totalEsperado,
+    'Excesso': m.excesso,
+    '% pago/NF': m.pctPagoSobreNF,
+    'Excesso % vs esperado': m.excessoPct,
+    'Conformes': m.qtd_ok,
+    'Tarifa mínima': m.qtd_min,
+    'Com devolução': m.qtd_dev,
+    'A investigar': m.qtd_flag,
+    'Abaixo': m.qtd_low
+  };
+}
+
+function buildMonthlyExportRowsFull(rows) {
+  const sorted = [...rows].sort((a, b) => compareMesRef(a.mesRef, b.mesRef));
+  const out = [];
+  const dated = sorted.filter(m => m.mesRef !== 'sem-data');
+  const noData = sorted.filter(m => m.mesRef === 'sem-data');
+  let lastYear = null;
+  let yearGroup = [];
+
+  dated.forEach(m => {
+    const year = m.mesRef.slice(0, 4);
+    if (lastYear && year !== lastYear && yearGroup.length) {
+      out.push(monthExportRowFull(aggregateMonthTotals(yearGroup), `Total ${lastYear}`));
+      yearGroup = [];
+    }
+    out.push(monthExportRowFull(m));
+    yearGroup.push(m);
+    lastYear = year;
+  });
+  if (yearGroup.length && lastYear) {
+    out.push(monthExportRowFull(aggregateMonthTotals(yearGroup), `Total ${lastYear}`));
+  }
+  noData.forEach(m => out.push(monthExportRowFull(m)));
+  if (sorted.length) out.push(monthExportRowFull(aggregateMonthTotals(sorted), 'Total geral'));
+  return out;
+}
+
+function buildMonthlyExportRows(rows) {
+  return buildMonthlyExportRowsFull(rows).map(r => ({
+    'Mês': r['Mês'],
+    'NFs': r['NFs'],
+    'Faturação': r['Faturação'],
+    'Pago': r['Pago'],
+    'Esperado (6%)': r['Esperado (6%)'],
+    'Excesso': r['Excesso'],
+    '% pago/NF': r['% pago/NF'],
+    'Tarifa mínima': r['Tarifa mínima'],
+    'A investigar': r['A investigar'],
+    'Conformes': r['Conformes']
+  }));
+}
+
 function enrichNF(nf) {
   if (nf.mesRef) return nf;
   let d = nf.dtNF ? (parseSapBrDate(nf.dtNF) || (nf.dtNF instanceof Date && isPlausibleSapDate(nf.dtNF) ? nf.dtNF : null)) : null;
@@ -1322,11 +1451,12 @@ function computeMonthly(list) {
     ...b,
     pctPagoSobreNF: b.totalValorNF ? b.totalPago / b.totalValorNF : 0,
     excessoPct: b.totalEsperado ? b.excesso / b.totalEsperado : 0
-  })).sort((a, b) => a.mesRef.localeCompare(b.mesRef));
+  })).sort((a, b) => compareMesRef(a.mesRef, b.mesRef));
 }
 
 function sortValue(row, col, type) {
   if (type === 'status') return (statusMeta[row.status] || {}).label || row.status || '';
+  if (type === 'mesRef') return mesRefSortKey(row.mesRef);
   if (type === 'number') return num(row[col]);
   if (type === 'date') {
     const d = row[col];
@@ -1499,18 +1629,7 @@ function exportFullWorkbook() {
   const ctes = cteExportRows();
   if (ctes.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ctes), 'CT-e');
 
-  const mensal = monthlyRows.map(m => ({
-    'Mês': m.mesLabel,
-    'NFs': m.totalNF,
-    'Faturação': m.totalValorNF,
-    'Pago': m.totalPago,
-    'Esperado (6%)': m.totalEsperado,
-    'Excesso': m.excesso,
-    '% pago/NF': m.pctPagoSobreNF,
-    'Tarifa mínima': m.qtd_min,
-    'A investigar': m.qtd_flag,
-    'Conformes': m.qtd_ok
-  }));
+  const mensal = buildMonthlyExportRows(monthlyRows);
   if (mensal.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mensal), 'Por mês');
 
   const stamp = new Date().toISOString().slice(0, 10);
@@ -1539,21 +1658,7 @@ function exportFilteredView() {
 function exportMonthlyWorkbook() {
   if (!monthlyRows.length) { fteToast('Sem dados mensais.'); return; }
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(monthlyRows.map(m => ({
-    'Mês': m.mesLabel,
-    'NFs': m.totalNF,
-    'Faturação': m.totalValorNF,
-    'Pago': m.totalPago,
-    'Esperado (6%)': m.totalEsperado,
-    'Excesso': m.excesso,
-    '% pago/NF': m.pctPagoSobreNF,
-    'Excesso % vs esperado': m.excessoPct,
-    'Conformes': m.qtd_ok,
-    'Tarifa mínima': m.qtd_min,
-    'Com devolução': m.qtd_dev,
-    'A investigar': m.qtd_flag,
-    'Abaixo': m.qtd_low
-  }))), 'Resumo mensal');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(buildMonthlyExportRowsFull(monthlyRows)), 'Resumo mensal');
   const det = [];
   monthlyRows.forEach(m => {
     m.items.forEach(x => det.push({ ...nfExportRow(x), 'Mês': m.mesLabel }));
@@ -1617,15 +1722,32 @@ function renderMonthlyTable() {
   }
   monthlyRows = computeMonthly(currentNFs);
   renderSortableHead('monthTableHead', MONTH_COLUMNS, monthSort, renderMonthlyTable);
-  const sorted = sortRows(monthlyRows, MONTH_COLUMNS, monthSort);
+  const sorted = sortMonthlyRows(monthlyRows, monthSort);
+  const groupByYear = monthSort.col === 'mesRef';
+  const displayRows = groupByYear
+    ? buildMonthlyDisplayRows(sorted)
+    : [
+      ...sorted.map(m => ({ type: 'month', ...m })),
+      ...(sorted.length ? [{ type: 'total', label: 'Total geral', ...aggregateMonthTotals(sorted) }] : [])
+    ];
   const maxExcesso = Math.max(...sorted.map(m => m.excesso), 0);
 
   const body = $('monthTableBody');
-  body.innerHTML = sorted.map(m => {
-    const high = m.excesso > 0 && m.excesso >= maxExcesso * 0.85;
-    const active = selectedMonth === m.mesRef;
-    return `<tr class="month-row-clickable${high ? ' month-row-high' : ''}${active ? ' active-month' : ''}" data-mes="${m.mesRef}">
-      <td><strong>${m.mesLabel}</strong></td>
+  body.innerHTML = displayRows.map(row => {
+    if (row.type === 'year') {
+      return `<tr class="month-year-row"><td colspan="9"><strong>${row.label}</strong></td></tr>`;
+    }
+    const isTotal = row.type === 'subtotal' || row.type === 'total';
+    const m = row;
+    const high = !isTotal && m.excesso > 0 && m.excesso >= maxExcesso * 0.85;
+    const active = !isTotal && selectedMonth === m.mesRef;
+    const label = row.type === 'month' ? m.mesLabel : row.label;
+    const trCls = isTotal
+      ? (row.type === 'total' ? 'month-total-row' : 'month-subtotal-row')
+      : `month-row-clickable${high ? ' month-row-high' : ''}${active ? ' active-month' : ''}`;
+    const dataMes = row.type === 'month' ? ` data-mes="${m.mesRef}"` : '';
+    return `<tr class="${trCls}"${dataMes}>
+      <td><strong>${label}</strong></td>
       <td class="right">${m.totalNF}</td>
       <td class="right">${fmtMoney(m.totalValorNF)}</td>
       <td class="right">${fmtMoney(m.totalPago)}</td>
