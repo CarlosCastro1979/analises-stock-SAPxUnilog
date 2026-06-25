@@ -1,5 +1,5 @@
-// fretes.js v1.4.9
-const FRETES_JS_VERSION = '1.4.9';
+// fretes.js v1.5.1
+const FRETES_JS_VERSION = '1.5.1';
 
 const sb = db;
 
@@ -26,6 +26,9 @@ let fteCteFileName = '';
 let fteCteBuffer = null;
 let fteSapFileName = '';
 let fteSapBuffer = null;
+let fteQzPendingFiles = [];
+let quinzenalPack = null;
+let activeQzPanel = 'b2b';
 
 function fteCompany() {
   return typeof company !== 'undefined' ? company : 'DFB';
@@ -37,6 +40,10 @@ function fteCteSlot() {
 
 function fteSapSlot() {
   return typeof EXCEL_SLOTS !== 'undefined' ? EXCEL_SLOTS.FRETES_SAP_NF : 'fretes_sap_nf';
+}
+
+function fteQuinzenalSlot() {
+  return typeof EXCEL_SLOTS !== 'undefined' ? EXCEL_SLOTS.FRETES_QUINZENAL : 'fretes_quinzenal';
 }
 
 function setCteZoneLoaded(name) {
@@ -106,12 +113,20 @@ function updateFretesFileStatus(meta) {
 }
 
 async function persistFretesFile(slot, fileName, arrayBuffer) {
-  if (typeof upsertExcelBinary !== 'function') return;
+  if (typeof upsertExcelBinary !== 'function') {
+    fteToastError('Persistência Excel indisponível — recarrega a página.');
+    return;
+  }
   try {
     await upsertExcelBinary(slot, fileName, arrayBuffer);
     updateFretesFileStatus();
   } catch (err) {
     console.error('[fretes] persist', err);
+    if (typeof isExcelFilesTableMissing === 'function' && isExcelFilesTableMissing(err)) {
+      fteToastError('Tabela logistica_excel_files em falta no Supabase.');
+    } else {
+      fteToastError('Erro ao guardar Excel: ' + (err.message || err));
+    }
   }
 }
 
@@ -1858,6 +1873,10 @@ function renderAll() {
   renderAnomaliesPanel();
   renderTable();
   renderMonthlyTable();
+  if (quinzenalPack?.b2bRows?.length) {
+    refreshQuinzenalCompare();
+    if ($('tab-quinzenal')?.style.display === 'block') renderQuinzenalTab();
+  }
 }
 
 function renderAnomaliesPanel() {
@@ -2337,13 +2356,23 @@ async function loadHistory() {
 }
 
 async function loadSavedFretesFiles(silent = false) {
-  if (typeof fetchExcelFiles !== 'function' || typeof base64ToArrayBuffer !== 'function') return false;
+  if (typeof fetchExcelFiles !== 'function' || typeof base64ToArrayBuffer !== 'function') {
+    if (!silent) fteToastError('Persistência Excel indisponível — recarrega a página.');
+    return false;
+  }
   const co = fteCompany();
   let meta;
   try {
     meta = await fetchExcelFiles([fteCteSlot(), fteSapSlot()]);
   } catch (err) {
     console.error('[fretes] load saved', err);
+    if (!silent) {
+      if (typeof isExcelFilesTableMissing === 'function' && isExcelFilesTableMissing(err)) {
+        fteToastError('Tabela logistica_excel_files em falta no Supabase.');
+      } else {
+        fteToastError('Erro ao carregar ficheiros: ' + (err.message || err));
+      }
+    }
     return false;
   }
 
@@ -2352,6 +2381,11 @@ async function loadSavedFretesFiles(silent = false) {
   const sapRec = meta[fteSapSlot()];
 
   if (!cteRec?.file_data) {
+    if (cteRec?.file_name && !silent) {
+      fteToastError('CT-e guardado só com nome — clica Processar e Guardar para persistir o ficheiro.');
+    } else if (!cteRec && !silent) {
+      fteToastError('Sem ficheiros CT-e guardados para ' + co + '.');
+    }
     if (_fteLoadedCompany === co && currentNFs.length) return true;
     return false;
   }
@@ -2396,6 +2430,583 @@ async function loadSavedFretesFiles(silent = false) {
   }
 }
 
+// ── QUINZENAL UNILOG (B2B diff vs CT-e · B2C vendas/fretes) ──
+
+const QZ_MESES = {
+  janeiro: 1, fevereiro: 2, marco: 3, março: 3, abril: 4, maio: 5, junho: 6,
+  julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12
+};
+
+const QZ_B2B_ALIASES = {
+  nf: ['nota fiscal', 'nf', 'n nota fiscal'],
+  valorNF: ['valor nf', 'valor da nf', 'vl nf'],
+  numCte: ['num. cte', 'num cte', 'numero cte', 'numeros cte', 'n cte'],
+  pago: ['total fatura rev.', 'total fatura rev', 'total fatura', 'valor fatura'],
+  transportador: ['transportador', 'transportadora'],
+  dtNF: ['dt nf', 'data nf', 'data nota fiscal'],
+  destinatario: ['destinatario', 'destinatário']
+};
+
+const QZ_B2C_ALIASES = {
+  pedido: ['numero pedido', 'número pedido', 'n pedido', 'pedido'],
+  chaveNF: ['chaves acesso nf', 'chave acesso nf', 'chave nf', 'numeros nf', 'números nf'],
+  dtColeta: ['data da coleta', 'data coleta'],
+  dtNF: ['datas de emissao nf', 'datas de emissão nf', 'data emissao nf'],
+  numCte: ['numeros ct-e', 'numeros cte', 'números ct-e', 'numero ct-e'],
+  transportador: ['nome transportadora', 'transportadora', 'transportador'],
+  destinatario: ['nome destinatario', 'nome destinatário', 'destinatario', 'destinatário'],
+  valorProdutos: ['valor produtos', 'vl produtos'],
+  valorNF: ['total nf', 'valor total nf'],
+  pago: ['valor fatura', 'total fatura', 'frete'],
+  zona: ['zona entrega', 'regiao entrega', 'região entrega']
+};
+
+function findQzField(row, field, aliasesMap) {
+  const aliases = aliasesMap[field];
+  const entries = Object.entries(row);
+  for (const alias of aliases) {
+    const hit = entries.find(([k]) => normCol(k) === alias);
+    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[1];
+  }
+  for (const alias of aliases) {
+    const hit = entries.find(([k]) => {
+      const nk = normCol(k);
+      return nk.includes(alias) || alias.includes(nk);
+    });
+    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[1];
+  }
+  return null;
+}
+
+function nfFromNfeKey(key) {
+  const s = String(key || '').replace(/\D/g, '');
+  if (s.length >= 44) return s.slice(25, 34).replace(/^0+/, '') || '0';
+  if (s.length >= 9) return s.slice(-9).replace(/^0+/, '') || '0';
+  return s.replace(/^0+/, '') || '';
+}
+
+function parseQuinzenalFileName(name) {
+  const canal = /B2B/i.test(name) ? 'B2B' : (/B2C/i.test(name) ? 'B2C' : null);
+  const quinzena = /1\s*ª?\s*Q|1aQ/i.test(name) ? 1 : (/2\s*ª?\s*Q|2aQ/i.test(name) ? 2 : null);
+  let mes = null;
+  let ano = null;
+  const ym = name.match(/(\d{4})\s*$/);
+  if (ym) ano = parseInt(ym[1], 10);
+  const norm = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  for (const [k, v] of Object.entries(QZ_MESES)) {
+    const kk = k.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (norm.includes(kk)) { mes = v; break; }
+  }
+  const quinzenaKey = ano && mes && quinzena ? `${ano}-${String(mes).padStart(2, '0')}-Q${quinzena}` : null;
+  const qLabel = quinzena && mes && ano ? `${quinzena}ªQ ${MESES_PT[mes - 1]}/${ano}` : name;
+  return { canal, quinzena, mes, ano, quinzenaKey, quinzenaLabel: qLabel, fileName: name };
+}
+
+function quinzenaDateRange(meta) {
+  if (!meta?.ano || !meta?.mes || !meta?.quinzena) return null;
+  const start = new Date(meta.ano, meta.mes - 1, meta.quinzena === 1 ? 1 : 16);
+  start.setHours(0, 0, 0, 0);
+  const end = meta.quinzena === 1
+    ? new Date(meta.ano, meta.mes - 1, 15, 23, 59, 59, 999)
+    : new Date(meta.ano, meta.mes, 0, 23, 59, 59, 999);
+  return { start, end };
+}
+
+function isQzB2BHeader(cells) {
+  const n = cells.map(c => normCol(c));
+  return n.some(c => c === 'nota fiscal' || c === 'nf') && n.some(c => c.includes('total fatura'));
+}
+
+function isQzB2CHeader(cells) {
+  const n = cells.map(c => normCol(c));
+  return n.some(c => c.includes('total nf')) && n.some(c => c.includes('valor fatura') || c.includes('valor produtos'));
+}
+
+function normalizeQzB2BRow(row) {
+  return {
+    nf: findQzField(row, 'nf', QZ_B2B_ALIASES),
+    valorNF: findQzField(row, 'valorNF', QZ_B2B_ALIASES),
+    numCte: findQzField(row, 'numCte', QZ_B2B_ALIASES),
+    pago: findQzField(row, 'pago', QZ_B2B_ALIASES),
+    transportador: findQzField(row, 'transportador', QZ_B2B_ALIASES),
+    dtNF: findQzField(row, 'dtNF', QZ_B2B_ALIASES),
+    destinatario: findQzField(row, 'destinatario', QZ_B2B_ALIASES)
+  };
+}
+
+function normalizeQzB2CRow(row) {
+  const chave = findQzField(row, 'chaveNF', QZ_B2C_ALIASES);
+  const pedido = findQzField(row, 'pedido', QZ_B2C_ALIASES);
+  let nf = nfFromNfeKey(chave);
+  if (!nf && pedido) nf = String(pedido).trim();
+  return {
+    pedido, nf, chaveNF: chave,
+    dtColeta: findQzField(row, 'dtColeta', QZ_B2C_ALIASES),
+    dtNF: findQzField(row, 'dtNF', QZ_B2C_ALIASES),
+    numCte: findQzField(row, 'numCte', QZ_B2C_ALIASES),
+    transportador: findQzField(row, 'transportador', QZ_B2C_ALIASES),
+    destinatario: findQzField(row, 'destinatario', QZ_B2C_ALIASES),
+    valorProdutos: findQzField(row, 'valorProdutos', QZ_B2C_ALIASES),
+    valorNF: findQzField(row, 'valorNF', QZ_B2C_ALIASES),
+    pago: findQzField(row, 'pago', QZ_B2C_ALIASES),
+    zona: findQzField(row, 'zona', QZ_B2C_ALIASES)
+  };
+}
+
+function parseQzSheetRows(sheet, canal) {
+  const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+  if (!raw.length) return { rows: [], headers: [] };
+  const headerFn = canal === 'B2B' ? isQzB2BHeader : isQzB2CHeader;
+  const normFn = canal === 'B2B' ? normalizeQzB2BRow : normalizeQzB2CRow;
+  let headerIdx = raw.findIndex(row => Array.isArray(row) && headerFn(row));
+  if (headerIdx < 0) return { rows: [], headers: [] };
+  const headerRow = raw[headerIdx] || [];
+  const headers = headerRow.map(h => String(h || '').trim()).filter(Boolean);
+  const rows = [];
+  for (let i = headerIdx + 1; i < raw.length; i++) {
+    const line = raw[i];
+    if (!Array.isArray(line) || line.every(c => c === null || c === undefined || c === '')) continue;
+    const obj = {};
+    headerRow.forEach((h, j) => { if (h) obj[h] = line[j] ?? null; });
+    const row = normFn(obj);
+    if (canal === 'B2B') {
+      if (!row.nf || String(row.nf).trim() === '') continue;
+      const nfStr = String(row.nf).trim().toLowerCase();
+      if (nfStr.includes('total') || nfStr === 'na') continue;
+    } else {
+      if (!row.pago && !row.valorNF && !row.pedido) continue;
+      if (String(row.pedido || '').toLowerCase().includes('pedido')) continue;
+    }
+    rows.push(row);
+  }
+  return { rows, headers };
+}
+
+function loadQuinzenalFromWorkbook(wb, fileMeta) {
+  const canal = fileMeta.canal || (/B2B/i.test(fileMeta.fileName) ? 'B2B' : 'B2C');
+  let best = { rows: [], headers: [], valid: 0, sheetName: wb.SheetNames[0] };
+  for (const name of wb.SheetNames) {
+    const parsed = parseQzSheetRows(wb.Sheets[name], canal);
+    if (parsed.rows.length > best.valid) best = { ...parsed, sheetName: name, valid: parsed.rows.length };
+  }
+  return { ...best, meta: fileMeta, canal };
+}
+
+function aggregateQzB2BRows(rows, fileMeta) {
+  const byNf = {};
+  rows.forEach(r => {
+    const key = normNFKey(r.nf);
+    if (!key) return;
+    if (!byNf[key]) {
+      byNf[key] = {
+        nf: String(r.nf).trim(), nfKey: key, valorNF: 0, pago: 0, nCteSet: new Set(),
+        transportador: r.transportador || '', destinatario: r.destinatario || '',
+        quinzenaKey: fileMeta.quinzenaKey, quinzenaLabel: fileMeta.quinzenaLabel, fileName: fileMeta.fileName
+      };
+    }
+    const g = byNf[key];
+    if (num(r.valorNF) > g.valorNF) g.valorNF = num(r.valorNF);
+    g.pago += num(r.pago);
+    if (r.numCte) g.nCteSet.add(String(r.numCte).trim());
+    if (r.transportador && g.transportador === '') g.transportador = r.transportador;
+  });
+  return Object.values(byNf).map(g => ({ ...g, nCte: g.nCteSet.size || 1, nCteSet: undefined }));
+}
+
+function cteNfsInQuinzena(range) {
+  if (!range || !currentNFs.length) return [];
+  return currentNFs.filter(nf => {
+    enrichNF(nf);
+    const d = nf.dtRef || (nf.dtNF ? (parseSapBrDate(nf.dtNF) || (nf.dtNF instanceof Date ? nf.dtNF : null)) : null);
+    if (!d || isNaN(d)) return false;
+    return d >= range.start && d <= range.end;
+  });
+}
+
+function buildB2BQuinzenaTotals(b2bRows) {
+  const byQz = {};
+  b2bRows.forEach(r => {
+    const k = r.quinzenaKey || 'sem-quinzena';
+    if (!byQz[k]) {
+      byQz[k] = {
+        quinzenaKey: k, quinzenaLabel: r.quinzenaLabel || k,
+        nfCountQz: 0, totalValorNFQz: 0, totalPagoQz: 0, totalCteQz: 0,
+        nfCountCte: 0, totalValorNFCte: 0, totalPagoCte: 0, totalCteCte: 0
+      };
+    }
+    const b = byQz[k];
+    b.nfCountQz++; b.totalValorNFQz += r.valorNF; b.totalPagoQz += r.pago; b.totalCteQz += r.nCte;
+  });
+  Object.values(byQz).forEach(b => {
+    const parts = b.quinzenaKey.split('-');
+    if (parts.length >= 3) {
+      const ano = parseInt(parts[0], 10);
+      const mes = parseInt(parts[1], 10);
+      const quinzena = parseInt(parts[2].replace('Q', ''), 10);
+      const cteList = cteNfsInQuinzena(quinzenaDateRange({ ano, mes, quinzena }));
+      b.nfCountCte = cteList.length;
+      b.totalValorNFCte = cteList.reduce((s, x) => s + x.valorNF, 0);
+      b.totalPagoCte = cteList.reduce((s, x) => s + x.pago, 0);
+      b.totalCteCte = cteList.reduce((s, x) => s + x.nCte, 0);
+    }
+  });
+  return Object.values(byQz).sort((a, b) => (a.quinzenaKey || '').localeCompare(b.quinzenaKey || ''));
+}
+
+function buildB2CQuinzenaTotals(b2cRows) {
+  const byQz = {};
+  b2cRows.forEach(r => {
+    const k = r.quinzenaKey || 'sem-quinzena';
+    if (!byQz[k]) byQz[k] = { quinzenaKey: k, quinzenaLabel: r.quinzenaLabel || k, count: 0, totalVendas: 0, totalFrete: 0 };
+    byQz[k].count++; byQz[k].totalVendas += r.valorNF; byQz[k].totalFrete += r.pago;
+  });
+  return Object.values(byQz).map(b => ({ ...b, pctFrete: b.totalVendas ? b.totalFrete / b.totalVendas : 0 }))
+    .sort((a, b) => (a.quinzenaKey || '').localeCompare(b.quinzenaKey || ''));
+}
+
+function buildB2BCompare(b2bRows) {
+  const qzMap = {};
+  b2bRows.forEach(r => {
+    const k = r.nfKey;
+    if (!qzMap[k]) qzMap[k] = { ...r };
+    else { qzMap[k].valorNF = Math.max(qzMap[k].valorNF, r.valorNF); qzMap[k].pago += r.pago; qzMap[k].nCte += r.nCte; }
+  });
+  const cteMap = {};
+  currentNFs.forEach(nf => { const k = normNFKey(nf.nf); if (k) cteMap[k] = nf; });
+  const keys = new Set([...Object.keys(qzMap), ...Object.keys(cteMap)]);
+  const rows = [];
+  keys.forEach(k => {
+    const qz = qzMap[k];
+    const cte = cteMap[k];
+    const valorNFQz = qz?.valorNF || 0;
+    const valorNFCte = cte?.valorNF || 0;
+    const pagoQz = qz?.pago || 0;
+    const pagoCte = cte?.pago || 0;
+    const nCteQz = qz?.nCte || 0;
+    const nCteCte = cte?.nCte || 0;
+    let status = 'match';
+    if (qz && !cte) status = 'onlyQz';
+    else if (!qz && cte) status = 'onlyCte';
+    else if (Math.abs(valorNFQz - valorNFCte) > 1 || Math.abs(pagoQz - pagoCte) > 0.5 || nCteQz !== nCteCte) status = 'diff';
+    rows.push({
+      nfKey: k, nf: qz?.nf || cte?.nf || k,
+      quinzenaKey: qz?.quinzenaKey || '', quinzenaLabel: qz?.quinzenaLabel || '',
+      valorNFQz, valorNFCte, diffValorNF: valorNFCte - valorNFQz,
+      pagoQz, pagoCte, diffPago: pagoCte - pagoQz,
+      nCteQz, nCteCte, diffCte: nCteCte - nCteQz, status,
+      transportador: qz?.transportador || cte?.transportador || ''
+    });
+  });
+  const ord = { onlyQz: 0, onlyCte: 1, diff: 2, match: 3 };
+  return rows.sort((a, b) => (ord[a.status] ?? 9) - (ord[b.status] ?? 9) || String(a.nf).localeCompare(String(b.nf)));
+}
+
+function buildQuinzenalPack(fileResults) {
+  const b2bRows = [];
+  const b2cRows = [];
+  const files = [];
+  fileResults.forEach(fr => {
+    if (!fr.ok) return;
+    const { meta, canal, rows, sheetName } = fr;
+    if (canal === 'B2B') {
+      const agg = aggregateQzB2BRows(rows, meta);
+      b2bRows.push(...agg);
+      files.push({
+        fileName: meta.fileName, canal, quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel,
+        sheetName, rowCount: rows.length, nfCount: agg.length,
+        totalValorNF: agg.reduce((s, x) => s + x.valorNF, 0),
+        totalPago: agg.reduce((s, x) => s + x.pago, 0),
+        totalCte: agg.reduce((s, x) => s + x.nCte, 0)
+      });
+    } else {
+      rows.forEach(r => {
+        b2cRows.push({
+          ...r, valorNF: num(r.valorNF) || num(r.valorProdutos), pago: num(r.pago),
+          quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel, fileName: meta.fileName
+        });
+      });
+      files.push({
+        fileName: meta.fileName, canal, quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel,
+        sheetName, rowCount: rows.length, nfCount: rows.length,
+        totalValorNF: rows.reduce((s, x) => s + (num(x.valorNF) || num(x.valorProdutos)), 0),
+        totalPago: rows.reduce((s, x) => s + num(x.pago), 0),
+        totalCte: rows.filter(x => x.numCte).length
+      });
+    }
+  });
+  const pack = { version: 1, updatedAt: new Date().toISOString(), files, b2bRows, b2cRows };
+  pack.b2bCompare = buildB2BCompare(b2bRows);
+  pack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(b2bRows);
+  pack.b2cQuinzenaTotals = buildB2CQuinzenaTotals(b2cRows);
+  return pack;
+}
+
+function qzCompareSummary(rows) {
+  const s = { total: rows.length, onlyQz: 0, onlyCte: 0, diff: 0, match: 0, diffValor: 0 };
+  rows.forEach(r => {
+    s[r.status] = (s[r.status] || 0) + 1;
+    if (Math.abs(r.diffValorNF) > 1) s.diffValor++;
+  });
+  return s;
+}
+
+function refreshQuinzenalCompare() {
+  if (!quinzenalPack?.b2bRows) return;
+  quinzenalPack.b2bCompare = buildB2BCompare(quinzenalPack.b2bRows);
+  quinzenalPack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(quinzenalPack.b2bRows);
+}
+
+function setQzZoneLoaded(count) {
+  const fn = $('qzFn');
+  const zone = $('qzZone');
+  const list = $('qzFileList');
+  if (fn) fn.textContent = count ? `✓ ${count} ficheiro(s) seleccionado(s)` : '';
+  zone?.classList.toggle('loaded', count > 0);
+  if (list) {
+    if (count && fteQzPendingFiles.length) {
+      list.style.display = 'block';
+      list.innerHTML = fteQzPendingFiles.map(f => `<div>${f.name}</div>`).join('');
+    } else { list.style.display = 'none'; list.innerHTML = ''; }
+  }
+  const btn = $('qzProcBtn');
+  if (btn) btn.disabled = !count;
+}
+
+async function persistQuinzenalPack(pack) {
+  if (typeof upsertExcelBinary !== 'function') return;
+  const buf = new TextEncoder().encode(JSON.stringify(pack)).buffer;
+  try { await upsertExcelBinary(fteQuinzenalSlot(), `quinzenal_${pack.files.length}_files.json`, buf); }
+  catch (err) { console.error('[fretes] persist quinzenal', err); }
+}
+
+async function loadSavedQuinzenalPack(silent) {
+  if (typeof fetchExcelFiles !== 'function') return false;
+  try {
+    const m = await fetchExcelFiles([fteQuinzenalSlot()]);
+    const rec = m[fteQuinzenalSlot()];
+    if (!rec?.file_data) return false;
+    quinzenalPack = JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(rec.file_data)));
+    refreshQuinzenalCompare();
+    setQzZoneLoaded(quinzenalPack.files?.length || 0);
+    const st = $('qzStatus');
+    if (st && rec.file_name) st.textContent = `Guardado: ${rec.file_name}`;
+    if (!silent) fteToast('Relatórios quinzenais carregados.');
+    renderQuinzenalTab();
+    return true;
+  } catch (err) { console.error('[fretes] load quinzenal', err); return false; }
+}
+
+function processQuinzenalFile(file) {
+  return new Promise((resolve) => {
+    const meta = parseQuinzenalFileName(file.name);
+    if (!meta.canal) { resolve({ ok: false, fileName: file.name, error: 'Canal B2B/B2C não detectado' }); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const loaded = loadQuinzenalFromWorkbook(readWorkbookFromArrayBuffer(e.target.result), meta);
+        if (!loaded.rows.length) { resolve({ ok: false, fileName: file.name, error: 'Sem linhas de detalhe' }); return; }
+        resolve({ ok: true, ...loaded, meta });
+      } catch (err) { resolve({ ok: false, fileName: file.name, error: String(err.message || err) }); }
+    };
+    reader.onerror = () => resolve({ ok: false, fileName: file.name, error: 'Erro de leitura' });
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function processAndSaveQuinzenal() {
+  if (!fteQzPendingFiles.length) { fteToastError('Selecciona ficheiros quinzenais primeiro.'); return; }
+  const spin = $('qzSpin');
+  const btn = $('qzProcBtn');
+  if (spin) spin.style.display = '';
+  if (btn) btn.disabled = true;
+  try {
+    const results = await Promise.all(fteQzPendingFiles.map(f => processQuinzenalFile(f)));
+    const ok = results.filter(r => r.ok);
+    const fail = results.filter(r => !r.ok);
+    if (!ok.length) { fteToastError('Nenhum ficheiro processado.'); return; }
+    quinzenalPack = buildQuinzenalPack(results);
+    await persistQuinzenalPack(quinzenalPack);
+    const st = $('qzStatus');
+    if (st) st.textContent = `${ok.length} ficheiro(s) · ${quinzenalPack.b2bRows.length} NFs B2B · ${quinzenalPack.b2cRows.length} linhas B2C`;
+    if (fail.length) fteToast(`${ok.length} OK, ${fail.length} com erro`);
+    else fteToast('Quinzenais processados e guardados.');
+    renderQuinzenalTab();
+  } catch (err) {
+    console.error('[fretes] quinzenal', err);
+    fteToastError('Erro: ' + (err.message || err));
+  } finally {
+    if (spin) spin.style.display = 'none';
+    if (btn) btn.disabled = !fteQzPendingFiles.length;
+  }
+}
+
+function fmtQzDiff(v, threshold) {
+  if (Math.abs(v) <= (threshold ?? 0.01)) return '<span style="color:var(--green)">0</span>';
+  const sign = v > 0 ? '+' : '';
+  return `<span style="color:${v > 0 ? '#b3261e' : '#555'}">${sign}${fmtMoney(v)}</span>`;
+}
+
+function fmtQzStatus(s) {
+  return { match: '<span style="color:var(--green)">OK</span>', diff: '<span style="color:#b3261e">Diferença</span>',
+    onlyQz: '<span style="color:#b3261e">Só quinzenal</span>', onlyCte: '<span style="color:#b3261e">Só CT-e</span>' }[s] || s;
+}
+
+function populateQzQuinzenaFilters() {
+  if (!quinzenalPack) return;
+  const keys = [...new Set((quinzenalPack.b2bRows || []).map(r => r.quinzenaKey).filter(Boolean))].sort();
+  const sel = $('qzFilterQuinzena');
+  if (sel) {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Todas as quinzenas</option>' + keys.map(k => {
+      const lbl = quinzenalPack.b2bRows.find(r => r.quinzenaKey === k)?.quinzenaLabel || k;
+      return `<option value="${k}">${lbl}</option>`;
+    }).join('');
+    sel.value = keys.includes(cur) ? cur : '';
+  }
+  const keysB2c = [...new Set((quinzenalPack.b2cRows || []).map(r => r.quinzenaKey).filter(Boolean))].sort();
+  const selB2c = $('qzB2cFilterQuinzena');
+  if (selB2c) {
+    const cur = selB2c.value;
+    selB2c.innerHTML = '<option value="">Todas as quinzenas</option>' + keysB2c.map(k => {
+      const lbl = quinzenalPack.b2cRows.find(r => r.quinzenaKey === k)?.quinzenaLabel || k;
+      return `<option value="${k}">${lbl}</option>`;
+    }).join('');
+    selB2c.value = keysB2c.includes(cur) ? cur : '';
+  }
+}
+
+function renderQuinzenalTab() {
+  const empty = $('qzEmpty');
+  const b2bPanel = $('qzB2b');
+  const b2cPanel = $('qzB2c');
+  if (!quinzenalPack?.files?.length) {
+    if (empty) empty.style.display = 'block';
+    if (b2bPanel) b2bPanel.style.display = 'none';
+    if (b2cPanel) b2cPanel.style.display = 'none';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  populateQzQuinzenaFilters();
+  refreshQuinzenalCompare();
+  if (activeQzPanel === 'b2b') {
+    if (b2bPanel) b2bPanel.style.display = 'block';
+    if (b2cPanel) b2cPanel.style.display = 'none';
+    renderQzB2b();
+  } else {
+    if (b2bPanel) b2bPanel.style.display = 'none';
+    if (b2cPanel) b2cPanel.style.display = 'block';
+    renderQzB2c();
+  }
+}
+
+function renderQzB2b() {
+  const rows = quinzenalPack.b2bCompare || [];
+  const sum = qzCompareSummary(rows);
+  const kpis = $('qzB2bKpis');
+  if (kpis) kpis.innerHTML = `
+    <div class="kpi"><div class="label">NFs comparadas</div><div class="value">${sum.total}</div></div>
+    <div class="kpi flag"><div class="label">Só quinzenal</div><div class="value">${sum.onlyQz}</div></div>
+    <div class="kpi flag"><div class="label">Só CT-e</div><div class="value">${sum.onlyCte}</div></div>
+    <div class="kpi"><div class="label">Com diferença</div><div class="value">${sum.diff}</div></div>
+    <div class="kpi"><div class="label">Δ valor NF</div><div class="value">${sum.diffValor}</div></div>
+    <div class="kpi"><div class="label">Conformes</div><div class="value">${sum.match}</div></div>`;
+
+  const qzBody = $('qzB2bQuinzenaBody');
+  if (qzBody) {
+    const totals = quinzenalPack.b2bQuinzenaTotals || [];
+    let tQz = { nf: 0, val: 0, frete: 0, cte: 0, nfC: 0, valC: 0, freteC: 0, cteC: 0 };
+    qzBody.innerHTML = totals.map(t => {
+      tQz.nf += t.nfCountQz; tQz.val += t.totalValorNFQz; tQz.frete += t.totalPagoQz; tQz.cte += t.totalCteQz;
+      tQz.nfC += t.nfCountCte; tQz.valC += t.totalValorNFCte; tQz.freteC += t.totalPagoCte; tQz.cteC += t.totalCteCte;
+      return `<tr><td><strong>${t.quinzenaLabel}</strong></td>
+        <td class="right">${t.nfCountQz}</td><td class="right">${t.nfCountCte}</td><td class="right">${t.nfCountCte - t.nfCountQz}</td>
+        <td class="right">${fmtMoney(t.totalValorNFQz)}</td><td class="right">${fmtMoney(t.totalValorNFCte)}</td>
+        <td class="right">${fmtQzDiff(t.totalValorNFCte - t.totalValorNFQz, 1)}</td>
+        <td class="right">${fmtMoney(t.totalPagoQz)}</td><td class="right">${fmtMoney(t.totalPagoCte)}</td>
+        <td class="right">${fmtQzDiff(t.totalPagoCte - t.totalPagoQz, 0.5)}</td>
+        <td class="right">${t.totalCteQz}</td><td class="right">${t.totalCteCte}</td><td class="right">${t.totalCteCte - t.totalCteQz}</td></tr>`;
+    }).join('') + `<tr class="month-total-row"><td><strong>Total</strong></td>
+      <td class="right">${tQz.nf}</td><td class="right">${tQz.nfC}</td><td class="right">${tQz.nfC - tQz.nf}</td>
+      <td class="right">${fmtMoney(tQz.val)}</td><td class="right">${fmtMoney(tQz.valC)}</td>
+      <td class="right">${fmtQzDiff(tQz.valC - tQz.val, 1)}</td>
+      <td class="right">${fmtMoney(tQz.frete)}</td><td class="right">${fmtMoney(tQz.freteC)}</td>
+      <td class="right">${fmtQzDiff(tQz.freteC - tQz.frete, 0.5)}</td>
+      <td class="right">${tQz.cte}</td><td class="right">${tQz.cteC}</td><td class="right">${tQz.cteC - tQz.cte}</td></tr>`;
+  }
+
+  const qFilter = $('qzFilterQuinzena')?.value || '';
+  const dFilter = $('qzFilterDiff')?.value || '';
+  const search = ($('qzSearchNF')?.value || '').trim();
+  let list = rows;
+  if (qFilter) list = list.filter(r => r.quinzenaKey === qFilter);
+  if (dFilter === 'onlyQz') list = list.filter(r => r.status === 'onlyQz');
+  else if (dFilter === 'onlyCte') list = list.filter(r => r.status === 'onlyCte');
+  else if (dFilter === 'valor') list = list.filter(r => Math.abs(r.diffValorNF) > 1);
+  else if (dFilter === 'frete') list = list.filter(r => Math.abs(r.diffPago) > 0.5);
+  else if (dFilter === 'cte') list = list.filter(r => r.diffCte !== 0);
+  if (search) list = list.filter(r => String(r.nf).includes(search));
+
+  const detBody = $('qzB2bDetailBody');
+  if (detBody) {
+    detBody.innerHTML = list.slice(0, 2000).map(r => {
+      const cls = r.status === 'onlyQz' || r.status === 'onlyCte' ? 'qz-only-row' : (r.status === 'diff' ? 'qz-diff-row' : '');
+      const pctNote = r.valorNFQz > 0 && r.pagoQz > 0 ? fmtPct(r.pagoQz / r.valorNFQz) : '-';
+      return `<tr class="${cls}"><td>${r.nf}</td><td>${r.quinzenaLabel || '-'}</td>
+        <td class="right">${r.valorNFQz ? fmtMoney(r.valorNFQz) : '-'}</td><td class="right">${r.valorNFCte ? fmtMoney(r.valorNFCte) : '-'}</td>
+        <td class="right">${fmtQzDiff(r.diffValorNF, 1)}</td>
+        <td class="right">${r.pagoQz ? fmtMoney(r.pagoQz) : '-'}</td><td class="right">${r.pagoCte ? fmtMoney(r.pagoCte) : '-'}</td>
+        <td class="right">${fmtQzDiff(r.diffPago, 0.5)}</td>
+        <td class="right">${r.nCteQz || '-'}</td><td class="right">${r.nCteCte || '-'}</td><td class="right">${r.diffCte || 0}</td>
+        <td>${fmtQzStatus(r.status)}</td><td class="right">${pctNote}</td></tr>`;
+    }).join('') || '<tr><td colspan="13" class="empty">Sem dados B2B — carrega quinzenais B2B e análise CT-e</td></tr>';
+  }
+}
+
+function renderQzB2c() {
+  const rows = quinzenalPack.b2cRows || [];
+  const totalVendas = rows.reduce((s, r) => s + r.valorNF, 0);
+  const totalFrete = rows.reduce((s, r) => s + r.pago, 0);
+  const kpis = $('qzB2cKpis');
+  if (kpis) kpis.innerHTML = `
+    <div class="kpi"><div class="label">Entregas B2C</div><div class="value">${rows.length}</div></div>
+    <div class="kpi"><div class="label">Vendas (Total NF)</div><div class="value">${fmtMoney(totalVendas)}</div></div>
+    <div class="kpi"><div class="label">Frete pago</div><div class="value">${fmtMoney(totalFrete)}</div></div>
+    <div class="kpi"><div class="label">% frete/vendas</div><div class="value">${fmtPct(totalVendas ? totalFrete / totalVendas : 0)}</div></div>
+    <div class="kpi"><div class="label">Quinzenas</div><div class="value">${(quinzenalPack.b2cQuinzenaTotals || []).length}</div></div>
+    <div class="kpi"><div class="label">Ficheiros B2C</div><div class="value">${(quinzenalPack.files || []).filter(f => f.canal === 'B2C').length}</div></div>`;
+
+  const qBody = $('qzB2cQuinzenaBody');
+  if (qBody) {
+    const totals = quinzenalPack.b2cQuinzenaTotals || [];
+    let t = { c: 0, v: 0, f: 0 };
+    qBody.innerHTML = totals.map(b => {
+      t.c += b.count; t.v += b.totalVendas; t.f += b.totalFrete;
+      return `<tr><td><strong>${b.quinzenaLabel}</strong></td><td class="right">${b.count}</td>
+        <td class="right">${fmtMoney(b.totalVendas)}</td><td class="right">${fmtMoney(b.totalFrete)}</td>
+        <td class="right">${fmtPct(b.pctFrete)}</td></tr>`;
+    }).join('') + `<tr class="month-total-row"><td><strong>Total</strong></td>
+      <td class="right">${t.c}</td><td class="right">${fmtMoney(t.v)}</td><td class="right">${fmtMoney(t.f)}</td>
+      <td class="right">${fmtPct(t.v ? t.f / t.v : 0)}</td></tr>`;
+  }
+
+  const qFilter = $('qzB2cFilterQuinzena')?.value || '';
+  const search = ($('qzB2cSearch')?.value || '').toLowerCase();
+  let list = rows;
+  if (qFilter) list = list.filter(r => r.quinzenaKey === qFilter);
+  if (search) list = list.filter(r => String(r.pedido || '').includes(search) || String(r.nf || '').includes(search) ||
+    String(r.destinatario || '').toLowerCase().includes(search));
+
+  const detBody = $('qzB2cDetailBody');
+  if (detBody) {
+    detBody.innerHTML = list.slice(0, 2000).map(r => `<tr>
+      <td>${r.pedido || '-'}</td><td>${r.nf || '-'}</td><td>${r.quinzenaLabel || '-'}</td>
+      <td>${fmtDate(r.dtColeta || r.dtNF)}</td><td>${r.destinatario || '-'}</td><td>${r.transportador || '-'}</td>
+      <td class="right">${fmtMoney(r.valorNF)}</td><td class="right">${fmtMoney(r.pago)}</td>
+      <td class="right">${fmtPct(r.valorNF ? r.pago / r.valorNF : 0)}</td><td>${r.zona || '-'}</td></tr>`).join('')
+      || '<tr><td colspan="10" class="empty">Sem dados B2C</td></tr>';
+  }
+}
+
 function reloadFretesForCompany() {
   _fteLoadedCompany = null;
   currentNFs = [];
@@ -2409,6 +3020,9 @@ function reloadFretesForCompany() {
   fteCteBuffer = null;
   fteSapFileName = '';
   fteSapBuffer = null;
+  fteQzPendingFiles = [];
+  quinzenalPack = null;
+  setQzZoneLoaded(0);
   const results = $('results');
   if (results) results.style.display = 'none';
   const us = $('uploadSection');
@@ -2419,6 +3033,7 @@ function reloadFretesForCompany() {
   updateSaveStatus('');
   updateFretesFileStatus();
   if (typeof loadSavedFretesFiles === 'function') loadSavedFretesFiles(true);
+  loadSavedQuinzenalPack(true);
 }
 
 function initFretes() {
@@ -2432,8 +3047,10 @@ function initFretes() {
       $('tab-analise').style.display = t.dataset.tab === 'analise' ? 'block' : 'none';
       $('tab-mensal').style.display = t.dataset.tab === 'mensal' ? 'block' : 'none';
       $('tab-historico').style.display = t.dataset.tab === 'historico' ? 'block' : 'none';
+      $('tab-quinzenal').style.display = t.dataset.tab === 'quinzenal' ? 'block' : 'none';
       if (t.dataset.tab === 'historico') loadHistory();
       if (t.dataset.tab === 'mensal') renderMonthlyTable();
+      if (t.dataset.tab === 'quinzenal') renderQuinzenalTab();
     });
   });
 
@@ -2465,6 +3082,45 @@ function initFretes() {
 
   $('procBtn')?.addEventListener('click', () => processAndSaveFretes());
   $('loadLastBtn')?.addEventListener('click', () => loadSavedFretesFiles(false));
+  $('qzProcBtn')?.addEventListener('click', () => processAndSaveQuinzenal());
+
+  document.querySelectorAll('.qz-subtab').forEach(st => {
+    st.addEventListener('click', () => {
+      document.querySelectorAll('.qz-subtab').forEach(x => x.classList.remove('active'));
+      st.classList.add('active');
+      activeQzPanel = st.dataset.qz || 'b2b';
+      renderQuinzenalTab();
+    });
+  });
+
+  const qzZone = $('qzZone');
+  const qzInput = $('qzFileInput');
+  if (qzZone && qzInput) {
+    qzZone.addEventListener('click', () => qzInput.click());
+    qzZone.addEventListener('dragover', e => { e.preventDefault(); qzZone.classList.add('drag'); });
+    qzZone.addEventListener('dragleave', () => qzZone.classList.remove('drag'));
+    qzZone.addEventListener('drop', e => {
+      e.preventDefault(); qzZone.classList.remove('drag');
+      if (e.dataTransfer.files.length) {
+        fteQzPendingFiles = [...fteQzPendingFiles, ...Array.from(e.dataTransfer.files)];
+        setQzZoneLoaded(fteQzPendingFiles.length);
+      }
+    });
+    qzInput.addEventListener('change', e => {
+      if (e.target.files.length) {
+        fteQzPendingFiles = [...fteQzPendingFiles, ...Array.from(e.target.files)];
+        setQzZoneLoaded(fteQzPendingFiles.length);
+      }
+    });
+  }
+
+  ['qzFilterQuinzena', 'qzFilterDiff', 'qzSearchNF', 'qzB2cFilterQuinzena', 'qzB2cSearch'].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    const fn = () => renderQuinzenalTab();
+    el.addEventListener('input', fn);
+    el.addEventListener('change', fn);
+  });
 
   $('newFileBtn').addEventListener('click', () => {
     $('results').style.display = 'none';
@@ -2509,4 +3165,5 @@ function initFretes() {
 
   applyFretesFileLabelsFromMeta();
   loadSavedFretesFiles(true);
+  loadSavedQuinzenalPack(true);
 }

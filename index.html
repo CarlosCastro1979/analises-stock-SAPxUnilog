@@ -274,6 +274,21 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-fretes tr.month-year-row td{background:var(--bg3);font-size:12px;padding-top:10px;border-top:2px solid var(--border2);}
 #page-fretes tr.month-subtotal-row td{background:#f8fafc;font-weight:600;border-top:1px solid var(--border2);}
 #page-fretes tr.month-total-row td{background:var(--bg3);font-weight:700;border-top:2px solid var(--border2);}
+#page-fretes .qz-subtabs{display:flex;gap:6px;margin:0 0 14px;}
+#page-fretes .qz-subtab{padding:8px 14px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-radius:6px;border:1px solid var(--border);background:#fff;}
+#page-fretes .qz-subtab.active{color:var(--red);border-color:var(--red);background:#fff5f5;}
+#page-fretes .qz-file-list{font-size:11px;color:var(--muted);max-height:120px;overflow-y:auto;margin-top:8px;text-align:left;}
+#page-fretes .qz-file-list div{padding:2px 0;font-family:var(--mono);}
+#page-fretes tr.qz-diff-row td{background:#fff8f0;}
+#page-fretes tr.qz-only-row td{background:#fef2f2;}
+#page-fretes .qz-subtabs{display:flex;gap:6px;margin:12px 0;}
+#page-fretes .qz-subtab{padding:6px 14px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:#fff;color:var(--muted);}
+#page-fretes .qz-subtab.active{background:var(--red);color:#fff;border-color:var(--red);}
+#page-fretes .qz-file-list{font-size:11px;color:var(--muted);max-height:120px;overflow-y:auto;margin-top:8px;text-align:left;}
+#page-fretes .qz-file-list div{padding:2px 0;font-family:var(--mono);}
+#page-fretes tr.qz-diff-row td{background:#fff5f5;}
+#page-fretes tr.qz-ok-row td{background:#f0fdf4;}
+#page-fretes tr.qz-only-row td{background:#fffbeb;}
 #page-fretes .hist-item .nums{display:flex;gap:20px;text-align:right;}
 #page-fretes .hist-item .nums .v{font-weight:700;font-size:13px;font-family:var(--mono);}
 #page-fretes .hist-item .nums .l{font-size:9px;color:var(--muted);text-transform:uppercase;}
@@ -352,7 +367,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.4.9</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.5.1</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -407,7 +422,7 @@ select.cad-inp{cursor:pointer;}
     </div>
     <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
       <button class="btn bp" id="procBtn" onclick="processAll()" disabled>⚡ Processar e Guardar</button>
-      <button class="btn bg" onclick="loadFromDB()">☁️ Carregar último guardado</button>
+      <button class="btn bg" onclick="loadLastSaved()">☁️ Carregar último guardado</button>
       <span id="procSpin" style="display:none"><span class="spin"></span></span>
     </div>
     <div id="stockFileStatus" style="display:none;font-size:11px;color:var(--muted);margin-top:10px"></div>
@@ -1342,6 +1357,7 @@ select.cad-inp{cursor:pointer;}
       <div class="fte-tab active" data-tab="analise">Análise atual</div>
       <div class="fte-tab" data-tab="mensal">Por mês</div>
       <div class="fte-tab" data-tab="historico">Histórico</div>
+      <div class="fte-tab" data-tab="quinzenal">Dif. Unilog</div>
     </div>
 
     <div id="fte-tab-analise">
@@ -1376,6 +1392,24 @@ select.cad-inp{cursor:pointer;}
           <span id="fte-procSpin" style="display:none"><span class="spin"></span></span>
         </div>
         <div id="fte-fileStatus" style="display:none;font-size:11px;color:var(--muted);margin-top:10px"></div>
+
+        <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border);">
+          <div class="ch" style="border:none;padding:0 0 8px;margin:0"><div class="ct" style="font-size:13px">Relatórios quinzenais Unilog</div></div>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Ficheiros <strong>Gestão de Frete DELTA B2B/B2C</strong> (1ªQ/2ªQ). Selecciona vários Excels — depois clica <strong>Processar quinzenais</strong>. B2B compara com a análise CT-e; B2C mostra vendas e fretes (sem regra 6%).</p>
+          <div class="uz" id="fte-qzZone" style="padding:20px;">
+            <div style="font-size:26px;margin-bottom:8px">📅</div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta os Excels quinzenais (multi-selecção)</div>
+            <div style="font-size:11px;color:var(--muted)">B2B + B2C · padrão: Gestão de Frete DELTA_B2B/B2C - 1ªQ Abril 2026.xlsx</div>
+            <div id="fte-qzFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+            <div id="fte-qzFileList" class="qz-file-list" style="display:none"></div>
+            <input type="file" id="fte-qzFileInput" accept=".xlsx,.xls" multiple>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;">
+            <button class="btn bp" id="fte-qzProcBtn" type="button" disabled>⚡ Processar quinzenais</button>
+            <span id="fte-qzSpin" style="display:none"><span class="spin"></span></span>
+            <span id="fte-qzStatus" style="font-size:11px;color:var(--muted);"></span>
+          </div>
+        </div>
       </div>
       <div id="fte-loadbar" class="loadbar" style="display:none;"></div>
 
@@ -1451,6 +1485,67 @@ select.cad-inp{cursor:pointer;}
       <div class="section-title" style="margin-top:0;">Histórico de análises <button class="btn bg bs" id="fte-exportHistoryBtn" type="button" style="margin-left:auto">Exportar histórico</button></div>
       <div id="fte-historyList" class="history-list"></div>
     </div>
+
+    <div id="fte-tab-quinzenal" style="display:none;">
+      <div class="qz-subtabs">
+        <div class="qz-subtab active" data-qz="b2b">B2B — vs CT-e</div>
+        <div class="qz-subtab" data-qz="b2c">B2C — vendas e fretes</div>
+      </div>
+      <div id="fte-qzEmpty" class="empty"><div class="empty-i">📅</div><div>Carrega os relatórios quinzenais Unilog na secção acima</div></div>
+      <div id="fte-qzB2b" style="display:none;">
+        <div class="kpis" id="fte-qzB2bKpis"></div>
+        <div class="section-title">Totais por quinzena (B2B)</div>
+        <div class="tbl-wrap" style="max-height:280px;margin-bottom:16px;">
+          <table><thead><tr>
+            <th>Quinzena</th><th class="right">NFs (QZ)</th><th class="right">NFs (CT-e)</th><th class="right">Δ NFs</th>
+            <th class="right">Faturação QZ</th><th class="right">Faturação CT-e</th><th class="right">Δ valor NF</th>
+            <th class="right">Frete QZ</th><th class="right">Frete CT-e</th><th class="right">Δ frete</th>
+            <th class="right">CT-e QZ</th><th class="right">CT-e CT-e</th><th class="right">Δ CT-e</th>
+          </tr></thead><tbody id="fte-qzB2bQuinzenaBody"></tbody></table>
+        </div>
+        <div class="section-title">Detalhe por NF — diferenças B2B</div>
+        <div class="filters">
+          <select id="fte-qzFilterQuinzena"><option value="">Todas as quinzenas</option></select>
+          <select id="fte-qzFilterDiff">
+            <option value="">Todos</option>
+            <option value="onlyQz">Só quinzenal</option>
+            <option value="onlyCte">Só CT-e</option>
+            <option value="valor">Δ valor NF</option>
+            <option value="frete">Δ frete</option>
+            <option value="cte">Δ qtd CT-e</option>
+          </select>
+          <input type="text" id="fte-qzSearchNF" placeholder="Procurar NF…">
+        </div>
+        <div class="tbl-wrap">
+          <table><thead><tr>
+            <th>NF</th><th>Quinzena</th><th class="right">Valor NF (QZ)</th><th class="right">Valor NF (CT-e)</th><th class="right">Δ NF</th>
+            <th class="right">Frete (QZ)</th><th class="right">Frete (CT-e)</th><th class="right">Δ frete</th>
+            <th class="right">Qtd CT-e (QZ)</th><th class="right">Qtd CT-e (CT-e)</th><th class="right">Δ CT-e</th>
+            <th>Estado</th><th>% pago (6%)</th>
+          </tr></thead><tbody id="fte-qzB2bDetailBody"></tbody></table>
+        </div>
+      </div>
+      <div id="fte-qzB2c" style="display:none;">
+        <div class="kpis" id="fte-qzB2cKpis"></div>
+        <div class="section-title">Totais por quinzena (B2C)</div>
+        <div class="tbl-wrap" style="max-height:280px;margin-bottom:16px;">
+          <table><thead><tr>
+            <th>Quinzena</th><th class="right">Entregas</th><th class="right">Vendas (Total NF)</th><th class="right">Frete pago</th><th class="right">% frete/vendas</th>
+          </tr></thead><tbody id="fte-qzB2cQuinzenaBody"></tbody></table>
+        </div>
+        <div class="section-title">Detalhe B2C</div>
+        <div class="filters">
+          <select id="fte-qzB2cFilterQuinzena"><option value="">Todas as quinzenas</option></select>
+          <input type="text" id="fte-qzB2cSearch" placeholder="Procurar pedido, destinatário…">
+        </div>
+        <div class="tbl-wrap">
+          <table><thead><tr>
+            <th>Pedido</th><th>NF</th><th>Quinzena</th><th>Data coleta</th><th>Destinatário</th><th>Transportador</th>
+            <th class="right">Vendas</th><th class="right">Frete</th><th class="right">% frete</th><th>Região</th>
+          </tr></thead><tbody id="fte-qzB2cDetailBody"></tbody></table>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1514,8 +1609,8 @@ const db=supabase.createClient(SB_URL,SB_KEY);
 // );
 // ALTER TABLE logistica_excel_files ENABLE ROW LEVEL SECURITY;
 // CREATE POLICY "anon_all" ON logistica_excel_files FOR ALL TO anon USING (true) WITH CHECK (true);
-const EXCEL_SLOTS={STOCK_SAP:'stock_sap',STOCK_UNILOG:'stock_unilog',FRETES_CTE:'fretes_cte',FRETES_SAP_NF:'fretes_sap_nf'};
-let stockSapFileName='',stockUniFileName='';
+const EXCEL_SLOTS={STOCK_SAP:'stock_sap',STOCK_UNILOG:'stock_unilog',FRETES_CTE:'fretes_cte',FRETES_SAP_NF:'fretes_sap_nf',FRETES_QUINZENAL:'fretes_quinzenal'};
+let stockSapFileName='',stockUniFileName='',stockSapBuffer=null,stockUniBuffer=null;
 
 function arrayBufferToBase64(buf){
   const bytes=new Uint8Array(buf);
@@ -1576,6 +1671,102 @@ async function applyStockFileLabelsFromMeta(){
     if(m[EXCEL_SLOTS.STOCK_UNILOG]?.file_name){uniEl.textContent='✓ '+m[EXCEL_SLOTS.STOCK_UNILOG].file_name;uniZ?.classList.add('loaded');}
     await updateStockFileStatus();
   }catch(e){}
+}
+function isExcelFilesTableMissing(err){
+  if(!err)return false;
+  if(err.code==='PGRST205')return true;
+  const m=err.message||'';
+  return /relation .+ does not exist/i.test(m)||/Could not find the table .+ logistica_excel_files/i.test(m);
+}
+function toastExcelFilesError(prefix,err,silent){
+  if(silent)return;
+  if(isExcelFilesTableMissing(err))toast(prefix+'Tabela logistica_excel_files em falta — executa o CREATE TABLE no Supabase (ver comentário no código).','error');
+  else toast(prefix+(err.message||err.code||'erro desconhecido'),'error');
+}
+function xlsxRowsFromArrayBuffer(buf){
+  const wb=XLSX.read(buf,{type:'array'});
+  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+}
+async function loadSavedStockExcelFiles(silent=false,parseIntoMemory=true){
+  try{
+    syncCompanyDepotMap();
+    const meta=await fetchExcelFiles([EXCEL_SLOTS.STOCK_SAP,EXCEL_SLOTS.STOCK_UNILOG]);
+    const sapRec=meta[EXCEL_SLOTS.STOCK_SAP];
+    const uniRec=meta[EXCEL_SLOTS.STOCK_UNILOG];
+    let loaded=false;
+    if(sapRec?.file_data){
+      stockSapBuffer=base64ToArrayBuffer(sapRec.file_data);
+      stockSapFileName=sapRec.file_name||'sap.xlsx';
+      document.getElementById('sapFn').textContent='✓ '+stockSapFileName;
+      document.getElementById('sapZone').classList.add('loaded');
+      if(parseIntoMemory){
+        const rows=xlsxRowsFromArrayBuffer(stockSapBuffer);
+        window._rawSapRows=rows;
+        sapData=normSap(rows);
+        invalidateSapMaps();
+        invalidateReconExclEANs();
+      }
+      loaded=true;
+    }else if(sapRec?.file_name){
+      stockSapFileName=sapRec.file_name;
+      document.getElementById('sapFn').textContent='✓ '+stockSapFileName;
+      document.getElementById('sapZone').classList.add('loaded');
+      if(!silent)toast('SAP: metadados sem ficheiro — volta a Processar e Guardar.','error');
+    }
+    if(uniRec?.file_data){
+      stockUniBuffer=base64ToArrayBuffer(uniRec.file_data);
+      stockUniFileName=uniRec.file_name||'unilog.xlsx';
+      document.getElementById('uniFn').textContent='✓ '+stockUniFileName;
+      document.getElementById('uniZone').classList.add('loaded');
+      if(parseIntoMemory){
+        uniData=filterUniForCompany(normUni(xlsxRowsFromArrayBuffer(stockUniBuffer)));
+        invalidateReconExclEANs();
+      }
+      loaded=true;
+    }else if(uniRec?.file_name){
+      stockUniFileName=uniRec.file_name;
+      document.getElementById('uniFn').textContent='✓ '+stockUniFileName;
+      document.getElementById('uniZone').classList.add('loaded');
+      if(!silent)toast('Unilog: metadados sem ficheiro — volta a Processar e Guardar.','error');
+    }
+    await updateStockFileStatus();
+    checkBtn();
+    return loaded;
+  }catch(e){
+    console.error('[stock] loadSavedStockExcelFiles',e);
+    toastExcelFilesError('Erro ao carregar Excel: ',e,silent);
+    return false;
+  }
+}
+async function autoLoadLastExcelFiles(){
+  const hadDb=await loadFromDB(true);
+  if(hadDb){
+    await loadSavedStockExcelFiles(true,false);
+    return;
+  }
+  const hadExcel=await loadSavedStockExcelFiles(true,true);
+  if(hadExcel&&sapData&&uniData)await processAll();
+}
+async function loadLastSaved(silent=false){
+  syncCompanyDepotMap();
+  const hadDb=await loadFromDB(true);
+  if(hadDb){
+    await loadSavedStockExcelFiles(true,false);
+    if(!silent)toast('Carregado: '+company,'success');
+    return true;
+  }
+  const hadExcel=await loadSavedStockExcelFiles(silent,true);
+  if(hadExcel&&sapData&&uniData){
+    await processAll();
+    if(!silent)toast('Excel carregado e processado.','success');
+    return true;
+  }
+  if(hadExcel){
+    if(!silent)toast('Ficheiros Excel carregados — clica Processar e Guardar.','info');
+    return true;
+  }
+  if(!silent)toast('Sem dados guardados para '+company,'error');
+  return false;
 }
 
 // Depot maps per company
@@ -1639,15 +1830,15 @@ async function init(){
   try{
     const{error}=await db.from('logistica_stock').select('id').limit(1);
     setDB(!error);
-    if(!error){await loadSuspValidados();await loadFromDB(true);await loadOccParams();await loadReconNotas();await loadPecasData();}
+    if(!error){await loadSuspValidados();await autoLoadLastExcelFiles();await loadOccParams();await loadReconNotas();await loadPecasData();}
   }catch(e){setDB(false);}
   scheduleColResize();
 }
 function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok':'');document.getElementById('dbLbl').textContent=ok?'Supabase OK':'offline';}
 
 // ── FILES ──
-function loadSap(inp){const f=inp.files[0];if(!f)return;stockSapFileName=f.name;readXlsx(f,rows=>{syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');});}
-function loadUni(inp){const f=inp.files[0];if(!f)return;stockUniFileName=f.name;readXlsx(f,rows=>{syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');});}
+function loadSap(inp){const f=inp.files[0];if(!f)return;stockSapFileName=f.name;const r=new FileReader();r.onload=e=>{try{stockSapBuffer=e.target.result;const rows=xlsxRowsFromArrayBuffer(stockSapBuffer);syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');}catch(err){toast(xlsxReadErrorMsg(err),'error');}};r.onerror=()=>toast('Erro ao ler ficheiro SAP.','error');r.readAsArrayBuffer(f);}
+function loadUni(inp){const f=inp.files[0];if(!f)return;stockUniFileName=f.name;const r=new FileReader();r.onload=e=>{try{stockUniBuffer=e.target.result;const rows=xlsxRowsFromArrayBuffer(stockUniBuffer);syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');}catch(err){toast(xlsxReadErrorMsg(err),'error');}};r.onerror=()=>toast('Erro ao ler ficheiro Unilog.','error');r.readAsArrayBuffer(f);}
 function xlsxReadErrorMsg(err){const m=String(err?.message||err||'');if(/encryptioninfo|encrypted file|password|agile encryption|office crypto|file is password-protected/i.test(m))return 'Ficheiro Excel protegido por password — exporta sem proteção ou guarda como .xlsx não encriptado (Excel → Guardar como). SheetJS CE não suporta ficheiros encriptados.';return 'Erro: '+m;}
 function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast(xlsxReadErrorMsg(err),'error');}};r.readAsArrayBuffer(file);}
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
@@ -3720,10 +3911,12 @@ async function processAll(){
     if(!error){await db.from('logistica_history').insert({company,uploaded_at:procAt,sap_rows:sapData.length,unilog_rows:uniData.length,summary:payload.recon_summary});toast('Guardado ✓','success');}
     else toast('DB: '+error.message,'error');
     try{
-      if(stockSapFileName)await upsertExcelMeta(EXCEL_SLOTS.STOCK_SAP,stockSapFileName);
-      if(stockUniFileName)await upsertExcelMeta(EXCEL_SLOTS.STOCK_UNILOG,stockUniFileName);
+      if(stockSapBuffer&&stockSapFileName)await upsertExcelBinary(EXCEL_SLOTS.STOCK_SAP,stockSapFileName,stockSapBuffer);
+      else if(stockSapFileName)await upsertExcelMeta(EXCEL_SLOTS.STOCK_SAP,stockSapFileName);
+      if(stockUniBuffer&&stockUniFileName)await upsertExcelBinary(EXCEL_SLOTS.STOCK_UNILOG,stockUniFileName,stockUniBuffer);
+      else if(stockUniFileName)await upsertExcelMeta(EXCEL_SLOTS.STOCK_UNILOG,stockUniFileName);
       await updateStockFileStatus();
-    }catch(e){console.warn('[stock] excel meta',e);}
+    }catch(e){console.warn('[stock] excel persist',e);toast('Aviso: não foi possível guardar ficheiros Excel na cloud.','error');}
   }catch(e){toast('Offline — dados em memória','error');}
   updateLoadBanner(procAt);
   document.getElementById('procSpin').style.display='none';document.getElementById('procBtn').disabled=false;
@@ -3874,7 +4067,7 @@ function switchCompany(){
   syncCompanyDepotMap();
   // Reset all data
   sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;valConflData=[];valConflStats=null;vencForaDepStats=null;vencForaDepSapStats=null;suspValidados=new Set();suspValidadosOcultos=0;
-  stockSapFileName='';stockUniFileName='';
+  stockSapFileName='';stockUniFileName='';stockSapBuffer=null;stockUniBuffer=null;
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
   document.getElementById('sapFn').textContent='';document.getElementById('uniFn').textContent='';
@@ -3894,7 +4087,7 @@ function switchCompany(){
   const alertBadge=document.getElementById('alertBadge');if(alertBadge){alertBadge.textContent='';alertBadge.style.display='none';}
   // Try to load saved data for the new company
   if(typeof reloadFretesForCompany==='function')reloadFretesForCompany();
-  loadFromDB(true);
+  autoLoadLastExcelFiles();
   toast('Empresa: '+company,'info');
 }
 
@@ -3902,7 +4095,7 @@ async function loadFromDB(silent=false){
   try{
     syncCompanyDepotMap();
     const{data,error}=await db.from('logistica_stock').select('*').eq('id',company).single();
-    if(error||!data){if(!silent)toast('Sem dados para '+company,'error');return;}
+    if(error||!data){if(!silent)toast('Sem dados para '+company,'error');return false;}
     company=data.company;syncCompanyDepotMap();
     sapData=filterSapRowsForCompany(JSON.parse(data.sap_data),company);
     uniData=JSON.parse(data.unilog_data);
@@ -3926,7 +4119,8 @@ async function loadFromDB(silent=false){
     updateLoadBanner(data.uploaded_at);
     await applyStockFileLabelsFromMeta();
     if(!silent)toast('Carregado: '+company,'success');
-  }catch(e){if(!silent)toast('Erro: '+e.message,'error');}
+    return true;
+  }catch(e){if(!silent)toast('Erro: '+e.message,'error');return false;}
 }
 
 // ── LOTES SUSPEITOS VALIDADOS ──
@@ -6867,7 +7061,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.4.8"></script>
+<script src="fretes.js?v=1.5.1"></script>
 <script>
 init();
 initMultiselects();
