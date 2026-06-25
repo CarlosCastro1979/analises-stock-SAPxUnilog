@@ -1,5 +1,5 @@
-// fretes.js v1.7.5
-const FRETES_JS_VERSION = '1.7.5';
+// fretes.js v1.7.6
+const FRETES_JS_VERSION = '1.7.6';
 
 const sb = db;
 
@@ -2103,6 +2103,8 @@ function renderAnomaliesPanel() {
   }
   fteEnableDomSort(body);
 }
+
+const CATEGORY_META = {
   ok: { title: 'Conforme (~6%)', cls: 'b-ok' },
   min: { title: 'Tarifa mínima (provável)', cls: 'b-min' },
   dev: { title: 'Com devolução', cls: 'b-dev' },
