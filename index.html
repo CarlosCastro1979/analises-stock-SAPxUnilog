@@ -373,7 +373,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.5.7</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.5.8</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1642,20 +1642,31 @@ function fmtExcelFileDate(iso){
   return new Date(iso).toLocaleDateString('pt-BR');
 }
 async function upsertExcelMeta(slot,fileName){
+  syncCompanyDepotMap();
+  console.log('[excel] save meta',company,slot,fileName);
   const{error}=await db.from('logistica_excel_files').upsert({company,slot,file_name:fileName,uploaded_at:new Date().toISOString()},{onConflict:'company,slot'});
-  if(error)throw error;
+  if(error){console.error('[excel] save meta error',company,slot,error);throw error;}
 }
 async function upsertExcelBinary(slot,fileName,arrayBuffer){
-  const{error}=await db.from('logistica_excel_files').upsert({company,slot,file_name:fileName,uploaded_at:new Date().toISOString(),file_data:arrayBufferToBase64(arrayBuffer)},{onConflict:'company,slot'});
-  if(error)throw error;
+  syncCompanyDepotMap();
+  const byteLen=arrayBuffer?.byteLength||0;
+  const b64=arrayBufferToBase64(arrayBuffer);
+  console.log('[excel] save',company,slot,fileName,'bytes',byteLen,'b64len',b64.length);
+  const{error}=await db.from('logistica_excel_files').upsert({company,slot,file_name:fileName,uploaded_at:new Date().toISOString(),file_data:b64},{onConflict:'company,slot'});
+  if(error){console.error('[excel] save error',company,slot,error);throw error;}
+  console.log('[excel] save ok',company,slot,fileName);
 }
 async function fetchExcelFiles(slots){
+  syncCompanyDepotMap();
   let q=db.from('logistica_excel_files').select('slot,file_name,uploaded_at,file_data').eq('company',company);
   if(slots?.length)q=q.in('slot',slots);
   const{data,error}=await q;
-  if(error)throw error;
+  if(error){console.error('[excel] load error',company,slots,error);throw error;}
   const map={};
-  (data||[]).forEach(r=>{map[r.slot]=r;});
+  (data||[]).forEach(r=>{
+    console.log('[excel] load',company,r.slot,r.file_name||'','dataLen',r.file_data?r.file_data.length:0);
+    map[r.slot]=r;
+  });
   return map;
 }
 function excelStatusPart(rec,label){
@@ -1834,14 +1845,14 @@ async function init(){
         }
       }
       if(t.dataset.page==='history')renderHistory();
-      if(t.dataset.page==='fretes'){initFretes();if(typeof loadSavedFretesFiles==='function')loadSavedFretesFiles(true);}
+      if(t.dataset.page==='fretes'){initFretes();if(typeof loadSavedFretesFiles==='function')loadSavedFretesFiles(false);}
       scheduleColResize();
     };
   });
   try{
     const{error}=await db.from('logistica_stock').select('id').limit(1);
     setDB(!error);
-    if(!error){await loadSuspValidados();await autoLoadLastExcelFiles();await loadOccParams();await loadReconNotas();await loadPecasData();}
+    if(!error){await loadSuspValidados();await autoLoadLastExcelFiles();await loadOccParams();await loadReconNotas();await loadPecasData();if(typeof loadSavedFretesFiles==='function')await loadSavedFretesFiles(true);}
   }catch(e){setDB(false);}
   scheduleColResize();
 }
@@ -7072,7 +7083,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.5.7"></script>
+<script src="fretes.js?v=1.5.8"></script>
 <script>
 init();
 initMultiselects();

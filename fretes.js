@@ -1,5 +1,5 @@
-// fretes.js v1.5.7
-const FRETES_JS_VERSION = '1.5.7';
+// fretes.js v1.5.8
+const FRETES_JS_VERSION = '1.5.8';
 
 const sb = db;
 
@@ -71,11 +71,14 @@ function checkFteBtn() {
 async function applyFretesFileLabelsFromMeta() {
   if (typeof fetchExcelFiles !== 'function') return;
   try {
+    if (typeof syncCompanyDepotMap === 'function') syncCompanyDepotMap();
     const m = await fetchExcelFiles([fteCteSlot(), fteSapSlot(), fteQuinzenalSlot()]);
     const cte = m[fteCteSlot()];
     const sap = m[fteSapSlot()];
-    if (cte?.file_name) setCteZoneLoaded(cte.file_name);
-    if (sap?.file_name) setSapZoneLoaded(sap.file_name);
+    if (cte?.file_data || fteCteBuffer) setCteZoneLoaded(cte?.file_name || fteCteFileName);
+    else if (cte?.file_name) setCteZoneLoaded('');
+    if (sap?.file_data || fteSapBuffer) setSapZoneLoaded(sap?.file_name || fteSapFileName);
+    else if (sap?.file_name) setSapZoneLoaded('');
     updateFretesFileStatus(m);
   } catch (e) { /* offline */ }
 }
@@ -136,18 +139,23 @@ function updateFretesFileStatus(meta) {
 async function persistFretesFile(slot, fileName, arrayBuffer) {
   if (typeof upsertExcelBinary !== 'function') {
     fteToastError('Persistência Excel indisponível — recarrega a página.');
-    return;
+    return false;
   }
+  const byteLen = arrayBuffer?.byteLength || 0;
+  console.log('[fretes] persist', fteCompany(), slot, fileName, 'bytes', byteLen);
   try {
     await upsertExcelBinary(slot, fileName, arrayBuffer);
     updateFretesFileStatus();
+    console.log('[fretes] persist ok', fteCompany(), slot, fileName);
+    return true;
   } catch (err) {
-    console.error('[fretes] persist', err);
+    console.error('[fretes] persist', fteCompany(), slot, err);
     if (typeof isExcelFilesTableMissing === 'function' && isExcelFilesTableMissing(err)) {
       fteToastError('Tabela logistica_excel_files em falta no Supabase.');
     } else {
       fteToastError('Erro ao guardar Excel: ' + (err.message || err));
     }
+    return false;
   }
 }
 
@@ -988,14 +996,19 @@ async function processAndSaveFretes() {
       processArrayBufferSap(fteSapBuffer, fteSapFileName);
     }
 
-    await persistFretesFile(fteCteSlot(), fteCteFileName, fteCteBuffer);
+    const cteSaved = await persistFretesFile(fteCteSlot(), fteCteFileName, fteCteBuffer);
+    let sapSaved = true;
     if (fteSapBuffer && fteSapFileName) {
-      await persistFretesFile(fteSapSlot(), fteSapFileName, fteSapBuffer);
+      sapSaved = await persistFretesFile(fteSapSlot(), fteSapFileName, fteSapBuffer);
+    }
+    if (!cteSaved || !sapSaved) {
+      fteToastError('Processado em memória, mas falhou guardar na cloud — verifica a consola.');
+      return;
     }
 
     _fteLoadedCompany = fteCompany();
     updateFretesFileStatus();
-    fteToast('Processado e guardado.');
+    fteToast('Processado e guardado na cloud.');
   } catch (err) {
     console.error('[fretes] processAndSave', err);
     fteToastError('Erro: ' + (err.message || err));
@@ -2440,12 +2453,14 @@ async function _loadSavedFretesFilesImpl(silent = false) {
     if (!silent) fteToastError('Persistência Excel indisponível — recarrega a página.');
     return false;
   }
+  if (typeof syncCompanyDepotMap === 'function') syncCompanyDepotMap();
   const co = fteCompany();
+  console.log('[fretes] load saved', co);
   let meta;
   try {
     meta = await fetchExcelFiles([fteCteSlot(), fteSapSlot(), fteQuinzenalSlot()]);
   } catch (err) {
-    console.error('[fretes] load saved', err);
+    console.error('[fretes] load saved', co, err);
     if (!silent) {
       if (typeof isExcelFilesTableMissing === 'function' && isExcelFilesTableMissing(err)) {
         fteToastError('Tabela logistica_excel_files em falta no Supabase.');
@@ -2458,24 +2473,38 @@ async function _loadSavedFretesFilesImpl(silent = false) {
 
   const cteRec = meta[fteCteSlot()];
   const sapRec = meta[fteSapSlot()];
+  const hadCteInMem = _fteLoadedCompany === co && currentNFs.length;
+  const hadQzInMem = !!quinzenalPack?.files?.length;
 
   let cteOk = false;
   if (cteRec?.file_data) {
     cteOk = await restoreCteFromRec(cteRec, sapRec, silent);
-  } else if (_fteLoadedCompany === co && currentNFs.length) {
+    console.log('[fretes] restore cte', co, cteRec.file_name, 'dataLen', cteRec.file_data.length, 'ok', cteOk);
+  } else if (hadCteInMem) {
     cteOk = true;
-  } else if (cteRec?.file_name && !silent) {
-    fteToastError('CT-e guardado só com nome — clica Processar e Guardar para persistir o ficheiro.');
+    console.log('[fretes] restore cte from memory', co, currentNFs.length, 'NFs');
+  } else if (cteRec?.file_name) {
+    console.warn('[fretes] cte metadata only', co, cteRec.file_name);
+    if (!silent) {
+      fteToastError('CT-e guardado só com nome — clica Processar e Guardar para persistir o ficheiro.');
+    }
   }
 
   const qzLoaded = await loadSavedQuinzenalPack(silent, meta, { deferCompare: true, skipRender: true });
+  if (qzLoaded) console.log('[fretes] restore quinzenal', co, quinzenalPack?.files?.length || 0, 'files');
   refreshQuinzenalCompare();
   updateFretesFileStatus(meta);
 
+  const freshCte = !!(cteRec?.file_data && cteOk && !hadCteInMem);
+  const freshQz = !!(qzLoaded && !hadQzInMem);
+
   if (!cteOk && !silent && !qzLoaded && !cteRec) {
     fteToastError('Sem ficheiros CT-e guardados para ' + co + '.');
-  } else if (cteOk && !silent) {
-    fteToast('Últimos ficheiros fretes carregados.');
+  } else if ((freshCte || freshQz) && !silent) {
+    const parts = [];
+    if (freshCte) parts.push('CT-e' + (sapRec?.file_data ? ' + SAP' : ''));
+    if (freshQz) parts.push('quinzenais');
+    fteToast('Ficheiros fretes restaurados: ' + parts.join(', ') + ' (' + co + ').');
   }
 
   if ($('tab-quinzenal')?.style.display === 'block') renderQuinzenalTab();
@@ -3098,30 +3127,51 @@ function setQzZoneLoaded(count) {
 }
 
 async function persistQuinzenalPack(pack) {
-  if (typeof upsertExcelBinary !== 'function') return;
+  if (typeof upsertExcelBinary !== 'function') {
+    fteToastError('Persistência Excel indisponível — recarrega a página.');
+    return false;
+  }
   const buf = new TextEncoder().encode(JSON.stringify(pack)).buffer;
+  const slot = fteQuinzenalSlot();
+  console.log('[fretes] persist quinzenal', fteCompany(), slot, pack?.files?.length || 0, 'files', 'bytes', buf.byteLength);
   try {
-    await upsertExcelBinary(fteQuinzenalSlot(), `quinzenal_${pack.files.length}_files.json`, buf);
+    await upsertExcelBinary(slot, `quinzenal_${pack.files.length}_files.json`, buf);
     updateQzProcessStatus();
     updateFretesFileStatus();
-  } catch (err) { console.error('[fretes] persist quinzenal', err); }
+    console.log('[fretes] persist quinzenal ok', fteCompany(), slot);
+    return true;
+  } catch (err) {
+    console.error('[fretes] persist quinzenal', fteCompany(), slot, err);
+    if (typeof isExcelFilesTableMissing === 'function' && isExcelFilesTableMissing(err)) {
+      fteToastError('Tabela logistica_excel_files em falta no Supabase.');
+    } else {
+      fteToastError('Erro ao guardar quinzenais: ' + (err.message || err));
+    }
+    return false;
+  }
 }
 
 async function loadSavedQuinzenalPack(silent, meta, opts = {}) {
   if (typeof fetchExcelFiles !== 'function') return false;
   try {
+    if (typeof syncCompanyDepotMap === 'function') syncCompanyDepotMap();
     const m = meta || await fetchExcelFiles([fteQuinzenalSlot()]);
     const rec = m[fteQuinzenalSlot()];
     if (!rec?.file_data) return false;
     quinzenalPack = parseQuinzenalPackFromRec(rec);
     if (!quinzenalPack?.files?.length) return false;
+    console.log('[fretes] load quinzenal', fteCompany(), rec.file_name, 'dataLen', rec.file_data.length, 'files', quinzenalPack.files.length);
     if (!opts?.deferCompare) refreshQuinzenalCompare();
     syncQzUploadZone();
     updateQzProcessStatus();
     if (!silent) fteToast('Relatórios quinzenais carregados.');
     if (!opts?.skipRender) renderQuinzenalTab();
     return true;
-  } catch (err) { console.error('[fretes] load quinzenal', err); return false; }
+  } catch (err) {
+    console.error('[fretes] load quinzenal', fteCompany(), err);
+    if (!silent) fteToastError('Erro ao carregar quinzenais: ' + (err.message || err));
+    return false;
+  }
 }
 
 function diagnoseQzParseFailure(wb, canal) {
@@ -3187,7 +3237,11 @@ async function processAndSaveQuinzenal() {
       fileBinaries[r.meta.fileName] = arrayBufferToBase64(r.arrayBuffer);
     });
     quinzenalPack = buildQuinzenalPack(results, fileBinaries);
-    await persistQuinzenalPack(quinzenalPack);
+    const qzSaved = await persistQuinzenalPack(quinzenalPack);
+    if (!qzSaved) {
+      fteToastError('Quinzenais processados em memória, mas falhou guardar na cloud.');
+      return;
+    }
     fteQzPendingFiles = [];
     const qzInput = $('qzFileInput');
     if (qzInput) qzInput.value = '';
@@ -3622,5 +3676,4 @@ function initFretes() {
   });
 
   applyFretesFileLabelsFromMeta();
-  loadSavedFretesFiles(true);
 }
