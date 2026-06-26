@@ -1,8 +1,10 @@
-// armazem.js v1.0.20
-const ARMAZEM_JS_VERSION = '1.0.20';
+// armazem.js v1.0.21
+const ARMAZEM_JS_VERSION = '1.0.21';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
+const ARM_IMPOSTOS_RATE = 0.1125;
+const ARM_IMPOSTOS_LABEL = 'Impostos — 2% (ISS) + 9,25% (PIS/COFINS) = 11,25%';
 const ARM_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
 const ARM_MAX_FILE_BYTES = 15 * 1024 * 1024;
 const ARM_ABSOLUTE_MAX_FILE_BYTES = 40 * 1024 * 1024;
@@ -30,22 +32,16 @@ let armSorts = {
   catalogo: { col: 'servico', dir: 1 }
 };
 
-/** Serviços conhecidos (Excels Unilog / maio 2026 parse). */
+/** Catálogo essencial do dropdown (variantes obscuras via «+ novo serviço»). */
 const ARM_DEFAULT_SERVICOS = [
   'PERCENTUAL SOBRE NF EXPEDIDA',
-  'ARMAZENAGEM POR POSICAO PALLET [AG]',
-  'ARMAZENAGEM POR POSICAO PALLET [AT]',
   'ARMAZENAGEM POR POSICAO PALLET [AG/AT]',
   'ARMAZENAGEM EXCEDENTE',
-  'ARMAZENAGEM EXCEDENTE NA AT',
   'HORA EXTRA',
   'ETIQUETAGEM POR UNIDADE',
   'READEQUACAO DE PRODUTOS - POR UNIDADE',
   'DESCARGA DE VEICULO',
-  'CONFERENCIA DE MERCADORIA',
-  'PALETIZACAO',
-  'SEPARACAO DE PEDIDOS',
-  'IMPOSTOS SERVICOS'
+  'CONFERENCIA DE MERCADORIA'
 ];
 
 const CATALOGO_DESPESAS = [
@@ -390,12 +386,39 @@ function armCollectServicosFromPack() {
 
 function armGetServiceCatalog() {
   const set = new Set(ARM_DEFAULT_SERVICOS);
-  armCollectServicosFromPack().forEach(n => set.add(n));
   (armPack?.customServices || []).forEach(n => {
     const norm = normalizeServicoName(n);
     if (norm) set.add(norm);
   });
   return [...set].sort((a, b) => a.localeCompare(b, 'pt'));
+}
+
+function armServiceSubtotal(servicos) {
+  return (servicos || []).filter(s => !/^IMPOSTO/i.test(s.normName || '')).reduce((a, s) => a + (Number(s.valor) || 0), 0);
+}
+
+function armCalcImpostos(subtotal) {
+  return Math.round(armNum(subtotal) * ARM_IMPOSTOS_RATE * 100) / 100;
+}
+
+function armGetMonthImpostos(month) {
+  if (!month) return 0;
+  if (month.impostosManual) return armNum(month.impostos);
+  const sub = armServiceSubtotal(month.servicos);
+  if (sub > 0) return armCalcImpostos(sub);
+  return armCalcImpostos(month.totalServicos || month.valorApurado || 0);
+}
+
+function armLancamentoServicosFromMonth(month) {
+  return (month.servicos || [])
+    .filter(s => !/^IMPOSTO/i.test(s.normName || ''))
+    .map(s => ({ ...s }));
+}
+
+function armMonthsWithData() {
+  return new Set((armPack?.months || [])
+    .filter(m => m.mesKey && (m.servicos?.length || m.nfRows?.length))
+    .map(m => m.mesKey));
 }
 
 function armBuildServicoFromEntry(rawName, qtde, valorUnit) {
@@ -418,10 +441,10 @@ function armBuildServicoFromEntry(rawName, qtde, valorUnit) {
 
 function armRecalcMonthTotals(month) {
   const servicos = month.servicos || [];
-  const subtotal = servicos.filter(s => !/^IMPOSTO/i.test(s.normName || '')).reduce((a, s) => a + (Number(s.valor) || 0), 0);
+  const subtotal = armServiceSubtotal(servicos);
   month.totalServicos = subtotal;
   month.valorApurado = subtotal;
-  month.impostos = armNum(month.impostos);
+  month.impostos = month.impostosManual ? armNum(month.impostos) : armCalcImpostos(subtotal);
   month.valorTotal = subtotal + month.impostos;
   month.belowMin = subtotal < (month.valorMinimo || ARM_MINIMO_CONTRATUAL);
   month.adicionais = servicos.filter(s => !s.isNf && s.catalogId !== 'impostos');
@@ -472,15 +495,48 @@ function armInitLancamentoSelectors() {
   const mesSel = $arm('lancMes');
   if (!anoSel || anoSel._armInit) return;
   anoSel._armInit = true;
+  if (!anoSel._armChangeBound) {
+    anoSel._armChangeBound = true;
+    anoSel.addEventListener('change', () => {
+      armRefreshLancamentoMonthOptions();
+      armLoadLancamentoDraft();
+    });
+  }
+  if (mesSel && !mesSel._armChangeBound) {
+    mesSel._armChangeBound = true;
+    mesSel.addEventListener('change', () => armLoadLancamentoDraft());
+  }
+  armRefreshLancamentoMonthOptions();
+}
+
+function armRefreshLancamentoMonthOptions() {
+  const anoSel = $arm('lancAno');
+  const mesSel = $arm('lancMes');
+  if (!anoSel || !mesSel) return;
+  const dataMonths = armMonthsWithData();
   const now = new Date();
   const curY = now.getFullYear();
-  const years = [];
-  for (let y = curY + 1; y >= curY - 3; y--) years.push(y);
-  anoSel.innerHTML = years.map(y => `<option value="${y}" ${y === curY ? 'selected' : ''}>${y}</option>`).join('');
+  const yearSet = new Set();
+  dataMonths.forEach(mk => {
+    const y = mk.slice(0, 4);
+    if (y) yearSet.add(y);
+  });
+  for (let y = curY + 1; y >= curY - 3; y--) yearSet.add(String(y));
+  const years = [...yearSet].map(Number).sort((a, b) => b - a);
+  const prevY = anoSel.value || String(curY);
+  anoSel.innerHTML = years.map(y =>
+    `<option value="${y}" ${String(y) === prevY ? 'selected' : ''}>${y}</option>`
+  ).join('');
+  if (!anoSel.value) anoSel.value = String(curY);
+  const y = anoSel.value;
+  const curM = mesSel.value || String(now.getMonth() + 1).padStart(2, '0');
   mesSel.innerHTML = ARM_MESES_NOME.slice(1).map((nome, i) => {
     const num = String(i + 1).padStart(2, '0');
-    const sel = (i + 1) === (now.getMonth() + 1) ? ' selected' : '';
-    return `<option value="${num}"${sel}>${nome}</option>`;
+    const mk = `${y}-${num}`;
+    const hasData = dataMonths.has(mk);
+    const sel = num === curM ? ' selected' : '';
+    const label = hasData ? `${nome} ●` : nome;
+    return `<option value="${num}"${sel} title="${hasData ? 'Mês com dados guardados' : ''}">${label}</option>`;
   }).join('');
 }
 
@@ -489,6 +545,8 @@ function armBlankLancamentoDraft(mesKey) {
     mesKey,
     mesLabel: armMesNomeLong(mesKey, ''),
     impostos: 0,
+    impostosManual: false,
+    entrySource: '',
     servicos: [armBuildServicoFromEntry('PERCENTUAL SOBRE NF EXPEDIDA', 0, ARM_NF_RATE)]
   };
 }
@@ -501,11 +559,16 @@ function armLoadLancamentoDraft() {
   }
   const existing = (armPack?.months || []).find(m => m.mesKey === mesKey);
   if (existing) {
+    const servicos = armLancamentoServicosFromMonth(existing);
+    const subtotal = armServiceSubtotal(servicos);
+    const impostosManual = !!existing.impostosManual;
     armLancamentoDraft = {
       mesKey,
       mesLabel: armMesLabel(existing),
-      impostos: armNum(existing.impostos),
-      servicos: (existing.servicos || []).map(s => ({ ...s }))
+      entrySource: existing.entrySource || (existing.format === 'manual' ? 'manual' : 'excel'),
+      impostosManual,
+      impostos: impostosManual ? armNum(existing.impostos) : armCalcImpostos(subtotal),
+      servicos: servicos.length ? servicos : armBlankLancamentoDraft(mesKey).servicos
     };
     armNfUploadRows = (existing.nfRows || []).map(r => ({ ...r }));
   } else {
@@ -548,12 +611,25 @@ function renderArmLancamentoForm() {
   if (!body || !draft) return;
   body.innerHTML = (draft.servicos || []).map((s, i) => armLancamentoRowHtml(s, i)).join('');
   const imp = $arm('lancImpostos');
-  if (imp) imp.value = draft.impostos ? fmtArmNum(draft.impostos, 2) : '';
+  if (imp && document.activeElement !== imp) {
+    imp.value = draft.impostos ? fmtArmNum(draft.impostos, 2) : '';
+  }
+  const impLbl = $arm('lancImpostosLabel');
+  if (impLbl) {
+    impLbl.textContent = draft.impostosManual
+      ? `${ARM_IMPOSTOS_LABEL} (valor manual)`
+      : ARM_IMPOSTOS_LABEL;
+  }
   armRefreshLancamentoSummary();
   const note = $arm('lancSaveNote');
   if (note) {
-    const saved = (armPack?.months || []).some(m => m.mesKey === draft.mesKey);
-    note.textContent = saved ? `Último guardado: ${draft.mesLabel}` : 'Mês ainda não guardado';
+    const saved = (armPack?.months || []).find(m => m.mesKey === draft.mesKey);
+    if (saved) {
+      const src = draft.entrySource === 'manual' ? 'manual' : 'Excel';
+      note.textContent = `Dados carregados (${src}) — ${draft.mesLabel}`;
+    } else {
+      note.textContent = 'Mês ainda não guardado';
+    }
   }
   if (typeof scheduleTableSort === 'function') scheduleTableSort();
 }
@@ -561,16 +637,31 @@ function renderArmLancamentoForm() {
 function armRefreshLancamentoSummary() {
   const draft = armLancamentoDraft;
   if (!draft) return;
-  const subtotal = (draft.servicos || []).filter(s => !/^IMPOSTO/i.test(s.normName || '')).reduce((a, s) => a + (Number(s.valor) || 0), 0);
+  const subtotal = armServiceSubtotal(draft.servicos);
+  if (!draft.impostosManual) draft.impostos = armCalcImpostos(subtotal);
   const imp = armNum(draft.impostos);
   const typ = $arm('lancTypology');
   if (typ) typ.innerHTML = armTypologySummaryHtml(draft.servicos);
   const subEl = $arm('lancSubtotal');
   const impEl = $arm('lancImpostosDisp');
+  const impSumLbl = $arm('lancImpostosSumLabel');
+  const impLbl = $arm('lancImpostosLabel');
   const totEl = $arm('lancTotal');
   if (subEl) subEl.textContent = armFmtMoney(subtotal);
   if (impEl) impEl.textContent = armFmtMoney(imp);
+  if (impSumLbl) {
+    impSumLbl.textContent = draft.impostosManual ? 'Impostos (manual)' : ARM_IMPOSTOS_LABEL;
+  }
+  if (impLbl) {
+    impLbl.textContent = draft.impostosManual
+      ? `${ARM_IMPOSTOS_LABEL} (valor manual)`
+      : ARM_IMPOSTOS_LABEL;
+  }
   if (totEl) totEl.textContent = armFmtMoney(subtotal + imp);
+  const impInp = $arm('lancImpostos');
+  if (impInp && document.activeElement !== impInp && !draft.impostosManual) {
+    impInp.value = imp > 0 ? fmtArmNum(imp, 2) : '';
+  }
 }
 
 function armLancamentoRowChange(idx) {
@@ -633,6 +724,9 @@ async function armSaveLancamento() {
   }
   const impInp = $arm('lancImpostos');
   draft.impostos = armNum(impInp?.value);
+  if (!draft.impostosManual) {
+    draft.impostos = armCalcImpostos(armServiceSubtotal(draft.servicos));
+  }
   draft.servicos = (draft.servicos || []).filter(s => (s.valor || 0) > 0 || (s.qtde || 0) > 0);
   if (!draft.servicos.length) {
     armToast('Adiciona pelo menos uma linha com quantidade ou valor.', 'error');
@@ -650,6 +744,7 @@ async function armSaveLancamento() {
     entrySource: 'manual',
     manualUpdatedAt: new Date().toISOString(),
     impostos: draft.impostos,
+    impostosManual: !!draft.impostosManual,
     valorMinimo: ARM_MINIMO_CONTRATUAL,
     servicos: draft.servicos.map(s => ({ ...s })),
     nfRows: nfSource.map(r => applySapToArmNf({ ...r, mesKey: draft.mesKey }))
@@ -681,6 +776,7 @@ async function armSaveLancamento() {
   const saved = await persistArmPack(armPack);
   updateArmFileZone();
   armToast(`${armMesLabel(month)} guardado${saved ? ' na cloud' : ''}.`, 'success');
+  armRefreshLancamentoMonthOptions();
   renderArmLancamentoForm();
 }
 
@@ -832,9 +928,17 @@ function renderArmNfUploadTable() {
 
 function renderArmLancamento() {
   armInitLancamentoSelectors();
+  armRefreshLancamentoMonthOptions();
   if (!armLancamentoDraft) armLoadLancamentoDraft();
   else renderArmLancamentoForm();
   renderArmNfUploadTable();
+}
+
+function armLancamentoResetImpostosAuto() {
+  if (!armLancamentoDraft) return;
+  armLancamentoDraft.impostosManual = false;
+  armLancamentoDraft.impostos = armCalcImpostos(armServiceSubtotal(armLancamentoDraft.servicos));
+  renderArmLancamentoForm();
 }
 
 function armCleanFileBase(fileName) {
@@ -933,7 +1037,10 @@ function armDedupePackMonths(pack) {
 
 function armNormalizePackMonths(pack) {
   if (!pack?.months?.length) return pack;
-  pack.months.forEach(armNormalizeMonth);
+  pack.months.forEach(m => {
+    armNormalizeMonth(m);
+    armRecalcMonthTotals(m);
+  });
   return armDedupePackMonths(pack);
 }
 
@@ -1137,7 +1244,7 @@ function renderArmComparativoTable(months) {
     byYear[year].forEach(m => {
       const arm = armGetArmazenagemValor(m);
       const nfBase = armGetNfBase(m);
-      const imp = armNum(m.impostos);
+      const imp = armGetMonthImpostos(m);
       const pagoComImp = arm.pago + imp;
       const pctSem = armFmtPctGasto(arm.pago, nfBase);
       const pctCom = armFmtPctGasto(pagoComImp, nfBase);
@@ -1201,7 +1308,7 @@ function renderArmComparativoTable(months) {
           <th class="no-sort arm-col-ano">Ano</th>
           <th class="right no-sort arm-col-num" title="Valor faturação expedida">Vendas (NF base)</th>
           <th class="right no-sort arm-col-num" title="Subtotal serviços antes de impostos">Pago (s/ impostos)</th>
-          <th class="right no-sort arm-col-num" title="Impostos lançados manualmente">Impostos</th>
+          <th class="right no-sort arm-col-num" title="11,25% sobre subtotal (2% ISS + 9,25% PIS/COFINS)">Impostos</th>
           <th class="right no-sort arm-col-pct" title="Pago sem impostos ÷ vendas">% s/ vendas</th>
           <th class="right no-sort arm-col-pct" title="(Pago + impostos) ÷ vendas">% c/ impostos</th>
         </tr></thead>
@@ -1759,6 +1866,7 @@ function slimArmPackForPersist(pack) {
       totalServicos: n.totalServicos, valorMinimo: n.valorMinimo,
       valorApurado: n.valorApurado, valorTotal: n.valorTotal, belowMin: n.belowMin,
       impostos: armNum(n.impostos),
+      impostosManual: !!n.impostosManual,
       entrySource: n.entrySource || (n.format === 'manual' ? 'manual' : 'excel'),
       manualUpdatedAt: n.manualUpdatedAt || '',
       servicos: n.servicos, nfRows: n.nfRows, adicionais: n.adicionais,
@@ -1990,7 +2098,7 @@ function renderArmMensal() {
     mesKey: r => r.mesKey,
     mesLabel: r => armMesLabel(r),
     totalServicos: r => r.totalServicos,
-    impostos: r => armNum(r.impostos),
+    impostos: r => armGetMonthImpostos(r),
     valorMinimo: r => r.valorMinimo,
     belowMin: r => r.belowMin ? 1 : 0,
     nfCount: r => r.nfRows?.length || 0,
@@ -2001,7 +2109,7 @@ function renderArmMensal() {
   if (body) {
     body.innerHTML = rows.map(m => {
       const addVal = (m.adicionais || []).reduce((s, a) => s + a.valor, 0);
-      const imp = armNum(m.impostos);
+      const imp = armGetMonthImpostos(m);
       const cls = m.belowMin ? 'month-row-high' : '';
       const src = m.entrySource === 'manual' ? ' <span class="badge b-ok">Manual</span>' : '';
       const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
@@ -2536,10 +2644,12 @@ function initArmazem() {
   $arm('lancSaveBtn')?.addEventListener('click', () => armSaveLancamento());
   $arm('lancImpostos')?.addEventListener('input', () => {
     if (armLancamentoDraft) {
+      armLancamentoDraft.impostosManual = true;
       armLancamentoDraft.impostos = armNum($arm('lancImpostos')?.value);
       armRefreshLancamentoSummary();
     }
   });
+  $arm('lancImpostosAutoBtn')?.addEventListener('click', () => armLancamentoResetImpostosAuto());
 
   const nfZone = $arm('nfUploadZone');
   const nfInput = $arm('nfUploadInput');
@@ -2610,4 +2720,5 @@ window.armLancamentoAddRow = armLancamentoAddRow;
 window.armLancamentoAddCustomService = armLancamentoAddCustomService;
 window.armSaveLancamento = armSaveLancamento;
 window.armLoadLancamentoDraft = armLoadLancamentoDraft;
+window.armLancamentoResetImpostosAuto = armLancamentoResetImpostosAuto;
 window.armProcessNfUpload = armProcessNfUpload;
