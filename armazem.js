@@ -1,9 +1,11 @@
-// armazem.js v1.0.1
-const ARMAZEM_JS_VERSION = '1.0.1';
+// armazem.js v1.0.2
+const ARMAZEM_JS_VERSION = '1.0.2';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
 const ARM_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
+const ARM_MAX_FILE_BYTES = 15 * 1024 * 1024;
+const ARM_PARSE_TIMEOUT_MS = 90_000;
 
 const $arm = id => document.getElementById('arm-' + id);
 
@@ -56,6 +58,25 @@ function armSlot() {
 function armToast(msg, type) {
   if (typeof toast === 'function') toast(msg, type || 'success');
   else console.log('[armazem]', msg);
+}
+
+function armFmtBytes(n) {
+  const b = Number(n) || 0;
+  if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
+  return (b / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function armYield() {
+  return new Promise(r => setTimeout(r, 0));
+}
+
+function armWithTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(
+      `Timeout (${Math.round(ms / 1000)}s) ao processar ${label || 'ficheiro'} — ficheiro demasiado grande ou complexo.`
+    )), ms))
+  ]);
 }
 
 function armNum(v) {
@@ -441,7 +462,12 @@ async function readFileToWorkbook(file) {
 
 function mergeArmPack(prev, next) {
   if (!prev?.months?.length) return next;
-  if (!next?.months?.length) return prev;
+  if (!next?.months?.length) {
+    return {
+      ...prev,
+      failedFiles: [...(prev.failedFiles || []), ...(next.failedFiles || [])]
+    };
+  }
   const replace = new Set(next.months.map(m => m.mesKey || m.fileName));
   const months = [
     ...prev.months.filter(m => !replace.has(m.mesKey || m.fileName)),
@@ -451,27 +477,22 @@ function mergeArmPack(prev, next) {
     version: 2,
     updatedAt: new Date().toISOString(),
     months,
-    failedFiles: next.failedFiles || [],
-    fileBinaries: { ...(prev.fileBinaries || {}), ...(next.fileBinaries || {}) }
+    failedFiles: [...(prev.failedFiles || []), ...(next.failedFiles || [])]
   };
 }
 
 function buildArmPackFromFiles(fileResults) {
   const months = [];
   const failedFiles = [];
-  const fileBinaries = {};
   fileResults.forEach(fr => {
     if (fr.error) {
       failedFiles.push({ fileName: fr.fileName, error: fr.error });
       return;
     }
     months.push(fr.record);
-    if (fr.buffer && typeof arrayBufferToBase64 === 'function') {
-      fileBinaries[fr.fileName] = arrayBufferToBase64(fr.buffer);
-    }
   });
   months.sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
-  return { version: 2, updatedAt: new Date().toISOString(), months, failedFiles, fileBinaries };
+  return { version: 2, updatedAt: new Date().toISOString(), months, failedFiles };
 }
 
 function slimArmPackForPersist(pack) {
@@ -496,12 +517,18 @@ async function persistArmPack(pack) {
   const json = JSON.stringify(slim);
   const bytes = new TextEncoder().encode(json);
   if (bytes.length > ARM_PERSIST_MAX_JSON_BYTES) {
-    armToast('Dados demasiado grandes para guardar na cloud — reduz ficheiros.', 'error');
+    armToast('Dados demasiado grandes para guardar na cloud — reduz ficheiros ou meses com muitas NFs.', 'error');
     return false;
   }
   const label = `${pack.months.length} mês(es) armazém`;
-  await upsertExcelBinary(armSlot(), label, bytes.buffer);
-  return true;
+  try {
+    await upsertExcelBinary(armSlot(), label, bytes.buffer);
+    return true;
+  } catch (e) {
+    console.error('[armazem] persist', e);
+    armToast('Erro ao guardar na cloud: ' + (e.message || e), 'error');
+    return false;
+  }
 }
 
 function parseArmPackFromRec(rec) {
@@ -1003,38 +1030,97 @@ function armSetCatalog(sel) {
   armToast('Catálogo atualizado.');
 }
 
+function armSetProcessing(active, label) {
+  const spin = $arm('procSpin');
+  const btn = $arm('procBtn');
+  const note = $arm('procNote');
+  if (spin) spin.style.display = active ? 'inline-flex' : 'none';
+  if (btn) btn.disabled = active || !armPendingFiles.length;
+  if (note) {
+    if (active && label) {
+      note.textContent = label;
+      note.style.display = 'inline';
+    } else {
+      note.textContent = '';
+      note.style.display = 'none';
+    }
+  }
+}
+
+async function processOneArmFile(file) {
+  const size = file.size || 0;
+  if (size > ARM_MAX_FILE_BYTES) {
+    throw new Error(
+      `Ficheiro demasiado grande (${armFmtBytes(size)}). Limite ${armFmtBytes(ARM_MAX_FILE_BYTES)} — ` +
+      'ex.: Novembro 2025 (~24 MB) trava o browser; usa meses mais recentes em .xlsx ou remove a folha Arm.'
+    );
+  }
+  const { wb } = await armWithTimeout(readFileToWorkbook(file), ARM_PARSE_TIMEOUT_MS, file.name);
+  await armYield();
+  const record = await armWithTimeout(
+    Promise.resolve(parseArmazemWorkbook(wb, file.name)),
+    ARM_PARSE_TIMEOUT_MS,
+    file.name
+  );
+  return { fileName: file.name, record };
+}
+
 async function processArmFiles() {
   if (armCompany() !== 'DFB') {
     armToast('Avaliação Armazém disponível apenas para DFB.', 'error');
     return;
   }
-  if (!armPendingFiles.length && !armPack?.months?.length) return;
-  const spin = $arm('procSpin');
-  if (spin) spin.style.display = 'inline-flex';
+  if (!armPendingFiles.length) {
+    armToast('Seleciona ficheiros Excel para processar.', 'error');
+    return;
+  }
+  const pending = [...armPendingFiles];
+  armSetProcessing(true, `A processar 0/${pending.length}…`);
   try {
     const results = [];
-    for (const file of armPendingFiles) {
+    for (let i = 0; i < pending.length; i++) {
+      const file = pending[i];
+      armSetProcessing(true, `A processar ${i + 1}/${pending.length}: ${file.name}`);
       try {
-        const { wb, buffer } = await readFileToWorkbook(file);
-        const record = parseArmazemWorkbook(wb, file.name);
-        results.push({ fileName: file.name, record, buffer });
+        results.push(await processOneArmFile(file));
       } catch (err) {
-        results.push({ fileName: file.name, error: String(err.message || err) });
+        const msg = String(err.message || err);
+        console.error('[armazem] parse', file.name, err);
+        results.push({ fileName: file.name, error: msg });
+        armToast(`${file.name}: ${msg}`, 'error');
       }
+      await armYield();
     }
     const built = buildArmPackFromFiles(results);
+    const okN = built.months.length;
+    const failN = built.failedFiles?.length || 0;
+    if (!okN && failN) {
+      armToast(`Nenhum mês processado (${failN} erro(s)).`, 'error');
+      return;
+    }
+    if (!okN) {
+      armToast('Nenhum dado extraído dos ficheiros.', 'error');
+      return;
+    }
     armPack = mergeArmPack(armPack, built);
     refreshAllSapOnNfs();
     armPendingFiles = [];
     updateArmFileZone();
     const saved = await persistArmPack(armPack);
-    const failN = built.failedFiles?.length || 0;
-    armToast(`Processado: ${built.months.length} mês(es)${failN ? `, ${failN} erro(s)` : ''}${saved ? ' · guardado' : ''}.`);
-    switchArmTab('acumulado');
+    const totalMonths = armPack.months.length;
+    armToast(
+      `Processado: ${okN} novo(s), ${totalMonths} mês(es) no total` +
+      (failN ? `, ${failN} erro(s)` : '') +
+      (saved ? ' · guardado' : '') + '.',
+      failN ? 'error' : 'success'
+    );
+    switchArmTab(totalMonths === 1 ? 'mensal' : 'acumulado');
   } catch (err) {
-    armToast(String(err.message || err), 'error');
+    console.error('[armazem] processArmFiles', err);
+    armToast('Erro ao processar: ' + (err.message || err), 'error');
   } finally {
-    if (spin) spin.style.display = 'none';
+    armSetProcessing(false);
+    updateArmFileZone();
   }
 }
 
@@ -1142,11 +1228,11 @@ function initArmazem() {
   $arm('procBtn')?.addEventListener('click', () => processArmFiles());
   $arm('loadBtn')?.addEventListener('click', async () => {
     const ok = await loadSavedArmazem(false);
-    if (ok) switchArmTab('acumulado');
+    if (ok) switchArmTab((armPack?.months?.length || 0) === 1 ? 'mensal' : 'acumulado');
   });
   $arm('exportBtn')?.addEventListener('click', () => exportArmazemWorkbook());
 
   renderArmDfbGate();
   updateArmFileZone();
-  loadSavedArmazem(true);
+  loadSavedArmazem(true).catch(e => console.warn('[armazem] load saved', e));
 }
