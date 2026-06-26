@@ -1,5 +1,5 @@
-// armazem.js v1.0.0
-const ARMAZEM_JS_VERSION = '1.0.0';
+// armazem.js v1.0.1
+const ARMAZEM_JS_VERSION = '1.0.1';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -610,6 +610,28 @@ function renderArmDfbGate() {
   gate.style.display = armCompany() === 'DFB' ? 'none' : 'block';
 }
 
+function armIsExcelFile(file) {
+  return /\.xlsx?$/i.test(String(file?.name || ''));
+}
+
+function armFilterExcelFiles(fileList) {
+  return Array.from(fileList || []).filter(armIsExcelFile);
+}
+
+function armOnFileSelected(input) {
+  if (!input?.files?.length) return;
+  const files = armFilterExcelFiles(input.files);
+  if (!files.length) {
+    armToast('Seleciona ficheiros .xls ou .xlsx.', 'error');
+    input.value = '';
+    return;
+  }
+  armPendingFiles = files;
+  updateArmFileZone();
+  armToast(`${files.length} ficheiro(s) selecionado(s).`, 'success');
+  input.value = '';
+}
+
 function updateArmFileZone() {
   const fn = $arm('fileFn');
   const list = $arm('fileList');
@@ -750,7 +772,7 @@ function renderArmAcumulado() {
     body.innerHTML = rows.map(r => `<tr>
       <td><strong>${armEsc(r.label)}</strong></td>
       <td class="right">${armFmtMoney(r.valor)}</td>
-      <td class="right">${fmt ? fmt(r.qtde) : r.qtde.toLocaleString('pt-BR')}</td>
+      <td class="right">${typeof fmt === 'function' ? fmt(r.qtde) : r.qtde.toLocaleString('pt-BR')}</td>
       <td class="right">${r.months.length}</td>
       <td style="font-size:11px">${armEsc(r.servicos.join(' · '))}</td>
     </tr>`).join('');
@@ -1096,22 +1118,25 @@ function initArmazem() {
   const zone = $arm('fileZone');
   const input = $arm('fileInput');
   if (zone && input) {
-    zone.addEventListener('click', () => input.click());
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
     zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
     zone.addEventListener('drop', e => {
       e.preventDefault(); zone.classList.remove('drag');
       if (e.dataTransfer.files.length) {
-        armPendingFiles = Array.from(e.dataTransfer.files);
+        const files = armFilterExcelFiles(e.dataTransfer.files);
+        if (!files.length) {
+          armToast('Arrasta ficheiros .xls ou .xlsx.', 'error');
+          return;
+        }
+        armPendingFiles = files;
         updateArmFileZone();
+        armToast(`${files.length} ficheiro(s) selecionado(s).`, 'success');
       }
     });
-    input.addEventListener('change', e => {
-      if (e.target.files.length) {
-        armPendingFiles = Array.from(e.target.files);
-        updateArmFileZone();
-      }
-    });
+    if (!input._armChangeBound) {
+      input._armChangeBound = true;
+      input.addEventListener('change', e => armOnFileSelected(e.target));
+    }
   }
 
   $arm('procBtn')?.addEventListener('click', () => processArmFiles());

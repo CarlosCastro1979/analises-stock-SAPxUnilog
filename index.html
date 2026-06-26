@@ -423,7 +423,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.0</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.1</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1705,13 +1705,13 @@ select.cad-inp{cursor:pointer;}
         O export SAP NF é reutilizado do módulo <strong>Fretes CT-e</strong> (cobre todos os meses de uma vez).
       </p>
       <div class="sl">Excels mensais Unilog</div>
-      <div class="uz" id="arm-fileZone" style="padding:20px;">
+      <div class="uz" id="arm-fileZone" style="padding:20px;" onclick="document.getElementById('arm-fileInput').click()">
         <div style="font-size:26px;margin-bottom:8px">📊</div>
         <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta os ficheiros mensais</div>
         <div style="font-size:11px;color:var(--muted)">Receita_Custo DELTA — .xls (v1) ou .xlsx (v2)</div>
         <div id="arm-fileFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
         <div id="arm-fileList" class="arm-file-list" style="display:none"></div>
-        <input type="file" id="arm-fileInput" accept=".xlsx,.xls" multiple>
+        <input type="file" id="arm-fileInput" accept=".xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple onchange="typeof armOnFileSelected==='function'&&armOnFileSelected(this)">
       </div>
       <div id="arm-sapNote" class="data-warn" style="margin-top:14px;font-size:12px;"></div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
@@ -7550,7 +7550,7 @@ function applyResizable(){scheduleColResize();}
 
 </script>
 <script src="fretes.js?v=1.7.12"></script>
-<script src="armazem.js?v=1.0.0"></script>
+<script src="armazem.js?v=1.0.1"></script>
 <script>
 init();
 initMultiselects();
