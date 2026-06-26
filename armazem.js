@@ -1,11 +1,13 @@
-// armazem.js v1.0.8
-const ARMAZEM_JS_VERSION = '1.0.8';
+// armazem.js v1.0.9
+const ARMAZEM_JS_VERSION = '1.0.9';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
 const ARM_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
 const ARM_MAX_FILE_BYTES = 15 * 1024 * 1024;
+const ARM_ABSOLUTE_MAX_FILE_BYTES = 40 * 1024 * 1024;
 const ARM_PARSE_TIMEOUT_MS = 90_000;
+const ARM_LARGE_PARSE_TIMEOUT_MS = 180_000;
 
 const $arm = id => document.getElementById('arm-' + id);
 
@@ -448,6 +450,37 @@ function findResumoSheetName(wb) {
   return wb.SheetNames.find(n => /^resumo de servi/.test(normSheetName(n))) || null;
 }
 
+function isArmBloatSheet(name) {
+  const n = normSheetName(name);
+  return /^(arm|stock)$/.test(n) || /^armazen/.test(n) || /estoque/.test(n);
+}
+
+function pickBillingSheets(sheetNames) {
+  if (!sheetNames?.length) return [];
+  const names = [...sheetNames];
+  const v2Keep = names.filter(n => {
+    if (isArmBloatSheet(n)) return false;
+    const s = normSheetName(n);
+    return /^resumo de servi/.test(s) || /^informa/.test(s);
+  });
+  if (v2Keep.length) return v2Keep;
+  const v1Keep = names.filter(n => !isArmBloatSheet(n));
+  return v1Keep.length ? v1Keep : [names[0]];
+}
+
+function armShortMonthLabel(fileName, mesKey, mesLabel) {
+  if (mesKey) {
+    const m = mesKey.match(/^(\d{4})-(\d{2})$/);
+    if (m) {
+      const mi = parseInt(m[2], 10);
+      return `${ARM_MESES_NOME[mi] || m[2]} ${m[1]}`;
+    }
+  }
+  const fromName = parseMonthFromFileName(fileName);
+  if (fromName.mesKey) return armMesNomeLong(fromName.mesKey, fromName.mesLabel);
+  return mesLabel || fileName;
+}
+
 function parseBrDate(s) {
   const t = String(s || '').trim();
   const m = t.match(/^(\d{2})[./](\d{2})[./](\d{2,4})/);
@@ -460,7 +493,8 @@ function isNfPercentualService(name) {
   return normalizeServicoName(name) === 'PERCENTUAL SOBRE NF EXPEDIDA';
 }
 
-function parseArmazemV2(wb, fileName) {
+function parseArmazemV2(wb, fileName, opts) {
+  const skipNfDetail = !!opts?.skipNfDetail;
   const infoName = findSheetName(wb, /^Informa/);
   const resumoName = findResumoSheetName(wb);
   const diarioName = findSheetName(wb, /^Detalhamento Di/);
@@ -525,45 +559,47 @@ function parseArmazemV2(wb, fileName) {
   }
 
   const nfRows = [];
-  const nfSheet = wb.SheetNames.find(n => /PERCENTUAL SOBRE NF/i.test(n));
-  if (nfSheet) {
-    const m = sheetToMatrix(wb.Sheets[nfSheet]);
-    let dataHdr = -1;
-    for (let r = 0; r < m.length; r++) {
-      if (/Data Cobran/i.test(cellText(m, r, 0)) && /Documento/i.test(cellText(m, r, 1))) { dataHdr = r; break; }
-    }
-    if (dataHdr >= 0) {
-      for (let r = dataHdr + 1; r < m.length; r++) {
-        const dt = cellText(m, r, 0);
-        const nf = cellText(m, r, 1);
-        const valorNF = armCellNum(m, r, 2);
-        const fee = armCellNum(m, r, 3);
-        if (!nf || nf === '-') continue;
-        nfRows.push({
-          data: parseBrDate(dt), nf, valorNF, taxa: ARM_NF_RATE,
-          fee, mesKey: meta.mesKey, fileName
-        });
+  if (!skipNfDetail) {
+    const nfSheet = wb.SheetNames.find(n => /PERCENTUAL SOBRE NF/i.test(n));
+    if (nfSheet) {
+      const m = sheetToMatrix(wb.Sheets[nfSheet]);
+      let dataHdr = -1;
+      for (let r = 0; r < m.length; r++) {
+        if (/Data Cobran/i.test(cellText(m, r, 0)) && /Documento/i.test(cellText(m, r, 1))) { dataHdr = r; break; }
       }
-    }
-  } else if (diarioName) {
-    const m = sheetToMatrix(wb.Sheets[diarioName]);
-    let hdrD = -1;
-    for (let r = 0; r < m.length; r++) {
-      if (/^Data$/i.test(cellText(m, r, 0)) && /Tipo de Servi/i.test(cellText(m, r, 1))) { hdrD = r; break; }
-    }
-    if (hdrD >= 0) {
-      for (let r = hdrD + 1; r < m.length; r++) {
-        const dt = cellText(m, r, 0);
-        const svc = cellText(m, r, 1);
-        if (!isNfPercentualService(svc)) continue;
-        const nf = cellText(m, r, 2);
-        const valorNF = armCellNum(m, r, 3);
-        const fee = armCellNum(m, r, 4);
-        if (!nf || nf === '-') continue;
-        nfRows.push({
-          data: parseBrDate(dt), nf, valorNF, taxa: ARM_NF_RATE, fee,
-          mesKey: meta.mesKey, fileName
-        });
+      if (dataHdr >= 0) {
+        for (let r = dataHdr + 1; r < m.length; r++) {
+          const dt = cellText(m, r, 0);
+          const nf = cellText(m, r, 1);
+          const valorNF = armCellNum(m, r, 2);
+          const fee = armCellNum(m, r, 3);
+          if (!nf || nf === '-') continue;
+          nfRows.push({
+            data: parseBrDate(dt), nf, valorNF, taxa: ARM_NF_RATE,
+            fee, mesKey: meta.mesKey, fileName
+          });
+        }
+      }
+    } else if (diarioName) {
+      const m = sheetToMatrix(wb.Sheets[diarioName]);
+      let hdrD = -1;
+      for (let r = 0; r < m.length; r++) {
+        if (/^Data$/i.test(cellText(m, r, 0)) && /Tipo de Servi/i.test(cellText(m, r, 1))) { hdrD = r; break; }
+      }
+      if (hdrD >= 0) {
+        for (let r = hdrD + 1; r < m.length; r++) {
+          const dt = cellText(m, r, 0);
+          const svc = cellText(m, r, 1);
+          if (!isNfPercentualService(svc)) continue;
+          const nf = cellText(m, r, 2);
+          const valorNF = armCellNum(m, r, 3);
+          const fee = armCellNum(m, r, 4);
+          if (!nf || nf === '-') continue;
+          nfRows.push({
+            data: parseBrDate(dt), nf, valorNF, taxa: ARM_NF_RATE, fee,
+            mesKey: meta.mesKey, fileName
+          });
+        }
       }
     }
   }
@@ -573,11 +609,15 @@ function parseArmazemV2(wb, fileName) {
     fileName, format: 'v2', meta, depositante, dataInicial, dataFinal,
     totalServicos: totalServicos || totalCalc,
     valorMinimo, valorApurado: valorApurado || totalCalc, valorTotal,
-    servicos, nfRows
+    servicos, nfRows,
+    partialParse: skipNfDetail,
+    nfSkipped: skipNfDetail,
+    parseNote: skipNfDetail ? 'NF detalhe omitido (ficheiro grande)' : ''
   });
 }
 
-function parseArmazemV1(wb, fileName) {
+function parseArmazemV1(wb, fileName, opts) {
+  const skipNfDetail = !!opts?.skipNfDetail;
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const m = sheetToMatrix(sheet);
   const meta = parseMonthFromFileName(fileName);
@@ -622,24 +662,26 @@ function parseArmazemV1(wb, fileName) {
   }
 
   const nfRows = [];
-  for (let r = 0; r < m.length; r++) {
-    const svc = cellText(m, r, 2);
-    if (!isNfPercentualService(svc)) continue;
-    let hdr = r + 3;
-    while (hdr < m.length && !/N[oº] Doc/i.test(cellText(m, hdr, 7)) && !/N[oº] Doc/i.test(cellText(m, hdr, 8))) hdr++;
-    if (hdr >= m.length) continue;
-    for (let rr = hdr + 1; rr < m.length; rr++) {
-      if (/^Regra:/i.test(cellText(m, rr, 1)) || /^\s*Resumo\s*$/i.test(cellText(m, rr, 1))) break;
-      const nf = cellText(m, rr, 7);
-      const dt = cellText(m, rr, 1);
-      const valorNF = armCellNum(m, rr, 28);
-      const taxa = armCellNum(m, rr, 32) || ARM_NF_RATE;
-      const fee = armCellNum(m, rr, 36);
-      if (!nf) continue;
-      nfRows.push({
-        data: parseBrDate(dt), nf, valorNF, taxa, fee,
-        mesKey: meta.mesKey, fileName
-      });
+  if (!skipNfDetail) {
+    for (let r = 0; r < m.length; r++) {
+      const svc = cellText(m, r, 2);
+      if (!isNfPercentualService(svc)) continue;
+      let hdr = r + 3;
+      while (hdr < m.length && !/N[oº] Doc/i.test(cellText(m, hdr, 7)) && !/N[oº] Doc/i.test(cellText(m, hdr, 8))) hdr++;
+      if (hdr >= m.length) continue;
+      for (let rr = hdr + 1; rr < m.length; rr++) {
+        if (/^Regra:/i.test(cellText(m, rr, 1)) || /^\s*Resumo\s*$/i.test(cellText(m, rr, 1))) break;
+        const nf = cellText(m, rr, 7);
+        const dt = cellText(m, rr, 1);
+        const valorNF = armCellNum(m, rr, 28);
+        const taxa = armCellNum(m, rr, 32) || ARM_NF_RATE;
+        const fee = armCellNum(m, rr, 36);
+        if (!nf) continue;
+        nfRows.push({
+          data: parseBrDate(dt), nf, valorNF, taxa, fee,
+          mesKey: meta.mesKey, fileName
+        });
+      }
     }
   }
 
@@ -651,7 +693,10 @@ function parseArmazemV1(wb, fileName) {
     fileName, format: 'v1', meta, depositante, dataInicial, dataFinal,
     totalServicos: totalCalc, valorMinimo: ARM_MINIMO_CONTRATUAL,
     valorApurado: totalCalc, valorTotal: totalCalc,
-    servicos, nfRows
+    servicos, nfRows,
+    partialParse: skipNfDetail,
+    nfSkipped: skipNfDetail,
+    parseNote: skipNfDetail ? 'NF detalhe omitido (ficheiro grande)' : ''
   });
 }
 
@@ -673,13 +718,16 @@ function buildMonthRecord(opts) {
     belowMin,
     servicos: opts.servicos || [],
     nfRows,
-    adicionais: (opts.servicos || []).filter(s => !s.isNf && s.catalogId !== 'impostos')
+    adicionais: (opts.servicos || []).filter(s => !s.isNf && s.catalogId !== 'impostos'),
+    partialParse: !!opts.partialParse,
+    nfSkipped: !!opts.nfSkipped,
+    parseNote: opts.parseNote || ''
   };
 }
 
-function parseArmazemWorkbook(wb, fileName) {
+function parseArmazemWorkbook(wb, fileName, opts) {
   const hasV2 = !!findResumoSheetName(wb);
-  const rec = hasV2 ? parseArmazemV2(wb, fileName) : parseArmazemV1(wb, fileName);
+  const rec = hasV2 ? parseArmazemV2(wb, fileName, opts) : parseArmazemV1(wb, fileName, opts);
   if (armCompany() !== 'DFB') {
     rec.companyWarning = 'Módulo configurado para Delta Foods Brasil (DFB).';
   }
@@ -729,14 +777,27 @@ function detectParserVersion(wb) {
   return findResumoSheetName(wb) ? 'v2' : 'v1';
 }
 
-async function readFileToWorkbook(file) {
+async function readFileToWorkbook(file, opts) {
   const buf = await file.arrayBuffer();
-  try {
-    return { wb: XLSX.read(buf, { type: 'array' }), buffer: buf };
-  } catch (err) {
-    const msg = typeof formatXlsxReadError === 'function' ? formatXlsxReadError(err) : String(err.message || err);
-    throw new Error(msg);
+  const readArr = (options) => {
+    try {
+      return XLSX.read(buf, { type: 'array', ...options });
+    } catch (err) {
+      const msg = typeof formatXlsxReadError === 'function' ? formatXlsxReadError(err) : String(err.message || err);
+      throw new Error(msg);
+    }
+  };
+
+  if (!opts?.lightweight) {
+    return { wb: readArr(), buffer: buf };
   }
+
+  const probe = readArr({ bookSheets: true });
+  const allNames = probe.SheetNames || [];
+  const toLoad = pickBillingSheets(allNames);
+  const skipped = allNames.filter(n => !toLoad.includes(n));
+  const wb = skipped.length ? readArr({ sheets: toLoad }) : readArr();
+  return { wb, buffer: buf, sheetFilter: { loaded: toLoad, skipped } };
 }
 
 function mergeArmPack(prev, next) {
@@ -784,7 +845,8 @@ function slimArmPackForPersist(pack) {
       dataInicial: m.dataInicial, dataFinal: m.dataFinal,
       totalServicos: m.totalServicos, valorMinimo: m.valorMinimo,
       valorApurado: m.valorApurado, valorTotal: m.valorTotal, belowMin: m.belowMin,
-      servicos: m.servicos, nfRows: m.nfRows, adicionais: m.adicionais
+      servicos: m.servicos, nfRows: m.nfRows, adicionais: m.adicionais,
+      partialParse: m.partialParse, nfSkipped: m.nfSkipped, parseNote: m.parseNote
     })),
     failedFiles: pack.failedFiles || []
   };
@@ -947,13 +1009,19 @@ function updateArmFileZone() {
   if (fn) fn.textContent = n ? `✓ ${n} mês(es) carregado(s)` : (pend ? `${pend} ficheiro(s) selecionado(s)` : '');
   zone?.classList.toggle('loaded', n > 0 || pend > 0);
   if (list) {
-    const names = [
-      ...(armPack?.months || []).map(m => m.fileName),
-      ...armPendingFiles.map(f => f.name + ' (pendente)')
-    ];
-    if (names.length) {
+    const lines = [];
+    (armPack?.months || []).forEach(m => {
+      let line = m.fileName;
+      if (m.partialParse) line += ' (resumo OK · NF omitido)';
+      lines.push(line);
+    });
+    armPendingFiles.forEach(f => lines.push(f.name + ' (pendente — clicar Processar)'));
+    (armPack?.failedFiles || []).forEach(f => {
+      lines.push(`${f.fileName} (erro: ${f.error || 'desconhecido'})`);
+    });
+    if (lines.length) {
       list.style.display = 'block';
-      list.innerHTML = names.map(n => `<div>${armEsc(n)}</div>`).join('');
+      list.innerHTML = lines.map(n => `<div>${armEsc(n)}</div>`).join('');
     } else {
       list.style.display = 'none';
       list.innerHTML = '';
@@ -1010,14 +1078,15 @@ function renderArmMensal() {
     body.innerHTML = rows.map(m => {
       const addVal = (m.adicionais || []).reduce((s, a) => s + a.valor, 0);
       const cls = m.belowMin ? 'month-row-high' : '';
+      const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
       return `<tr class="${cls}">
         <td>${armEsc(m.mesLabel)}</td>
         <td class="right">${armFmtMoney(m.totalServicos)}</td>
         <td class="right">${armFmtMoney(m.valorMinimo)}</td>
         <td>${m.belowMin ? '<span class="badge b-flag">Abaixo mínimo</span>' : '<span class="badge b-ok">OK</span>'}</td>
-        <td class="right">${m.nfRows?.length || 0}</td>
+        <td class="right">${m.nfRows?.length || 0}${m.nfSkipped ? ' <span class="badge b-warn" title="Detalhe NF omitido — ficheiro grande">—</span>' : ''}</td>
         <td class="right">${armFmtMoney(addVal)}</td>
-        <td style="font-size:10px;color:var(--muted)">${armEsc(m.fileName)}</td>
+        <td style="font-size:10px;color:var(--muted)">${armEsc(m.fileName)}${partial}</td>
       </tr>`;
     }).join('');
   }
@@ -1328,19 +1397,36 @@ function armSetProcessing(active, label) {
 
 async function processOneArmFile(file) {
   const size = file.size || 0;
-  if (size > ARM_MAX_FILE_BYTES) {
+  if (size > ARM_ABSOLUTE_MAX_FILE_BYTES) {
     throw new Error(
-      `Ficheiro demasiado grande (${armFmtBytes(size)}). Limite ${armFmtBytes(ARM_MAX_FILE_BYTES)} — ` +
-      'ex.: Novembro 2025 (~24 MB) trava o browser; usa meses mais recentes em .xlsx ou remove a folha Arm.'
+      `Ficheiro demasiado grande (${armFmtBytes(size)}). Limite absoluto ${armFmtBytes(ARM_ABSOLUTE_MAX_FILE_BYTES)}.`
     );
   }
-  const { wb } = await armWithTimeout(readFileToWorkbook(file), ARM_PARSE_TIMEOUT_MS, file.name);
-  await armYield();
-  const record = await armWithTimeout(
-    Promise.resolve(parseArmazemWorkbook(wb, file.name)),
-    ARM_PARSE_TIMEOUT_MS,
+  const lightweight = size >= ARM_MAX_FILE_BYTES;
+  const timeoutMs = lightweight ? ARM_LARGE_PARSE_TIMEOUT_MS : ARM_PARSE_TIMEOUT_MS;
+  const { wb, sheetFilter } = await armWithTimeout(
+    readFileToWorkbook(file, lightweight ? { lightweight: true } : {}),
+    timeoutMs,
     file.name
   );
+  await armYield();
+  const parseOpts = lightweight ? { skipNfDetail: true } : {};
+  const record = await armWithTimeout(
+    Promise.resolve(parseArmazemWorkbook(wb, file.name, parseOpts)),
+    timeoutMs,
+    file.name
+  );
+  if (lightweight) {
+    const skipped = sheetFilter?.skipped?.length ? sheetFilter.skipped.join(', ') : 'folhas extra';
+    const monthLbl = armShortMonthLabel(file.name, record.mesKey, record.mesLabel);
+    record.partialParse = true;
+    record.nfSkipped = true;
+    record.parseNote = `Resumo OK; NF detalhe omitido (${armFmtBytes(size)}; ignorado: ${skipped})`;
+    record._partialToast = `${monthLbl}: resumo OK, NF detalhe omitido (ficheiro grande).`;
+  }
+  if (!record.servicos?.length) {
+    throw new Error('Nenhum serviço no bloco Resumo — verifica o ficheiro ou formato.');
+  }
   return { fileName: file.name, record };
 }
 
@@ -1367,6 +1453,11 @@ async function processArmFiles() {
         console.error('[armazem] parse', file.name, err);
         results.push({ fileName: file.name, error: msg });
         armToast(`${file.name}: ${msg}`, 'error');
+      }
+      const last = results[results.length - 1];
+      if (last?.record?._partialToast) {
+        armToast(last.record._partialToast, 'info');
+        delete last.record._partialToast;
       }
       await armYield();
     }

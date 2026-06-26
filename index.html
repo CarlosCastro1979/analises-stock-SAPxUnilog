@@ -341,6 +341,7 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-armazem .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;}
 #page-armazem .b-ok{background:#dcfce7;color:var(--green);}
 #page-armazem .b-flag{background:#fee2e2;color:var(--red);}
+#page-armazem .b-warn{background:#fef3c7;color:var(--yellow);}
 #page-armazem .b-min{background:#fef3c7;color:var(--yellow);}
 #page-armazem .b-fix165{background:#ffedd5;color:#c2410c;}
 #page-armazem .data-warn{background:#fffbeb;border:1px solid #fcd34d;color:#92400e;border-radius:6px;padding:10px 12px;margin:0 0 12px;font-size:12px;}
@@ -1720,7 +1721,7 @@ select.cad-inp{cursor:pointer;}
       <div class="uz" id="arm-fileZone" style="padding:20px;" onclick="document.getElementById('arm-fileInput').click()">
         <div style="font-size:26px;margin-bottom:8px">📊</div>
         <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta os ficheiros mensais</div>
-        <div style="font-size:11px;color:var(--muted)">Receita_Custo DELTA — .xls (v1) ou .xlsx (v2)</div>
+        <div style="font-size:11px;color:var(--muted)">Receita_Custo DELTA — .xls (v1) ou .xlsx (v2). Ficheiros &gt;15 MB: extrai só o Resumo (ignora folha Arm / NF detalhe).</div>
         <div id="arm-fileFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
         <div id="arm-fileList" class="arm-file-list" style="display:none"></div>
         <input type="file" id="arm-fileInput" accept=".xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple onchange="typeof armOnFileSelected==='function'&&armOnFileSelected(this)">
@@ -7565,7 +7566,7 @@ function applyResizable(){scheduleColResize();}
 
 </script>
 <script src="fretes.js?v=1.7.12"></script>
-<script src="armazem.js?v=1.0.8" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
+<script src="armazem.js?v=1.0.9" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
 <script>
 if(typeof initArmazem!=='function'){
   const e=document.getElementById('arm-initErr');
