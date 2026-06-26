@@ -1,5 +1,5 @@
-// armazem.js v1.0.21
-const ARMAZEM_JS_VERSION = '1.0.21';
+// armazem.js v1.0.22
+const ARMAZEM_JS_VERSION = '1.0.22';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -842,6 +842,7 @@ async function armProcessNfUpload(file) {
     return;
   }
   try {
+    await armEnsureSapLoaded();
     const { wb } = await readFileToWorkbook(file, {});
     armNfUploadRows = parseNfListFromWorkbook(wb, file.name, mesKey);
     if (!armNfUploadRows.length) {
@@ -858,14 +859,11 @@ async function armProcessNfUpload(file) {
 
 function renderArmNfUploadTable() {
   const wrap = $arm('nfUploadSummary');
-  const api = sapApi();
   const sapNote = $arm('nfUploadSapNote');
   if (sapNote) {
-    const nSap = api?.isSapLoaded() ? Object.keys(api.getMap()).length : 0;
-    sapNote.innerHTML = nSap
-      ? `✓ SAP NF (ZFACT) carregado — ${nSap.toLocaleString('pt-BR')} NFs disponíveis para validação.`
-      : '⚠ Carrega o Excel SAP NF no módulo <strong>Fretes CT-e</strong> para validar contra ZFACT.';
+    sapNote.innerHTML = armSapStatusHtml();
     sapNote.style.display = 'block';
+    sapNote.classList.toggle('data-warn', !sapApi()?.isSapLoaded?.());
   }
   if (!armNfUploadRows.length) {
     if (wrap) wrap.style.display = 'none';
@@ -909,11 +907,10 @@ function renderArmNfUploadTable() {
     body.innerHTML = rows.map(r => {
       const diff = r.sapFound ? armNum(r.valorNF) - armNum(r.sapValor) : null;
       let cls = '';
-      if (r.sapMissing) cls = 'nf-sap-missing';
+      if (r.sapNotLoaded) cls = 'nf-sap-pending';
+      else if (r.sapMissing) cls = 'nf-sap-missing';
       else if (r.valorDiff) cls = 'nf-val-mismatch';
-      const estado = r.sapMissing ? '<span class="badge b-flag">Ausente ZFACT</span>'
-        : r.valorDiff ? '<span class="badge b-fix165">Δ valor</span>'
-        : '<span class="badge b-ok">OK</span>';
+      const estado = armNfEstadoBadge(r);
       return `<tr class="${cls}">
         <td>${armEsc(r.nf)}</td>
         <td class="right">${armFmtMoney(r.valorNF)}</td>
@@ -1744,6 +1741,63 @@ function sapApi() {
   return window.FretesSAP || null;
 }
 
+let _armSapEnsurePromise = null;
+
+/** Wait for shared Fretes SAP NF map (ZFACT) — no separate upload in Armazém. */
+async function armEnsureSapLoaded() {
+  if (sapApi()?.isSapLoaded?.()) return true;
+  if (_armSapEnsurePromise) return _armSapEnsurePromise;
+  _armSapEnsurePromise = (async () => {
+    try {
+      if (typeof loadSavedFretesFiles === 'function') {
+        await loadSavedFretesFiles(true);
+      } else if (sapApi()?.ensureLoaded) {
+        await sapApi().ensureLoaded(true);
+      }
+    } catch (e) {
+      console.warn('[armazem] ensure sap', e);
+    }
+    return !!sapApi()?.isSapLoaded?.();
+  })().finally(() => { _armSapEnsurePromise = null; });
+  return _armSapEnsurePromise;
+}
+
+function armGotoFretesPage(ev) {
+  ev?.preventDefault?.();
+  document.querySelector('.nt[data-page="fretes"]')?.click();
+}
+
+function armSapStatusHtml() {
+  const api = sapApi();
+  if (api?.isSapLoaded?.()) {
+    const n = Object.keys(api.getMap()).length;
+    return `✓ SAP NF (ZFACT) carregado — <strong>${n.toLocaleString('pt-BR')}</strong> NFs disponíveis (partilhado com Fretes, sem re-upload).`;
+  }
+  return '⚠ <strong>Carrega ZFACT em Dados/Fretes primeiro</strong> — menu '
+    + '<a href="#" class="arm-link-fretes">Fretes CT-e</a> → Excel SAP NF. '
+    + 'Não é necessário carregar outra vez aqui no Armazém.';
+}
+
+function armNfEstadoBadge(r) {
+  if (r.sapNotLoaded) return '<span class="badge b-warn">SAP não carregado</span>';
+  if (r.sapMissing) return '<span class="badge b-flag">Ausente ZFACT</span>';
+  if (r.valorDiff) return '<span class="badge b-fix165">Δ valor</span>';
+  return '<span class="badge b-ok">OK</span>';
+}
+
+function refreshArmazemSapValidation() {
+  refreshAllSapOnNfs();
+  armNfUploadRows = armNfUploadRows.map(r => applySapToArmNf(r));
+  if (armInited) renderArmActiveTab();
+}
+
+async function armRefreshWithSap() {
+  await armEnsureSapLoaded();
+  refreshAllSapOnNfs();
+  armNfUploadRows = armNfUploadRows.map(r => applySapToArmNf(r));
+  renderArmActiveTab();
+}
+
 function applySapToArmNf(row) {
   const api = sapApi();
   const out = { ...row };
@@ -1752,7 +1806,11 @@ function applySapToArmNf(row) {
   out.feeExpected = out.valorUnilog * ARM_NF_RATE;
   out.feeDelta = out.feeUnilog - out.feeExpected;
 
-  if (!api || !api.isSapLoaded()) {
+  const sapLoaded = !!(api && api.isSapLoaded());
+  out.sapLoaded = sapLoaded;
+  out.sapNotLoaded = !sapLoaded;
+
+  if (!sapLoaded) {
     out.sapFound = false;
     out.sapMissing = false;
     out.sapValor = null;
@@ -1988,7 +2046,7 @@ function switchArmTab(tab) {
     const el = $arm('tab-' + id);
     if (el) el.style.display = id === tab ? 'block' : 'none';
   });
-  renderArmActiveTab();
+  armRefreshWithSap().catch(e => console.warn('[armazem] refresh sap', e));
 }
 
 function renderArmActiveTab() {
@@ -2059,13 +2117,10 @@ function updateArmFileZone() {
     }
   }
   const sapNote = $arm('sapNote');
-  const api = sapApi();
   if (sapNote) {
-    const nSap = api?.isSapLoaded() ? Object.keys(api.getMap()).length : 0;
-    sapNote.innerHTML = nSap
-      ? `✓ SAP NF carregado no módulo <strong>Fretes</strong> (${nSap.toLocaleString('pt-BR')} NFs) — reutilizado para validação 5,5%.`
-      : '⚠ Carrega o Excel SAP NF no módulo <strong>Fretes CT-e</strong> para validar valores das NFs (export cobre todos os meses).';
+    sapNote.innerHTML = armSapStatusHtml();
     sapNote.style.display = 'block';
+    sapNote.classList.toggle('data-warn', !sapApi()?.isSapLoaded?.());
   }
   const btn = $arm('procBtn');
   if (btn) btn.disabled = !armPendingFiles.length;
@@ -2194,14 +2249,15 @@ function renderArmNf() {
 
   const api = sapApi();
   const sapLoaded = api?.isSapLoaded();
-  const missing = allNf.filter(r => r.sapMissing).length;
+  const notLoaded = allNf.some(r => r.sapNotLoaded);
+  const missing = sapLoaded ? allNf.filter(r => r.sapMissing).length : 0;
   const valDiff = allNf.filter(r => r.valorDiff).length;
 
   const kpis = $arm('nfKpis');
   if (kpis) {
     kpis.innerHTML = `
       <div class="kpi"><div class="label">Linhas NF</div><div class="value">${allNf.length}</div></div>
-      <div class="kpi"><div class="label">SAP</div><div class="value">${sapLoaded ? 'Carregado' : '—'}</div></div>
+      <div class="kpi${notLoaded ? ' flag' : ''}"><div class="label">SAP ZFACT</div><div class="value">${sapLoaded ? 'Carregado' : '—'}</div>${notLoaded ? '<div class="sub">Carrega em Fretes CT-e</div>' : ''}</div>
       <div class="kpi${missing ? ' flag' : ''}"><div class="label">NF ausente SAP</div><div class="value">${missing}</div></div>
       <div class="kpi${valDiff ? ' flag' : ''}"><div class="label">Δ valor SAP</div><div class="value">${valDiff}</div></div>`;
   }
@@ -2236,11 +2292,10 @@ function renderArmNf() {
     body.innerHTML = rows.map(r => {
       const diff = r.sapFound ? armNum(r.valorNF) - armNum(r.sapValor) : null;
       let cls = '';
-      if (r.sapMissing) cls = 'nf-sap-missing';
+      if (r.sapNotLoaded) cls = 'nf-sap-pending';
+      else if (r.sapMissing) cls = 'nf-sap-missing';
       else if (r.valorDiff) cls = 'nf-val-mismatch';
-      const estado = r.sapMissing ? '<span class="badge b-flag">Ausente ZFACT</span>'
-        : r.valorDiff ? '<span class="badge b-fix165">Δ valor</span>'
-        : '<span class="badge b-ok">OK</span>';
+      const estado = armNfEstadoBadge(r);
       return `<tr class="${cls}">
         <td>${armEsc(r.mesLabel)}</td>
         <td>${armEsc(r.nf)}</td>
@@ -2627,12 +2682,15 @@ function initArmazem() {
   if (armInited) {
     renderArmDfbGate();
     updateArmFileZone();
-    refreshAllSapOnNfs();
-    if (armActiveTab === 'lancamento') renderArmLancamento();
+    armRefreshWithSap().catch(e => console.warn('[armazem] refresh sap', e));
     return;
   }
   armInited = true;
   loadCatalogOverrides();
+
+  document.getElementById('page-armazem')?.addEventListener('click', e => {
+    if (e.target?.closest?.('.arm-link-fretes')) armGotoFretesPage(e);
+  });
 
   document.querySelectorAll('#page-armazem .arm-tab').forEach(t => {
     t.addEventListener('click', () => switchArmTab(t.dataset.tab));
@@ -2701,13 +2759,19 @@ function initArmazem() {
 
   renderArmDfbGate();
   updateArmFileZone();
-  loadSavedArmazem(true).then(() => {
+  Promise.all([
+    loadSavedArmazem(true),
+    armEnsureSapLoaded()
+  ]).then(() => {
+    refreshAllSapOnNfs();
     if (armActiveTab === 'lancamento') armLoadLancamentoDraft();
     else renderArmActiveTab();
   }).catch(e => console.warn('[armazem] load saved', e));
 }
 
 window.initArmazem = initArmazem;
+window.refreshArmazemSapValidation = refreshArmazemSapValidation;
+window.armEnsureSapLoaded = armEnsureSapLoaded;
 window.armOnFileSelected = armOnFileSelected;
 window.processArmFiles = processArmFiles;
 window.armDoSort = armDoSort;

@@ -1,5 +1,5 @@
-// fretes.js v1.7.12
-const FRETES_JS_VERSION = '1.7.12';
+// fretes.js v1.7.13
+const FRETES_JS_VERSION = '1.7.13';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -1058,6 +1058,9 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
     }
 
     reEnrichAfterSapLoad();
+    if (typeof window.refreshArmazemSapValidation === 'function') {
+      window.refreshArmazemSapValidation();
+    }
 
     const nMatched = currentSummary?.nSapMatched ?? countSapMatches(currentNFs);
     if (!opts.silent) {
@@ -2585,6 +2588,23 @@ async function loadLatestFromCloud() {
   return ok;
 }
 
+function restoreSapFromRec(sapRec, silent = false) {
+  if (!sapRec?.file_data || typeof base64ToArrayBuffer !== 'function') return false;
+  try {
+    const buf = base64ToArrayBuffer(sapRec.file_data);
+    const ok = processArrayBufferSap(buf, sapRec.file_name || 'sap.xlsx', { silent: true });
+    if (!ok) return false;
+    fteSapFileName = sapRec.file_name || '';
+    fteSapBuffer = buf;
+    setSapZoneLoaded(sapRec.file_name);
+    return true;
+  } catch (err) {
+    console.error('[fretes] restore sap', err);
+    if (!silent) fteToastError('Erro ao carregar SAP NF guardado.');
+    return false;
+  }
+}
+
 async function restoreCteFromRec(cteRec, sapRec, silent = false) {
   if (!cteRec?.file_data) return false;
   const co = fteCompany();
@@ -2698,6 +2718,11 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   updateQzFileNote();
   updateFretesFileStatus(meta);
 
+  if (!isSapLoaded() && sapRec?.file_data) {
+    const sapOnlyOk = restoreSapFromRec(sapRec, silent);
+    console.log('[fretes] restore sap-only', co, sapRec.file_name, 'ok', sapOnlyOk, 'mapSize', Object.keys(sapNfMap).length);
+  }
+
   const freshCte = !!(cteRec?.file_data && cteOk && !hadCteInMem);
   const freshQz = !!(qzLoaded && !hadQzInMem);
 
@@ -2714,7 +2739,7 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   if (activeTab === 'analise-b2c') renderB2cAnalysisTab();
   else if (activeTab === 'cte-vs-qz') renderB2bCompareTab();
   else if (activeTab === 'resumo-total') renderResumoTotal();
-  return cteOk || qzLoaded || currentNFs.length > 0;
+  return cteOk || qzLoaded || currentNFs.length > 0 || isSapLoaded();
 }
 
 // ── QUINZENAL UNILOG (B2B diff vs CT-e · B2C vendas/fretes) ──
@@ -4500,5 +4525,7 @@ window.FretesSAP = {
   lookupSapEntry,
   isRelevantValorDiff,
   isSapLoaded,
-  loadSapRowsFromWorkbook
+  loadSapRowsFromWorkbook,
+  ensureLoaded: (silent = true) => loadSavedFretesFiles(silent).then(() => isSapLoaded()),
+  restoreSapFromRec
 };

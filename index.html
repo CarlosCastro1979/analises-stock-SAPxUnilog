@@ -1870,7 +1870,7 @@ select.cad-inp{cursor:pointer;}
       <div id="arm-nfEmpty" class="empty"><div class="empty-i">🧾</div><div>Sem linhas de NF 5,5% — lança na aba <strong>Lançamento mensal</strong> ou carrega Excels</div></div>
       <div id="arm-nfContent" style="display:none;">
         <div class="kpis" id="arm-nfKpis"></div>
-        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Validação cruzada com SAP NF / ZFACT (módulo Fretes). Coluna Δ = valor Unilog − valor SAP. Apenas taxa 5,5% — não inclui armazenagem, HE ou etiquetagem.</p>
+        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Validação cruzada com SAP NF / ZFACT (partilhado com módulo Fretes — carrega ZFACT uma vez em Fretes CT-e). Coluna Δ = valor Unilog − valor SAP. Apenas taxa 5,5% — não inclui armazenagem, HE ou etiquetagem.</p>
         <div class="filters">
           <select id="arm-nfFilterMes"><option value="">Todos os meses</option></select>
           <select id="arm-nfFilterIssue">
@@ -2203,7 +2203,7 @@ async function init(){
   try{
     const{error}=await db.from('logistica_stock').select('id').limit(1);
     setDB(!error);
-    if(!error){await loadSuspValidados();await autoLoadLastExcelFiles();await loadOccParams();await loadReconNotas();await loadPecasData();if(typeof loadSavedFretesFiles==='function')await loadSavedFretesFiles(true);}
+    if(!error){await loadSuspValidados();await autoLoadLastExcelFiles();await loadOccParams();await loadReconNotas();await loadPecasData();if(typeof loadSavedFretesFiles==='function')await loadSavedFretesFiles(true);if(typeof refreshArmazemSapValidation==='function')refreshArmazemSapValidation();}
   }catch(e){setDB(false);}
   scheduleColResize();
 }
@@ -7670,8 +7670,8 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.7.12"></script>
-<script src="armazem.js?v=1.0.21" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
+<script src="fretes.js?v=1.7.13"></script>
+<script src="armazem.js?v=1.0.22" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
 <script>
 if(typeof initArmazem!=='function'){
   const e=document.getElementById('arm-initErr');
