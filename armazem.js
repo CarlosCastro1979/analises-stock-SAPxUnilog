@@ -1,5 +1,5 @@
-// armazem.js v1.0.12
-const ARMAZEM_JS_VERSION = '1.0.12';
+// armazem.js v1.0.13
+const ARMAZEM_JS_VERSION = '1.0.13';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -354,7 +354,7 @@ function catalogLabel(id) {
 function armCleanFileBase(fileName) {
   return String(fileName || '')
     .replace(/\.xlsx?$/i, '')
-    .replace(/_+$/, '')
+    .replace(/[_\s.-]+$/g, '')
     .trim()
     .replace(/^receita[_\s]*(?:e[_\s]*)?custo\s*delta\s*[-–—:]?\s*/i, '')
     .trim();
@@ -362,8 +362,8 @@ function armCleanFileBase(fileName) {
 
 function parseMonthFromFileName(fileName) {
   const base = armCleanFileBase(fileName);
-  const m = base.match(/(\d{4})\s*$/);
-  const year = m ? parseInt(m[1], 10) : null;
+  const yearMatch = base.replace(/[_\s.-]+$/g, '').match(/(\d{4})\s*$/);
+  const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
   const low = base.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   let month = null;
   const meses = Object.entries(ARM_MESES_PT).sort((a, b) => b[0].length - a[0].length);
@@ -376,6 +376,39 @@ function parseMonthFromFileName(fileName) {
   const mesKey = `${year}-${String(month).padStart(2, '0')}`;
   const mesLabel = armMesNomeLong(mesKey, '');
   return { mesKey, mesLabel };
+}
+
+function armMesLabel(m) {
+  if (!m) return '—';
+  const obj = typeof m === 'string' ? { mesKey: m } : m;
+  const mesKey = String(obj.mesKey || '').trim();
+  if (/^\d{4}-\d{2}$/.test(mesKey)) return armMesNomeLong(mesKey, '');
+  for (const src of [obj.fileName, obj.mesLabel]) {
+    if (!src) continue;
+    const parsed = parseMonthFromFileName(src);
+    if (parsed.mesKey) return parsed.mesLabel;
+  }
+  const fallback = String(obj.mesLabel || obj.fileName || mesKey || '').trim();
+  return fallback || '—';
+}
+
+function armNormalizeMonth(m) {
+  if (!m) return m;
+  let mesKey = String(m.mesKey || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(mesKey)) {
+    const fromFile = parseMonthFromFileName(m.fileName || m.mesLabel || '');
+    if (fromFile.mesKey) mesKey = fromFile.mesKey;
+    else if (m.dataInicial) mesKey = String(m.dataInicial).slice(0, 7);
+  }
+  m.mesKey = mesKey;
+  m.mesLabel = armMesLabel({ mesKey, mesLabel: m.mesLabel, fileName: m.fileName });
+  return m;
+}
+
+function armNormalizePackMonths(pack) {
+  if (!pack?.months?.length) return pack;
+  pack.months.forEach(armNormalizeMonth);
+  return pack;
 }
 
 function armInfoLabelValue(matrix, r, labelRe) {
@@ -516,8 +549,7 @@ function renderArmComparativoTable(months, vendasPack) {
       const arm = armGetArmazenagemValor(m);
       const vendas = armVendasForMes(vendasPack, m.mesKey);
       const pct = armFmtPctGasto(arm.primary, vendas);
-      const mi = parseInt((m.mesKey || '').slice(5, 7), 10);
-      const mesNome = ARM_MESES_NOME[mi] || m.mesLabel || m.mesKey;
+      const mesNome = armMesLabel(m);
       const ano = (m.mesKey || '').slice(0, 4) || '—';
       yt.subtotal += arm.subtotal;
       yt.final += arm.final;
@@ -596,7 +628,7 @@ function renderArmResumoSections(months) {
     html += `<div class="arm-resumo-year"><div class="section-title arm-resumo-year-title">${armEsc(year)}</div>`;
     html += byYear[year].map(m => {
       const rows = armResumoRows(m);
-      const titulo = armMesNomeLong(m.mesKey, m.mesLabel);
+      const titulo = armMesLabel(m);
       return `<div class="arm-resumo-month">
         <div class="section-title arm-resumo-month-title">${armEsc(titulo)}</div>
         ${resumoTableHtml(rows)}
@@ -671,12 +703,32 @@ function scanResumoCols(matrix, hdrRow, fallback) {
 }
 
 function resumoRowServiceName(matrix, r, cols) {
-  const tryCols = [cols.nome, 1, 0].filter((c, i, a) => c >= 0 && a.indexOf(c) === i);
+  const seen = new Set();
+  const tryCols = [];
+  for (const c of [cols.nome, 1, 0, 2, 3, 4, 5]) {
+    if (c >= 0 && !seen.has(c)) { seen.add(c); tryCols.push(c); }
+  }
   for (const c of tryCols) {
     const t = cellText(matrix, r, c);
     if (t) return t;
   }
   return '';
+}
+
+function armIsResumoFooterRow(nome) {
+  return /^Apura|^Total\b|^Impostos/i.test(String(nome || '').trim());
+}
+
+function armLogParsedMonth(record, fileName) {
+  if (!record) return;
+  const label = armMesLabel(record);
+  const n = record.servicos?.length || 0;
+  const sub = record.totalServicos || 0;
+  const fin = record.valorTotal || 0;
+  console.log(`[armazem] ${label} parsed: ${n} servicos`, {
+    mesKey: record.mesKey, fileName: fileName || record.fileName,
+    subtotal: sub, final: fin, format: record.format
+  });
 }
 
 function armFinishServico(rawName, qtde, valorUnit, valor, isNf) {
@@ -723,16 +775,7 @@ function pickBillingSheets(sheetNames) {
 }
 
 function armShortMonthLabel(fileName, mesKey, mesLabel) {
-  if (mesKey) {
-    const m = mesKey.match(/^(\d{4})-(\d{2})$/);
-    if (m) {
-      const mi = parseInt(m[2], 10);
-      return `${ARM_MESES_NOME[mi] || m[2]} ${m[1]}`;
-    }
-  }
-  const fromName = parseMonthFromFileName(fileName);
-  if (fromName.mesKey) return armMesNomeLong(fromName.mesKey, fromName.mesLabel);
-  return mesLabel || fileName;
+  return armMesLabel({ mesKey, mesLabel, fileName });
 }
 
 function parseBrDate(s) {
@@ -781,7 +824,7 @@ function parseArmazemV2(wb, fileName, opts) {
     const nome = resumoRowServiceName(resumo, r, cols);
     const codigo = nome;
     if (!nome) continue;
-    if (/^Apura/i.test(nome) || /^Total$/i.test(nome) || /^Impostos/i.test(nome)) continue;
+    if (armIsResumoFooterRow(nome)) continue;
     const isNf = isNfPercentualService(nome);
     const nums = armFinishServico(
       nome,
@@ -799,6 +842,12 @@ function parseArmazemV2(wb, fileName, opts) {
       catalogId: cat.id, catalogSure: cat.sure, isNf
     });
   }
+
+  const totalCalc = servicos.filter(s => !/IMPOSTO/i.test(s.normName)).reduce((a, s) => a + s.valor, 0);
+  console.log(`[armazem] parseV2 resumo`, {
+    fileName, mesKey: meta.mesKey, resumoSheet: resumoName, hdr, cols,
+    servicos: servicos.length, subtotalCalc: totalCalc
+  });
 
   const nfRows = [];
   if (!skipNfDetail) {
@@ -846,7 +895,6 @@ function parseArmazemV2(wb, fileName, opts) {
     }
   }
 
-  const totalCalc = servicos.filter(s => !/IMPOSTO/i.test(s.normName)).reduce((a, s) => a + s.valor, 0);
   return buildMonthRecord({
     fileName, format: 'v2', meta, depositante, dataInicial, dataFinal,
     totalServicos: totalServicos || totalCalc,
@@ -945,7 +993,7 @@ function parseArmazemV1(wb, fileName, opts) {
 function buildMonthRecord(opts) {
   const nfRows = (opts.nfRows || []).map(applySapToArmNf);
   const belowMin = opts.totalServicos < (opts.valorMinimo || ARM_MINIMO_CONTRATUAL);
-  return {
+  return armNormalizeMonth({
     fileName: opts.fileName,
     format: opts.format,
     mesKey: opts.meta?.mesKey || '',
@@ -964,7 +1012,7 @@ function buildMonthRecord(opts) {
     partialParse: !!opts.partialParse,
     nfSkipped: !!opts.nfSkipped,
     parseNote: opts.parseNote || ''
-  };
+  });
 }
 
 function parseArmazemWorkbook(wb, fileName, opts) {
@@ -1055,12 +1103,12 @@ function mergeArmPack(prev, next) {
     ...prev.months.filter(m => !replace.has(m.mesKey || m.fileName)),
     ...next.months
   ].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
-  return {
+  return armNormalizePackMonths({
     version: 2,
     updatedAt: new Date().toISOString(),
     months,
     failedFiles: [...(prev.failedFiles || []), ...(next.failedFiles || [])]
-  };
+  });
 }
 
 function buildArmPackFromFiles(fileResults) {
@@ -1074,7 +1122,7 @@ function buildArmPackFromFiles(fileResults) {
     months.push(fr.record);
   });
   months.sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
-  return { version: 2, updatedAt: new Date().toISOString(), months, failedFiles };
+  return armNormalizePackMonths({ version: 2, updatedAt: new Date().toISOString(), months, failedFiles });
 }
 
 function slimArmPackForPersist(pack) {
@@ -1082,14 +1130,17 @@ function slimArmPackForPersist(pack) {
   return {
     version: pack.version || 2,
     updatedAt: new Date().toISOString(),
-    months: (pack.months || []).map(m => ({
-      fileName: m.fileName, format: m.format, mesKey: m.mesKey, mesLabel: m.mesLabel,
-      dataInicial: m.dataInicial, dataFinal: m.dataFinal,
-      totalServicos: m.totalServicos, valorMinimo: m.valorMinimo,
-      valorApurado: m.valorApurado, valorTotal: m.valorTotal, belowMin: m.belowMin,
-      servicos: m.servicos, nfRows: m.nfRows, adicionais: m.adicionais,
-      partialParse: m.partialParse, nfSkipped: m.nfSkipped, parseNote: m.parseNote
-    })),
+    months: (pack.months || []).map(m => {
+      const n = armNormalizeMonth({ ...m });
+      return {
+      fileName: n.fileName, format: n.format, mesKey: n.mesKey, mesLabel: n.mesLabel,
+      dataInicial: n.dataInicial, dataFinal: n.dataFinal,
+      totalServicos: n.totalServicos, valorMinimo: n.valorMinimo,
+      valorApurado: n.valorApurado, valorTotal: n.valorTotal, belowMin: n.belowMin,
+      servicos: n.servicos, nfRows: n.nfRows, adicionais: n.adicionais,
+      partialParse: n.partialParse, nfSkipped: n.nfSkipped, parseNote: n.parseNote
+    };
+    }),
     failedFiles: pack.failedFiles || []
   };
 }
@@ -1122,6 +1173,7 @@ function parseArmPackFromRec(rec) {
       pack.months.forEach(m => {
         m.nfRows = (m.nfRows || []).map(applySapToArmNf);
       });
+      armNormalizePackMonths(pack);
     }
     return pack;
   } catch (e) {
@@ -1139,7 +1191,7 @@ function aggregateByCatalog(months) {
       if (!map[id]) map[id] = { catalogId: id, label: catalogLabel(id), valor: 0, qtde: 0, months: new Set(), servicos: new Set() };
       map[id].valor += s.valor;
       map[id].qtde += s.qtde;
-      map[id].months.add(m.mesLabel);
+      map[id].months.add(armMesLabel(m));
       map[id].servicos.add(s.normName);
     });
   });
@@ -1253,7 +1305,8 @@ function updateArmFileZone() {
   if (list) {
     const lines = [];
     (armPack?.months || []).forEach(m => {
-      let line = m.fileName;
+      let line = armMesLabel(m);
+      if (m.fileName && m.fileName !== line) line += ` (${m.fileName})`;
       if (m.partialParse) line += ' (resumo OK · NF omitido)';
       lines.push(line);
     });
@@ -1285,7 +1338,7 @@ function updateArmFileZone() {
 function renderArmMensal() {
   const empty = $arm('mensalEmpty');
   const content = $arm('mensalContent');
-  const months = armPack?.months || [];
+  const months = armNormalizePackMonths({ months: armPack?.months || [] }).months;
   if (!months.length) {
     if (empty) empty.style.display = 'block';
     if (content) content.style.display = 'none';
@@ -1307,7 +1360,7 @@ function renderArmMensal() {
 
   const rows = armApplySort(months, 'mensal', {
     mesKey: r => r.mesKey,
-    mesLabel: r => r.mesLabel,
+    mesLabel: r => armMesLabel(r),
     totalServicos: r => r.totalServicos,
     valorMinimo: r => r.valorMinimo,
     belowMin: r => r.belowMin ? 1 : 0,
@@ -1322,7 +1375,7 @@ function renderArmMensal() {
       const cls = m.belowMin ? 'month-row-high' : '';
       const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
       return `<tr class="${cls}">
-        <td>${armEsc(m.mesLabel)}</td>
+        <td>${armEsc(armMesLabel(m))}</td>
         <td class="right">${armFmtMoney(m.totalServicos)}</td>
         <td class="right">${armFmtMoney(m.valorMinimo)}</td>
         <td>${m.belowMin ? '<span class="badge b-flag">Abaixo mínimo</span>' : '<span class="badge b-ok">OK</span>'}</td>
@@ -1351,7 +1404,7 @@ async function renderArmAcumulado() {
   const content = $arm('acumuladoContent');
   const sections = $arm('acumuladoSections');
   const comparativo = $arm('acumuladoComparativo');
-  const months = armPack?.months || [];
+  const months = armNormalizePackMonths({ months: armPack?.months || [] }).months;
   if (!months.length) {
     if (empty) empty.style.display = 'block';
     if (content) content.style.display = 'none';
@@ -1364,14 +1417,6 @@ async function renderArmAcumulado() {
   const agg = aggregateResumoByNorm(months);
   const totalAgg = agg.reduce((s, r) => s + r.valor, 0);
 
-  const vendasPack = await loadArmVendasByMonth();
-  if (comparativo) {
-    comparativo.innerHTML = renderArmComparativoTable(months, vendasPack);
-    if (typeof enableTableSort === 'function') {
-      enableTableSort('arm-comparativoTbl', { dataRowSelector: 'tr.arm-comparativo-month' });
-    }
-  }
-
   const kpis = $arm('acumuladoKpis');
   if (kpis) {
     kpis.innerHTML = `
@@ -1382,13 +1427,27 @@ async function renderArmAcumulado() {
   }
 
   if (sections) sections.innerHTML = renderArmResumoSections(months);
+  if (typeof scheduleColResize === 'function') scheduleColResize();
+
+  try {
+    const vendasPack = await loadArmVendasByMonth();
+    if (comparativo) {
+      comparativo.innerHTML = renderArmComparativoTable(months, vendasPack);
+      if (typeof enableTableSort === 'function') {
+        enableTableSort('arm-comparativoTbl', { dataRowSelector: 'tr.arm-comparativo-month' });
+      }
+    }
+  } catch (e) {
+    console.warn('[armazem] comparativo vendas', e);
+    if (comparativo) comparativo.innerHTML = '';
+  }
 }
 
 function renderArmNf() {
   const empty = $arm('nfEmpty');
   const content = $arm('nfContent');
   const months = armPack?.months || [];
-  const allNf = months.flatMap(m => (m.nfRows || []).map(r => ({ ...r, mesLabel: m.mesLabel })));
+  const allNf = months.flatMap(m => (m.nfRows || []).map(r => ({ ...r, mesKey: m.mesKey, mesLabel: armMesLabel(m) })));
   if (!allNf.length) {
     if (empty) empty.style.display = 'block';
     if (content) content.style.display = 'none';
@@ -1435,7 +1494,7 @@ function renderArmNf() {
   if (mesSel && !mesSel._armBound) {
     mesSel._armBound = true;
     const opts = ['<option value="">Todos os meses</option>']
-      .concat(months.map(m => `<option value="${armEsc(m.mesKey)}">${armEsc(m.mesLabel)}</option>`));
+      .concat(months.map(m => `<option value="${armEsc(m.mesKey)}">${armEsc(armMesLabel(m))}</option>`));
     mesSel.innerHTML = opts.join('');
     mesSel.addEventListener('change', renderArmNf);
     $arm('nfFilterIssue')?.addEventListener('change', renderArmNf);
@@ -1487,7 +1546,7 @@ function renderArmAdicionais() {
   const rows = [];
   months.forEach(m => {
     (m.adicionais || []).forEach(a => {
-      rows.push({ ...a, mesKey: m.mesKey, mesLabel: m.mesLabel, fileName: m.fileName });
+      rows.push({ ...a, mesKey: m.mesKey, mesLabel: armMesLabel(m), fileName: m.fileName });
     });
   });
   if (!rows.length) {
@@ -1511,7 +1570,7 @@ function renderArmAdicionais() {
   if (mesSel && !mesSel._armBound) {
     mesSel._armBound = true;
     mesSel.innerHTML = '<option value="">Todos os meses</option>' +
-      months.map(m => `<option value="${armEsc(m.mesKey)}">${armEsc(m.mesLabel)}</option>`).join('');
+      months.map(m => `<option value="${armEsc(m.mesKey)}">${armEsc(armMesLabel(m))}</option>`).join('');
     mesSel.addEventListener('change', renderArmAdicionais);
   }
 
@@ -1662,6 +1721,7 @@ async function processOneArmFile(file) {
   if (!record.servicos?.length) {
     throw new Error('Nenhum serviço no bloco Resumo — verifica o ficheiro ou formato.');
   }
+  armLogParsedMonth(record, file.name);
   return { fileName: file.name, record };
 }
 
@@ -1709,6 +1769,9 @@ async function processArmFiles() {
     }
     armPack = mergeArmPack(armPack, built);
     refreshAllSapOnNfs();
+    console.log('[armazem] armPack months:', (armPack.months || []).map(m =>
+      `${m.mesKey || '?'} (${m.servicos?.length || 0} srv, ${armMesLabel(m)})`
+    ).join('; '));
     armPendingFiles = [];
     updateArmFileZone();
     const saved = await persistArmPack(armPack);
@@ -1782,7 +1845,7 @@ function exportArmazemWorkbook() {
     let n = 2;
     while (usedNames.has(name)) { name = armMesSheetName(m.mesKey).slice(0, 28) + '_' + n++; }
     usedNames.add(name);
-    const aoa = exportResumoSheetRows(rows, 'Resumo — ' + armMesNomeLong(m.mesKey, m.mesLabel));
+    const aoa = exportResumoSheetRows(rows, 'Resumo — ' + armMesLabel(m));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), name);
   });
 
@@ -1794,7 +1857,7 @@ function exportArmazemWorkbook() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(totalAoa), 'Total');
 
   const mensal = months.map(m => ({
-    Mes: m.mesLabel, Total: m.totalServicos, Minimo: m.valorMinimo,
+    Mes: armMesLabel(m), Total: m.totalServicos, Minimo: m.valorMinimo,
     AbaixoMinimo: m.belowMin ? 'SIM' : 'NÃO',
     NFs: m.nfRows?.length || 0,
     Adicionais: (m.adicionais || []).reduce((s, a) => s + a.valor, 0),
@@ -1803,7 +1866,7 @@ function exportArmazemWorkbook() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mensal), 'Visão mensal');
 
   const nfs = months.flatMap(m => (m.nfRows || []).map(r => ({
-    Mes: m.mesLabel, NF: r.nf, Data: r.data,
+    Mes: armMesLabel(m), NF: r.nf, Data: r.data,
     ValorNF_Unilog: r.valorNF, ValorNF_SAP: r.sapValor ?? '',
     Taxa: r.fee, DeltaTaxa: r.feeDelta,
     SAP_OK: r.sapFound ? 'SIM' : (r.sapMissing ? 'AUSENTE' : '')
@@ -1811,7 +1874,7 @@ function exportArmazemWorkbook() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(nfs), 'NF 5.5%');
 
   const ad = months.flatMap(m => (m.adicionais || []).map(a => ({
-    Mes: m.mesLabel, Servico: a.normName, Valor: a.valor, Qtde: a.qtde
+    Mes: armMesLabel(m), Servico: a.normName, Valor: a.valor, Qtde: a.qtde
   })));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ad), 'Adicionais');
 
