@@ -353,10 +353,10 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-armazem .arm-comparativo-wrap{max-height:none;margin-bottom:24px;}
 #page-armazem .arm-comparativo-note{font-size:11px;color:var(--muted);margin:-4px 0 10px;line-height:1.45;}
 #page-armazem table.arm-comparativo-tbl{table-layout:fixed;width:100%;}
-#page-armazem table.arm-comparativo-tbl col.arm-col-mes{width:18%;}
-#page-armazem table.arm-comparativo-tbl col.arm-col-ano{width:8%;}
-#page-armazem table.arm-comparativo-tbl col.arm-col-num{width:24%;}
-#page-armazem table.arm-comparativo-tbl col.arm-col-pct{width:12%;}
+#page-armazem table.arm-comparativo-tbl col.arm-col-mes{width:14%;}
+#page-armazem table.arm-comparativo-tbl col.arm-col-ano{width:7%;}
+#page-armazem table.arm-comparativo-tbl col.arm-col-num{width:14%;}
+#page-armazem table.arm-comparativo-tbl col.arm-col-pct{width:10%;}
 #page-armazem table.arm-comparativo-tbl th,#page-armazem table.arm-comparativo-tbl td{vertical-align:middle;}
 #page-armazem table.arm-comparativo-tbl th.right,#page-armazem table.arm-comparativo-tbl td.right{text-align:right;white-space:nowrap;}
 #page-armazem table.arm-comparativo-tbl td.arm-col-mes{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;}
@@ -1771,9 +1771,9 @@ select.cad-inp{cursor:pointer;}
             <button class="btn bg bs" type="button" id="arm-lancAddCustomBtn">Adicionar ao catálogo</button>
           </div>
           <div class="filters" style="margin-top:14px;align-items:center;flex-wrap:wrap;gap:8px;">
-            <label id="arm-lancImpostosLabel" style="font-size:11px;font-weight:600;color:var(--muted);">Impostos — 2% (ISS) + 9,25% (PIS/COFINS) = 11,25%</label>
+            <label id="arm-lancImpostosLabel" style="font-size:11px;font-weight:600;color:var(--muted);">Impostos — 2% (ISS) + 9,25% (PIS/COFINS) = 11,25% (gross-up s/ subtotal)</label>
             <input type="text" id="arm-lancImpostos" placeholder="0,00" style="width:140px;text-align:right;font-family:var(--mono);">
-            <button class="btn bg bs" type="button" id="arm-lancImpostosAutoBtn" title="Repor cálculo automático 11,25%">↺ Auto</button>
+            <button class="btn bg bs" type="button" id="arm-lancImpostosAutoBtn" title="Repor cálculo automático (subtotal ÷ 0,8875 − subtotal)">↺ Auto</button>
           </div>
           <div class="arm-lanc-actions">
             <button class="btn bp" type="button" id="arm-lancSaveBtn">💾 Guardar mês</button>
@@ -1788,7 +1788,7 @@ select.cad-inp{cursor:pointer;}
               <span>Subtotal serviços</span><strong id="arm-lancSubtotal">—</strong>
             </div>
             <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
-              <span id="arm-lancImpostosSumLabel">Impostos — 2% (ISS) + 9,25% (PIS/COFINS) = 11,25%</span><strong id="arm-lancImpostosDisp">—</strong>
+              <span id="arm-lancImpostosSumLabel">Impostos — 2% (ISS) + 9,25% (PIS/COFINS) = 11,25% (gross-up s/ subtotal)</span><strong id="arm-lancImpostosDisp">—</strong>
             </div>
             <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-top:6px;">
               <span>Total c/ impostos</span><strong id="arm-lancTotal">—</strong>
@@ -7671,7 +7671,7 @@ function applyResizable(){scheduleColResize();}
 
 </script>
 <script src="fretes.js?v=1.7.13"></script>
-<script src="armazem.js?v=1.0.22" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
+<script src="armazem.js?v=1.0.24" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
 <script>
 if(typeof initArmazem!=='function'){
   const e=document.getElementById('arm-initErr');

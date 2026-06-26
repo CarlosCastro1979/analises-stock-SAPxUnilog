@@ -1,10 +1,11 @@
-// armazem.js v1.0.22
-const ARMAZEM_JS_VERSION = '1.0.22';
+// armazem.js v1.0.24
+const ARMAZEM_JS_VERSION = '1.0.24';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
 const ARM_IMPOSTOS_RATE = 0.1125;
-const ARM_IMPOSTOS_LABEL = 'Impostos — 2% (ISS) + 9,25% (PIS/COFINS) = 11,25%';
+const ARM_NET_FACTOR = 1 - ARM_IMPOSTOS_RATE; // 0,8875 — fator líquido Unilog
+const ARM_IMPOSTOS_LABEL = 'Impostos — 2% (ISS) + 9,25% (PIS/COFINS) = 11,25% (gross-up s/ subtotal)';
 const ARM_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
 const ARM_MAX_FILE_BYTES = 15 * 1024 * 1024;
 const ARM_ABSOLUTE_MAX_FILE_BYTES = 40 * 1024 * 1024;
@@ -25,6 +26,7 @@ const ARM_VENDAS_CACHE_MS = 60_000;
 let armCatalogOverrides = {};
 let armSorts = {
   mensal: { col: 'mesKey', dir: 1 },
+  comparativo: { col: 'mesKey', dir: 1 },
   acumulado: { col: 'valor', dir: -1 },
   nf: { col: 'nf', dir: 1 },
   nfUpload: { col: 'nf', dir: 1 },
@@ -397,8 +399,11 @@ function armServiceSubtotal(servicos) {
   return (servicos || []).filter(s => !/^IMPOSTO/i.test(s.normName || '')).reduce((a, s) => a + (Number(s.valor) || 0), 0);
 }
 
+/** Unilog Excel: =E11/0,8875-E11 (gross-up, não 11,25% simples do subtotal). */
 function armCalcImpostos(subtotal) {
-  return Math.round(armNum(subtotal) * ARM_IMPOSTOS_RATE * 100) / 100;
+  const sub = armNum(subtotal);
+  if (sub <= 0) return 0;
+  return Math.round((sub / ARM_NET_FACTOR - sub) * 100) / 100;
 }
 
 function armGetMonthImpostos(month) {
@@ -407,6 +412,10 @@ function armGetMonthImpostos(month) {
   const sub = armServiceSubtotal(month.servicos);
   if (sub > 0) return armCalcImpostos(sub);
   return armCalcImpostos(month.totalServicos || month.valorApurado || 0);
+}
+
+function armGetMonthPagoComImp(month) {
+  return armGetArmazenagemValor(month).pago + armGetMonthImpostos(month);
 }
 
 function armLancamentoServicosFromMonth(month) {
@@ -1223,7 +1232,26 @@ function armInvalidateVendasCache() {
 }
 
 function renderArmComparativoTable(months) {
-  const sorted = [...months].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
+  const cmpGetters = {
+    mesKey: m => m.mesKey,
+    mesLabel: m => armMesLabel(m),
+    ano: m => (m.mesKey || '').slice(0, 4),
+    nfBase: m => armGetNfBase(m),
+    pago: m => armGetArmazenagemValor(m).pago,
+    impostos: m => armGetMonthImpostos(m),
+    pagoComImp: m => armGetMonthPagoComImp(m),
+    pctSem: m => {
+      const nf = armGetNfBase(m);
+      const p = armGetArmazenagemValor(m).pago;
+      return nf > 0 && p >= 0 ? p / nf : -1;
+    },
+    pctCom: m => {
+      const nf = armGetNfBase(m);
+      const t = armGetMonthPagoComImp(m);
+      return nf > 0 && t >= 0 ? t / nf : -1;
+    }
+  };
+  const sorted = armApplySort(months, 'comparativo', cmpGetters);
   const byYear = {};
   sorted.forEach(m => {
     const y = (m.mesKey || '').slice(0, 4) || '—';
@@ -1233,22 +1261,23 @@ function renderArmComparativoTable(months) {
   const years = Object.keys(byYear).sort();
 
   let rows = '';
-  const grand = { pago: 0, impostos: 0, nfBase: 0, hasNfBase: false };
+  const grand = { pago: 0, impostos: 0, pagoComImp: 0, nfBase: 0, hasNfBase: false };
 
   years.forEach(year => {
-    rows += `<tr class="arm-year-header"><td colspan="7"><strong>${armEsc(year)}</strong></td></tr>`;
-    const yt = { pago: 0, impostos: 0, nfBase: 0, hasNfBase: false };
+    rows += `<tr class="arm-year-header"><td colspan="8"><strong>${armEsc(year)}</strong></td></tr>`;
+    const yt = { pago: 0, impostos: 0, pagoComImp: 0, nfBase: 0, hasNfBase: false };
     byYear[year].forEach(m => {
       const arm = armGetArmazenagemValor(m);
       const nfBase = armGetNfBase(m);
       const imp = armGetMonthImpostos(m);
-      const pagoComImp = arm.pago + imp;
+      const pagoComImp = armGetMonthPagoComImp(m);
       const pctSem = armFmtPctGasto(arm.pago, nfBase);
       const pctCom = armFmtPctGasto(pagoComImp, nfBase);
       const mesNome = armMesLabel(m);
       const ano = (m.mesKey || '').slice(0, 4) || '—';
       yt.pago += arm.pago;
       yt.impostos += imp;
+      yt.pagoComImp += pagoComImp;
       if (nfBase > 0) {
         yt.nfBase += nfBase;
         yt.hasNfBase = true;
@@ -1257,57 +1286,62 @@ function renderArmComparativoTable(months) {
       }
       grand.pago += arm.pago;
       grand.impostos += imp;
+      grand.pagoComImp += pagoComImp;
       rows += `<tr class="arm-comparativo-month">
         <td class="arm-col-mes">${armEsc(mesNome)}</td>
         <td class="arm-col-ano">${armEsc(ano)}</td>
         <td class="right arm-col-num">${nfBase > 0 ? armFmtMoney(nfBase) : '—'}</td>
         <td class="right arm-col-num">${arm.pago > 0 ? armFmtMoney(arm.pago) : '—'}</td>
         <td class="right arm-col-num">${imp > 0 ? armFmtMoney(imp) : '—'}</td>
+        <td class="right arm-col-num">${pagoComImp > 0 ? armFmtMoney(pagoComImp) : '—'}</td>
         <td class="right arm-col-pct" title="Pago sem impostos ÷ NF base">${pctSem}</td>
         <td class="right arm-col-pct" title="(Pago + impostos) ÷ NF base">${pctCom}</td>
       </tr>`;
     });
     const yPctSem = armFmtPctGasto(yt.pago, yt.hasNfBase ? yt.nfBase : null);
-    const yPctCom = armFmtPctGasto(yt.pago + yt.impostos, yt.hasNfBase ? yt.nfBase : null);
+    const yPctCom = armFmtPctGasto(yt.pagoComImp, yt.hasNfBase ? yt.nfBase : null);
     rows += `<tr class="arm-year-subtotal arm-resumo-subtotal">
       <td colspan="2"><strong>Subtotal ${armEsc(year)}</strong></td>
       <td class="right"><strong>${yt.hasNfBase ? armFmtMoney(yt.nfBase) : '—'}</strong></td>
       <td class="right"><strong>${yt.pago > 0 ? armFmtMoney(yt.pago) : '—'}</strong></td>
       <td class="right"><strong>${yt.impostos > 0 ? armFmtMoney(yt.impostos) : '—'}</strong></td>
+      <td class="right"><strong>${yt.pagoComImp > 0 ? armFmtMoney(yt.pagoComImp) : '—'}</strong></td>
       <td class="right"><strong>${yPctSem}</strong></td>
       <td class="right"><strong>${yPctCom}</strong></td>
     </tr>`;
   });
 
   const gPctSem = armFmtPctGasto(grand.pago, grand.hasNfBase ? grand.nfBase : null);
-  const gPctCom = armFmtPctGasto(grand.pago + grand.impostos, grand.hasNfBase ? grand.nfBase : null);
+  const gPctCom = armFmtPctGasto(grand.pagoComImp, grand.hasNfBase ? grand.nfBase : null);
   rows += `<tr class="arm-comparativo-total arm-resumo-subtotal">
     <td colspan="2"><strong>Total geral</strong></td>
     <td class="right"><strong>${grand.hasNfBase ? armFmtMoney(grand.nfBase) : '—'}</strong></td>
     <td class="right"><strong>${grand.pago > 0 ? armFmtMoney(grand.pago) : '—'}</strong></td>
     <td class="right"><strong>${grand.impostos > 0 ? armFmtMoney(grand.impostos) : '—'}</strong></td>
+    <td class="right"><strong>${grand.pagoComImp > 0 ? armFmtMoney(grand.pagoComImp) : '—'}</strong></td>
     <td class="right"><strong>${gPctSem}</strong></td>
     <td class="right"><strong>${gPctCom}</strong></td>
   </tr>`;
 
   return `
     <div class="section-title" style="margin-top:0;">Armazenagem vs Vendas (mensal)</div>
-    <p class="arm-comparativo-note">Vendas = base NF expedida (linha % sobre NF ou soma NFs validadas). Pago = subtotal serviços sem impostos. <strong>% s/ vendas</strong> = pago ÷ vendas. <strong>% c/ impostos</strong> = (pago + impostos) ÷ vendas.</p>
+    <p class="arm-comparativo-note">Vendas = base NF expedida (linha % sobre NF ou soma NFs validadas). Pago = subtotal serviços sem impostos. <strong>Total pago (c/ impostos)</strong> = pago + impostos (gross-up Unilog). <strong>% s/ vendas</strong> = pago ÷ vendas. <strong>% c/ impostos</strong> = total pago ÷ vendas.</p>
     <div class="tbl-wrap arm-comparativo-wrap">
-      <table id="arm-comparativoTbl" class="arm-comparativo-tbl">
+      <table id="arm-comparativoTbl" class="arm-comparativo-tbl" data-managed-sort="arm">
         <colgroup>
           <col class="arm-col-mes"><col class="arm-col-ano">
-          <col class="arm-col-num"><col class="arm-col-num"><col class="arm-col-num">
+          <col class="arm-col-num"><col class="arm-col-num"><col class="arm-col-num"><col class="arm-col-num">
           <col class="arm-col-pct"><col class="arm-col-pct">
         </colgroup>
         <thead><tr>
-          <th class="no-sort arm-col-mes">Mês</th>
-          <th class="no-sort arm-col-ano">Ano</th>
-          <th class="right no-sort arm-col-num" title="Valor faturação expedida">Vendas (NF base)</th>
-          <th class="right no-sort arm-col-num" title="Subtotal serviços antes de impostos">Pago (s/ impostos)</th>
-          <th class="right no-sort arm-col-num" title="11,25% sobre subtotal (2% ISS + 9,25% PIS/COFINS)">Impostos</th>
-          <th class="right no-sort arm-col-pct" title="Pago sem impostos ÷ vendas">% s/ vendas</th>
-          <th class="right no-sort arm-col-pct" title="(Pago + impostos) ÷ vendas">% c/ impostos</th>
+          ${sortTh('comparativo', 'mesLabel', 'Mês', 'arm-col-mes')}
+          ${sortTh('comparativo', 'ano', 'Ano', 'right arm-col-ano')}
+          ${sortTh('comparativo', 'nfBase', 'Vendas (NF base)', 'right arm-col-num')}
+          ${sortTh('comparativo', 'pago', 'Pago (s/ impostos)', 'right arm-col-num')}
+          ${sortTh('comparativo', 'impostos', 'Impostos', 'right arm-col-num')}
+          ${sortTh('comparativo', 'pagoComImp', 'Total pago (c/ impostos)', 'right arm-col-num')}
+          ${sortTh('comparativo', 'pctSem', '% s/ vendas', 'right arm-col-pct')}
+          ${sortTh('comparativo', 'pctCom', '% c/ impostos', 'right arm-col-pct')}
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -2154,6 +2188,7 @@ function renderArmMensal() {
     mesLabel: r => armMesLabel(r),
     totalServicos: r => r.totalServicos,
     impostos: r => armGetMonthImpostos(r),
+    pagoComImp: r => armGetMonthPagoComImp(r),
     valorMinimo: r => r.valorMinimo,
     belowMin: r => r.belowMin ? 1 : 0,
     nfCount: r => r.nfRows?.length || 0,
@@ -2165,6 +2200,7 @@ function renderArmMensal() {
     body.innerHTML = rows.map(m => {
       const addVal = (m.adicionais || []).reduce((s, a) => s + a.valor, 0);
       const imp = armGetMonthImpostos(m);
+      const pagoComImp = armGetMonthPagoComImp(m);
       const cls = m.belowMin ? 'month-row-high' : '';
       const src = m.entrySource === 'manual' ? ' <span class="badge b-ok">Manual</span>' : '';
       const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
@@ -2172,6 +2208,7 @@ function renderArmMensal() {
         <td>${armEsc(armMesLabel(m))}${src}</td>
         <td class="right">${armFmtMoney(m.totalServicos)}</td>
         <td class="right">${imp > 0 ? armFmtMoney(imp) : '—'}</td>
+        <td class="right">${pagoComImp > 0 ? armFmtMoney(pagoComImp) : '—'}</td>
         <td class="right">${armFmtMoney(m.valorMinimo)}</td>
         <td>${m.belowMin ? '<span class="badge b-flag">Abaixo mínimo</span>' : '<span class="badge b-ok">OK</span>'}</td>
         <td class="right">${m.nfRows?.length || 0}${m.nfSkipped ? ' <span class="badge b-warn" title="Detalhe NF omitido">—</span>' : ''}</td>
@@ -2187,6 +2224,7 @@ function renderArmMensal() {
       ${sortTh('mensal', 'mesLabel', 'Mês')}
       ${sortTh('mensal', 'totalServicos', 'Pago (s/ imp.)', 'right')}
       ${sortTh('mensal', 'impostos', 'Impostos', 'right')}
+      ${sortTh('mensal', 'pagoComImp', 'Total pago (c/ imp.)', 'right')}
       ${sortTh('mensal', 'valorMinimo', 'Mínimo contratual', 'right')}
       ${sortTh('mensal', 'belowMin', 'Alerta')}
       ${sortTh('mensal', 'nfCount', 'NFs 5,5%', 'right')}
@@ -2636,7 +2674,10 @@ function exportArmazemWorkbook() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(totalAoa), 'Total');
 
   const mensal = months.map(m => ({
-    Mes: armMesLabel(m), Total: m.totalServicos, Minimo: m.valorMinimo,
+    Mes: armMesLabel(m), Total: m.totalServicos,
+    Impostos: armGetMonthImpostos(m),
+    TotalComImpostos: armGetMonthPagoComImp(m),
+    Minimo: m.valorMinimo,
     AbaixoMinimo: m.belowMin ? 'SIM' : 'NÃO',
     NFs: m.nfRows?.length || 0,
     Adicionais: (m.adicionais || []).reduce((s, a) => s + a.valor, 0),
