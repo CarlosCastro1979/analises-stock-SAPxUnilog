@@ -349,6 +349,9 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-armazem .arm-file-list{font-size:11px;color:var(--muted);max-height:120px;overflow-y:auto;margin-top:8px;text-align:left;}
 #page-armazem .arm-file-list div{padding:2px 0;font-family:var(--mono);}
 #page-armazem .uz.drag{border-color:var(--red);background:#fff5f5;}
+#page-armazem #arm-procSpin,#page-armazem #arm-procNote{display:none !important;}
+#page-armazem #arm-procSpin:not([hidden]),#page-armazem #arm-procNote:not([hidden]){display:inline-flex !important;}
+#page-armazem #arm-procNote:not([hidden]){display:inline !important;}
 #page-fretes .empty{text-align:center;padding:40px 16px;color:var(--muted);}
 #page-fretes .cte-detail-table{width:100%;margin-top:6px;}
 #page-fretes .cte-detail-table th{font-size:10px;}
@@ -423,7 +426,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.2</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.3</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1686,6 +1689,10 @@ select.cad-inp{cursor:pointer;}
   <div class="card">
     <div class="ch"><div class="ct">Avaliação Cobrança Armazém Unilog</div></div>
 
+    <div id="arm-initErr" class="data-warn" style="display:none;margin-bottom:12px;">
+      Erro ao carregar o módulo Armazém — recarrega a página. Se persistir, verifica a consola do browser (F12).
+    </div>
+
     <div id="arm-dfbGate" class="data-warn" style="display:none;">
       Este módulo está disponível apenas para <strong>DFB — Delta Foods Brasil</strong>. Muda o seletor de empresa no topo.
     </div>
@@ -1713,12 +1720,12 @@ select.cad-inp{cursor:pointer;}
         <div id="arm-fileList" class="arm-file-list" style="display:none"></div>
         <input type="file" id="arm-fileInput" accept=".xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple onchange="typeof armOnFileSelected==='function'&&armOnFileSelected(this)">
       </div>
-      <div id="arm-sapNote" class="data-warn" style="margin-top:14px;font-size:12px;"></div>
+      <div id="arm-sapNote" class="data-warn" style="display:none;margin-top:14px;font-size:12px;"></div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
         <button class="btn bp" id="arm-procBtn" type="button" disabled>⚡ Processar e Guardar</button>
         <button class="btn bg" id="arm-loadBtn" type="button">☁️ Carregar último guardado</button>
-        <span id="arm-procSpin" style="display:none"><span class="spin"></span></span>
-        <span id="arm-procNote" style="display:none;font-size:11px;color:var(--yellow);font-weight:600"></span>
+        <span id="arm-procSpin" hidden style="display:none"><span class="spin"></span></span>
+        <span id="arm-procNote" hidden style="display:none;font-size:11px;color:var(--yellow);font-weight:600"></span>
       </div>
     </div>
 
@@ -7551,8 +7558,12 @@ function applyResizable(){scheduleColResize();}
 
 </script>
 <script src="fretes.js?v=1.7.12"></script>
-<script src="armazem.js?v=1.0.2"></script>
+<script src="armazem.js?v=1.0.3" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
 <script>
+if(typeof initArmazem!=='function'){
+  const e=document.getElementById('arm-initErr');
+  if(e)e.style.display='block';
+}
 init();
 initMultiselects();
 </script>

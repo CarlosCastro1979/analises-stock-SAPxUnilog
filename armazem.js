@@ -1,5 +1,5 @@
-// armazem.js v1.0.2
-const ARMAZEM_JS_VERSION = '1.0.2';
+// armazem.js v1.0.3
+const ARMAZEM_JS_VERSION = '1.0.3';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -32,7 +32,7 @@ const CATALOGO_DESPESAS = [
   { id: 'outros', label: 'Outros (validar)' }
 ];
 
-const MESES_PT = {
+const ARM_MESES_PT = {
   janeiro: 1, jan: 1,
   fevereiro: 2, fev: 2,
   marco: 3, março: 3, mar: 3,
@@ -155,7 +155,7 @@ function parseMonthFromFileName(fileName) {
   const year = m ? parseInt(m[1], 10) : null;
   const low = base.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   let month = null;
-  for (const [name, num] of Object.entries(MESES_PT)) {
+  for (const [name, num] of Object.entries(ARM_MESES_PT)) {
     const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (low.includes(key)) { month = num; break; }
   }
@@ -687,6 +687,7 @@ function updateArmFileZone() {
     sapNote.innerHTML = nSap
       ? `✓ SAP NF carregado no módulo <strong>Fretes</strong> (${nSap.toLocaleString('pt-BR')} NFs) — reutilizado para validação 5,5%.`
       : '⚠ Carrega o Excel SAP NF no módulo <strong>Fretes CT-e</strong> para validar valores das NFs (export cobre todos os meses).';
+    sapNote.style.display = 'block';
   }
   const btn = $arm('procBtn');
   if (btn) btn.disabled = !armPendingFiles.length;
@@ -1034,14 +1035,19 @@ function armSetProcessing(active, label) {
   const spin = $arm('procSpin');
   const btn = $arm('procBtn');
   const note = $arm('procNote');
-  if (spin) spin.style.display = active ? 'inline-flex' : 'none';
+  if (spin) {
+    spin.hidden = !active;
+    spin.style.display = active ? 'inline-flex' : 'none';
+  }
   if (btn) btn.disabled = active || !armPendingFiles.length;
   if (note) {
     if (active && label) {
       note.textContent = label;
+      note.hidden = false;
       note.style.display = 'inline';
     } else {
       note.textContent = '';
+      note.hidden = true;
       note.style.display = 'none';
     }
   }
@@ -1127,7 +1133,10 @@ async function processArmFiles() {
 async function loadSavedArmazem(silent) {
   if (typeof fetchExcelFiles !== 'function') return false;
   try {
-    const m = await fetchExcelFiles([armSlot()]);
+    const m = await Promise.race([
+      fetchExcelFiles([armSlot()]),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 25_000))
+    ]);
     const rec = m[armSlot()];
     const pack = parseArmPackFromRec(rec);
     if (pack?.months?.length) {
@@ -1137,7 +1146,9 @@ async function loadSavedArmazem(silent) {
       if (!silent) armToast(`${pack.months.length} mês(es) carregado(s) da cloud.`);
       return true;
     }
-  } catch (e) { /* offline */ }
+  } catch (e) {
+    console.warn('[armazem] load saved', e);
+  }
   return false;
 }
 
@@ -1188,6 +1199,10 @@ async function reloadArmazemForCompany() {
 }
 
 function initArmazem() {
+  armSetProcessing(false);
+  const initErr = $arm('initErr');
+  if (initErr) initErr.style.display = 'none';
+
   if (armInited) {
     renderArmDfbGate();
     updateArmFileZone();
@@ -1236,3 +1251,9 @@ function initArmazem() {
   updateArmFileZone();
   loadSavedArmazem(true).catch(e => console.warn('[armazem] load saved', e));
 }
+
+window.initArmazem = initArmazem;
+window.armOnFileSelected = armOnFileSelected;
+window.processArmFiles = processArmFiles;
+window.armDoSort = armDoSort;
+window.armSetCatalog = armSetCatalog;
