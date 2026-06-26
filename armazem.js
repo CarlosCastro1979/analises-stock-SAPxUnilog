@@ -1,5 +1,5 @@
-// armazem.js v1.0.3
-const ARMAZEM_JS_VERSION = '1.0.3';
+// armazem.js v1.0.4
+const ARMAZEM_JS_VERSION = '1.0.4';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -46,6 +46,11 @@ const ARM_MESES_PT = {
   novembro: 11, nov: 11,
   dezembro: 12, dez: 12
 };
+
+const ARM_MESES_NOME = [
+  '', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
 
 function armCompany() {
   return typeof company !== 'undefined' ? company : 'DFB';
@@ -101,14 +106,109 @@ function normalizeServicoName(raw) {
   let s = String(raw || '').trim();
   s = s.replace(/^\[[\d.]+\]\s*/i, '');
   s = s.replace(/\s+/g, ' ').toUpperCase();
-  if (/PERCENTUAL\s+SOBRE\s+NF\s+EXPEDID/.test(s)) return 'PERCENTUAL SOBRE NF EXPEDIDA';
+  if (/PERCENTUAL\s+SOBRE\s+NF\s+EXPEDID|ARMAZENAGEM\s+POR\s*%|5[,.]5\s*%/.test(s)) return 'PERCENTUAL SOBRE NF EXPEDIDA';
   if (/ARMAZENAGEM\s+EXCEDENTE/.test(s)) return 'ARMAZENAGEM EXCEDENTE';
   if (/ARMAZENAGEM\s+POR\s+POSI/.test(s)) return 'ARMAZENAGEM POR POSICAO PALLET';
-  if (/ETIQUETAGEM\s+EAN/.test(s)) return 'ETIQUETAGEM EAN - POR UNIDADE';
+  if (/ETIQUETAGEM/.test(s)) return 'ETIQUETAGEM EAN - POR UNIDADE';
   if (/READEQUA/.test(s)) return 'READEQUACAO DE PRODUTOS - POR UNIDADE';
-  if (/HORA\s+EXTRA/.test(s) || /\bHE\b/.test(s)) return 'HORA EXTRA';
+  if (/HORA\s+EXTRA|H\.\s*E|H\.E|\bHE\b/.test(s)) return 'HORA EXTRA';
+  if (/DECARGA\s+DE\s+MERCADORIA/.test(s)) return 'DECARGA DE MERCADORIA - POR PALLET';
   if (/IMPOSTO|PIS|COFINS|ISS/.test(s)) return 'IMPOSTOS SERVICOS';
   return s;
+}
+
+function armMesNomeLong(mesKey, mesLabel) {
+  const m = String(mesKey || '').match(/^(\d{4})-(\d{2})$/);
+  if (m) {
+    const mi = parseInt(m[2], 10);
+    return `${ARM_MESES_NOME[mi] || m[2]} ${m[1]}`;
+  }
+  if (mesLabel) return mesLabel;
+  return mesKey || '—';
+}
+
+function armMesSheetName(mesKey) {
+  const m = String(mesKey || '').match(/^(\d{4})-(\d{2})$/);
+  if (!m) return 'Mes';
+  const mi = parseInt(m[2], 10);
+  const short = (ARM_MESES_NOME[mi] || m[2]).slice(0, 3);
+  return `${short} ${m[1]}`.slice(0, 31);
+}
+
+function armResumoRows(month) {
+  return (month.servicos || []).filter(s => s.normName !== 'IMPOSTOS SERVICOS' && !/^IMPOSTO/i.test(s.normName));
+}
+
+function armFmtResumoQty(v, isNf) {
+  if (isNf) return armFmtMoney(v);
+  const n = Number(v) || 0;
+  if (Math.abs(n - Math.round(n)) < 0.0001) return n.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+}
+
+function armFmtResumoUnit(v, isNf) {
+  if (isNf) return (ARM_NF_RATE * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+  const n = Number(v) || 0;
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+}
+
+function armResumoRowHtml(s, opts) {
+  const isNf = !!s.isNf;
+  const nome = opts?.useNorm ? s.normName : (s.rawName || s.normName);
+  return `<tr>
+    <td>${armEsc(nome)}</td>
+    <td class="right">${armFmtResumoQty(s.qtde, isNf)}</td>
+    <td class="right">${armFmtResumoUnit(s.valorUnit, isNf)}</td>
+    <td class="right">${armFmtMoney(s.valor)}</td>
+  </tr>`;
+}
+
+function aggregateResumoByNorm(months) {
+  const map = {};
+  months.forEach(m => {
+    armResumoRows(m).forEach(s => {
+      const norm = normalizeServicoName(s.rawName);
+      if (!map[norm]) {
+        map[norm] = { normName: norm, qtde: 0, valor: 0, unitSum: 0, isNf: false, rawVariants: new Set() };
+      }
+      const row = map[norm];
+      row.qtde += s.qtde || 0;
+      row.valor += s.valor || 0;
+      if (s.qtde && s.valorUnit) row.unitSum += s.qtde * s.valorUnit;
+      if (s.isNf) row.isNf = true;
+      row.rawVariants.add(s.rawName);
+    });
+  });
+  return Object.values(map).map(r => ({
+    normName: r.normName,
+    rawName: r.normName,
+    qtde: r.qtde,
+    valor: r.valor,
+    valorUnit: r.isNf ? ARM_NF_RATE : (r.qtde ? r.unitSum / r.qtde : 0),
+    isNf: r.isNf,
+    rawVariants: [...r.rawVariants]
+  })).sort((a, b) => a.normName.localeCompare(b.normName, 'pt'));
+}
+
+function resumoTableHtml(rows, opts) {
+  const qtyHdr = opts?.total ? 'Qtde Serviço / Valor Faturação' : 'Qtde Serviço';
+  const valHdr = opts?.total ? 'Valor Calculado / Pago' : 'Valor Calculado';
+  const body = rows.map(s => armResumoRowHtml(s, opts)).join('');
+  const subtotal = rows.reduce((s, r) => s + (r.valor || 0), 0);
+  return `
+    <div class="tbl-wrap arm-resumo-tbl">
+      <table>
+        <thead><tr>
+          <th>Tipo de Serviço</th>
+          <th class="right">${qtyHdr}</th>
+          <th class="right">Valor Unitário</th>
+          <th class="right">${valHdr}</th>
+        </tr></thead>
+        <tbody>${body}
+          <tr class="arm-resumo-subtotal"><td><strong>Subtotal</strong></td><td></td><td></td><td class="right"><strong>${armFmtMoney(subtotal)}</strong></td></tr>
+        </tbody>
+      </table>
+    </div>`;
 }
 
 function catalogStorageKey() {
@@ -615,7 +715,7 @@ function switchArmTab(tab) {
   document.querySelectorAll('#page-armazem .arm-tab').forEach(t => {
     t.classList.toggle('active', t.dataset.tab === tab);
   });
-  ['carregamento', 'mensal', 'acumulado', 'nf', 'adicionais', 'catalogo'].forEach(id => {
+  ['carregamento', 'mensal', 'resumo', 'nf', 'adicionais', 'catalogo'].forEach(id => {
     const el = $arm('tab-' + id);
     if (el) el.style.display = id === tab ? 'block' : 'none';
   });
@@ -624,7 +724,7 @@ function switchArmTab(tab) {
 
 function renderArmActiveTab() {
   if (armActiveTab === 'mensal') renderArmMensal();
-  if (armActiveTab === 'acumulado') renderArmAcumulado();
+  if (armActiveTab === 'resumo') renderArmAcumulado();
   if (armActiveTab === 'nf') renderArmNf();
   if (armActiveTab === 'adicionais') renderArmAdicionais();
   if (armActiveTab === 'catalogo') renderArmCatalogo();
@@ -759,6 +859,7 @@ function renderArmMensal() {
 function renderArmAcumulado() {
   const empty = $arm('acumuladoEmpty');
   const content = $arm('acumuladoContent');
+  const sections = $arm('acumuladoSections');
   const months = armPack?.months || [];
   if (!months.length) {
     if (empty) empty.style.display = 'block';
@@ -768,42 +869,35 @@ function renderArmAcumulado() {
   if (empty) empty.style.display = 'none';
   if (content) content.style.display = 'block';
 
-  const agg = aggregateByCatalog(months);
-  const rows = armApplySort(agg, 'acumulado', {
-    label: r => r.label,
-    valor: r => r.valor,
-    qtde: r => r.qtde,
-    months: r => r.months.length
-  });
+  const totalServ = months.reduce((s, m) => s + (m.totalServicos || 0), 0);
+  const agg = aggregateResumoByNorm(months);
+  const totalAgg = agg.reduce((s, r) => s + r.valor, 0);
 
-  const total = agg.reduce((s, r) => s + r.valor, 0);
   const kpis = $arm('acumuladoKpis');
   if (kpis) {
     kpis.innerHTML = `
-      <div class="kpi"><div class="label">Tipos de despesa</div><div class="value">${agg.length}</div></div>
-      <div class="kpi"><div class="label">Acumulado total</div><div class="value">${armFmtMoney(total)}</div></div>
-      <div class="kpi"><div class="label">Meses</div><div class="value">${months.length}</div></div>`;
+      <div class="kpi"><div class="label">Meses</div><div class="value">${months.length}</div></div>
+      <div class="kpi"><div class="label">Tipos de serviço (total)</div><div class="value">${agg.length}</div></div>
+      <div class="kpi"><div class="label">Soma resumo</div><div class="value">${armFmtMoney(totalAgg)}</div></div>
+      <div class="kpi"><div class="label">Total serviços (faturas)</div><div class="value">${armFmtMoney(totalServ)}</div></div>`;
   }
 
-  const thead = $arm('acumuladoHead');
-  if (thead) {
-    thead.innerHTML = `
-      ${sortTh('acumulado', 'label', 'Tipo (catálogo)')}
-      ${sortTh('acumulado', 'valor', 'Valor acumulado', 'right')}
-      ${sortTh('acumulado', 'qtde', 'Qtde acumulada', 'right')}
-      ${sortTh('acumulado', 'months', 'Meses', 'right')}
-      <th>Serviços Unilog</th>`;
-  }
+  if (sections) {
+    const monthBlocks = months.map(m => {
+      const rows = armResumoRows(m);
+      const titulo = armMesNomeLong(m.mesKey, m.mesLabel);
+      return `<div class="arm-resumo-month">
+        <div class="section-title arm-resumo-month-title">${armEsc(titulo)}</div>
+        ${resumoTableHtml(rows)}
+      </div>`;
+    }).join('');
 
-  const body = $arm('acumuladoBody');
-  if (body) {
-    body.innerHTML = rows.map(r => `<tr>
-      <td><strong>${armEsc(r.label)}</strong></td>
-      <td class="right">${armFmtMoney(r.valor)}</td>
-      <td class="right">${typeof fmt === 'function' ? fmt(r.qtde) : r.qtde.toLocaleString('pt-BR')}</td>
-      <td class="right">${r.months.length}</td>
-      <td style="font-size:11px">${armEsc(r.servicos.join(' · '))}</td>
-    </tr>`).join('');
+    const totalBlock = `<div class="arm-resumo-month arm-resumo-total-block">
+      <div class="section-title arm-resumo-month-title">Total</div>
+      ${resumoTableHtml(agg, { useNorm: true, total: true })}
+    </div>`;
+
+    sections.innerHTML = monthBlocks + totalBlock;
   }
 }
 
@@ -1120,7 +1214,7 @@ async function processArmFiles() {
       (saved ? ' · guardado' : '') + '.',
       failN ? 'error' : 'success'
     );
-    switchArmTab(totalMonths === 1 ? 'mensal' : 'acumulado');
+    switchArmTab(totalMonths === 1 ? 'mensal' : 'resumo');
   } catch (err) {
     console.error('[armazem] processArmFiles', err);
     armToast('Erro ao processar: ' + (err.message || err), 'error');
@@ -1152,10 +1246,47 @@ async function loadSavedArmazem(silent) {
   return false;
 }
 
+function exportResumoSheetRows(rows, title) {
+  const aoa = [
+    [title || 'Resumo'],
+    [],
+    ['Tipo de Serviço', 'Qtde Serviço / Valor Faturação', 'Valor Unitário', 'Valor Calculado']
+  ];
+  rows.forEach(s => {
+    aoa.push([
+      s.rawName || s.normName,
+      s.isNf ? s.qtde : s.qtde,
+      s.isNf ? ARM_NF_RATE : s.valorUnit,
+      s.valor
+    ]);
+  });
+  const subtotal = rows.reduce((s, r) => s + (r.valor || 0), 0);
+  aoa.push([], ['Subtotal', '', '', subtotal]);
+  return aoa;
+}
+
 function exportArmazemWorkbook() {
   const months = armPack?.months || [];
   if (!months.length) { armToast('Sem dados para exportar.', 'error'); return; }
   const wb = XLSX.utils.book_new();
+  const usedNames = new Set();
+
+  months.forEach(m => {
+    const rows = armResumoRows(m);
+    let name = armMesSheetName(m.mesKey);
+    let n = 2;
+    while (usedNames.has(name)) { name = armMesSheetName(m.mesKey).slice(0, 28) + '_' + n++; }
+    usedNames.add(name);
+    const aoa = exportResumoSheetRows(rows, 'Resumo — ' + armMesNomeLong(m.mesKey, m.mesLabel));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), name);
+  });
+
+  const agg = aggregateResumoByNorm(months);
+  const totalAoa = exportResumoSheetRows(
+    agg.map(r => ({ ...r, rawName: r.normName })),
+    'Total — todos os meses'
+  );
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(totalAoa), 'Total');
 
   const mensal = months.map(m => ({
     Mes: m.mesLabel, Total: m.totalServicos, Minimo: m.valorMinimo,
@@ -1164,12 +1295,7 @@ function exportArmazemWorkbook() {
     Adicionais: (m.adicionais || []).reduce((s, a) => s + a.valor, 0),
     Ficheiro: m.fileName
   }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mensal), 'Mensal');
-
-  const acum = aggregateByCatalog(months).map(r => ({
-    Categoria: r.label, Valor: r.valor, Qtde: r.qtde, Meses: r.months.join(', ')
-  }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(acum), 'Acumulado');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mensal), 'Visão mensal');
 
   const nfs = months.flatMap(m => (m.nfRows || []).map(r => ({
     Mes: m.mesLabel, NF: r.nf, Data: r.data,
@@ -1243,7 +1369,7 @@ function initArmazem() {
   $arm('procBtn')?.addEventListener('click', () => processArmFiles());
   $arm('loadBtn')?.addEventListener('click', async () => {
     const ok = await loadSavedArmazem(false);
-    if (ok) switchArmTab((armPack?.months?.length || 0) === 1 ? 'mensal' : 'acumulado');
+    if (ok) switchArmTab((armPack?.months?.length || 0) === 1 ? 'mensal' : 'resumo');
   });
   $arm('exportBtn')?.addEventListener('click', () => exportArmazemWorkbook());
 
@@ -1257,3 +1383,4 @@ window.armOnFileSelected = armOnFileSelected;
 window.processArmFiles = processArmFiles;
 window.armDoSort = armDoSort;
 window.armSetCatalog = armSetCatalog;
+window.exportArmazemWorkbook = exportArmazemWorkbook;
