@@ -1,5 +1,5 @@
-// armazem.js v1.0.14
-const ARMAZEM_JS_VERSION = '1.0.14';
+// armazem.js v1.0.16
+const ARMAZEM_JS_VERSION = '1.0.16';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -402,6 +402,7 @@ function armNormalizeMonth(m) {
   }
   m.mesKey = mesKey;
   m.mesLabel = armMesLabel({ mesKey, mesLabel: m.mesLabel, fileName: m.fileName });
+  armRepairNfServico(m);
   return m;
 }
 
@@ -456,12 +457,55 @@ function armGetArmazenagemValor(month) {
   return { subtotal, final: finalVal, primary: finalVal > 0 ? finalVal : subtotal };
 }
 
-function armGetNfBase(month) {
-  const row = (month.servicos || []).find(s =>
+function armFindNfServico(month) {
+  return (month?.servicos || []).find(s =>
     s.isNf || isNfPercentualService(s.rawName || s.normName)
-  );
-  const v = row ? Number(row.qtde) : 0;
-  return Number.isFinite(v) && v > 0 ? v : 0;
+  ) || null;
+}
+
+/** NF resumo: qtde = faturação expedida (base); valor = taxa 5,5%. Recover when fee was stored as qtde. */
+function armNfBaseFromServico(row) {
+  if (!row) return 0;
+  const q = armNum(row.qtde);
+  const fee = armNum(row.valor);
+  if (q <= 0) {
+    if (fee > 0) return fee / ARM_NF_RATE;
+    return 0;
+  }
+  if (fee > 0) {
+    const expectedFee = q * ARM_NF_RATE;
+    const relErr = Math.abs(expectedFee - fee) / Math.max(expectedFee, fee, 1);
+    if (relErr < 0.08) return q;
+    // qtde ≈ valor → both read the fee column, not the NF base
+    if (Math.abs(q - fee) / Math.max(q, fee, 1) < 0.03) return q / ARM_NF_RATE;
+  }
+  if (q >= 500000) return q;
+  const asBase = q / ARM_NF_RATE;
+  if (asBase >= 500000) return asBase;
+  return q;
+}
+
+function armRepairNfServico(month) {
+  const row = armFindNfServico(month);
+  if (!row) return;
+  row.isNf = true;
+  const base = armNfBaseFromServico(row);
+  if (base > 0) {
+    row.qtde = base;
+    row.valorUnit = ARM_NF_RATE;
+    row.valor = base * ARM_NF_RATE;
+  }
+}
+
+function armGetNfBase(month) {
+  const fromServico = armNfBaseFromServico(armFindNfServico(month));
+  const nfSum = (month?.nfRows || []).reduce((a, r) => a + armNum(r.valorNF), 0);
+  if (fromServico > 0 && nfSum > 0) {
+    if (nfSum > fromServico * 1.5) return nfSum;
+    if (fromServico > nfSum * 1.5) return fromServico;
+    return Math.max(fromServico, nfSum);
+  }
+  return fromServico > 0 ? fromServico : nfSum > 0 ? nfSum : 0;
 }
 
 function armFmtPctGasto(armVal, nfBase) {
@@ -691,7 +735,7 @@ function scanResumoCols(matrix, hdrRow, fallback) {
   for (let c = 0; c < row.length; c++) {
     const h = normHdrCell(row[c]);
     if (!h) continue;
-    if (/qtde|quantidade/.test(h)) cols.qtde = c;
+    if (/qtde\s*servi|qtde|quantidade/.test(h)) cols.qtde = c;
     else if (/valor unit|unitario/.test(h)) cols.unit = c;
     else if (/valor calc|calculado/.test(h)) cols.valor = c;
     else if (/tipo de servi/.test(h)) nomeTipo = c;
@@ -728,7 +772,8 @@ function armLogParsedMonth(record, fileName) {
   const fin = record.valorTotal || 0;
   console.log(`[armazem] ${label} parsed: ${n} servicos`, {
     mesKey: record.mesKey, fileName: fileName || record.fileName,
-    subtotal: sub, final: fin, format: record.format
+    subtotal: sub, final: fin, format: record.format,
+    nfBase: armGetNfBase(record)
   });
 }
 
@@ -930,7 +975,7 @@ function parseArmazemV1(wb, fileName, opts) {
     const hdrRow = resumoHdr + 1;
     const cols = scanResumoCols(m, hdrRow, { nome: 1, qtde: 17, unit: 25, valor: 28 });
     for (let r = resumoHdr + 2; r < m.length; r++) {
-      const nome = cellText(m, r, cols.nome);
+      const nome = resumoRowServiceName(m, r, cols);
       if (!nome) continue;
       if (/^Apura/i.test(nome) || /IMPOSTO/i.test(nome)) continue;
       const isNf = isNfPercentualService(nome);
