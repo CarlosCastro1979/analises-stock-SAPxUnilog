@@ -1,5 +1,5 @@
-// armazem.js v1.0.16
-const ARMAZEM_JS_VERSION = '1.0.16';
+// armazem.js v1.0.17
+const ARMAZEM_JS_VERSION = '1.0.17';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -406,10 +406,58 @@ function armNormalizeMonth(m) {
   return m;
 }
 
+function armMonthMergeKey(m) {
+  const mk = String(m?.mesKey || '').trim();
+  if (/^\d{4}-\d{2}$/.test(mk)) return mk;
+  const fn = String(m?.fileName || '').trim().toLowerCase();
+  return fn || mk || '';
+}
+
+function armMonthDataScore(m) {
+  return (m?.servicos?.length || 0) * 100000
+    + (m?.nfRows?.length || 0) * 100
+    + (Number(m?.valorTotal) > 0 ? 10 : 0)
+    + (Number(m?.totalServicos) > 0 ? 1 : 0);
+}
+
+function armDedupePackMonths(pack) {
+  if (!pack?.months?.length) return pack;
+  const byKey = new Map();
+  for (const m of pack.months) {
+    const k = armMonthMergeKey(m);
+    if (!k) {
+      byKey.set(`__anon_${byKey.size}`, m);
+      continue;
+    }
+    const prev = byKey.get(k);
+    if (!prev) {
+      byKey.set(k, m);
+      continue;
+    }
+    const keep = armMonthDataScore(m) >= armMonthDataScore(prev) ? m : prev;
+    const drop = keep === m ? prev : m;
+    if ((keep.servicos?.length || 0) > (drop.servicos?.length || 0)) {
+      console.warn(`[armazem] dedupe ${k}: kept ${armMesLabel(keep)} (${keep.servicos.length} srv), dropped stale (${drop.fileName || '?'})`);
+    }
+    byKey.set(k, keep);
+  }
+  pack.months = [...byKey.values()].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
+  return pack;
+}
+
 function armNormalizePackMonths(pack) {
   if (!pack?.months?.length) return pack;
   pack.months.forEach(armNormalizeMonth);
-  return pack;
+  return armDedupePackMonths(pack);
+}
+
+function armLogPackMonths(label) {
+  const months = armPack?.months || [];
+  console.log(`[armazem] ${label}: ${months.length} month(s)`,
+    months.map(m => `${m.mesKey || '?'}:${m.servicos?.length || 0}srv`).join('; '));
+  months.filter(m => !(m.servicos?.length)).forEach(m => {
+    console.warn(`[armazem] ${armMesLabel(m)} sem servicos no resumo — processar de novo: ${m.fileName || '(sem ficheiro)'}`);
+  });
 }
 
 function armInfoLabelValue(matrix, r, labelRe) {
@@ -674,8 +722,13 @@ function renderArmResumoSections(months) {
     html += byYear[year].map(m => {
       const rows = armResumoRows(m);
       const titulo = armMesLabel(m);
+      const emptyWarn = rows.length ? '' : (
+        `<p class="data-warn" style="margin:0 0 8px;">Sem linhas de resumo guardadas — seleciona e processa de novo `
+        + `<strong>${armEsc(m.fileName || titulo)}</strong> na aba Carregamento.</p>`
+      );
       return `<div class="arm-resumo-month">
         <div class="section-title arm-resumo-month-title">${armEsc(titulo)}</div>
+        ${emptyWarn}
         ${resumoTableHtml(rows)}
       </div>`;
     }).join('');
@@ -1137,16 +1190,29 @@ async function readFileToWorkbook(file, opts) {
 }
 
 function mergeArmPack(prev, next) {
-  if (!prev?.months?.length) return next;
+  if (!prev?.months?.length) return armNormalizePackMonths(next);
   if (!next?.months?.length) {
-    return {
+    return armNormalizePackMonths({
       ...prev,
       failedFiles: [...(prev.failedFiles || []), ...(next.failedFiles || [])]
-    };
+    });
   }
-  const replace = new Set(next.months.map(m => m.mesKey || m.fileName));
+  const replaceMes = new Set();
+  const replaceFile = new Set();
+  next.months.forEach(m => {
+    const mk = String(m.mesKey || '').trim();
+    if (/^\d{4}-\d{2}$/.test(mk)) replaceMes.add(mk);
+    const fn = String(m.fileName || '').trim().toLowerCase();
+    if (fn) replaceFile.add(fn);
+  });
   const months = [
-    ...prev.months.filter(m => !replace.has(m.mesKey || m.fileName)),
+    ...prev.months.filter(m => {
+      const mk = String(m.mesKey || '').trim();
+      const fn = String(m.fileName || '').trim().toLowerCase();
+      if (mk && replaceMes.has(mk)) return false;
+      if (fn && replaceFile.has(fn)) return false;
+      return true;
+    }),
     ...next.months
   ].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
   return armNormalizePackMonths({
@@ -1353,6 +1419,7 @@ function updateArmFileZone() {
     (armPack?.months || []).forEach(m => {
       let line = armMesLabel(m);
       if (m.fileName && m.fileName !== line) line += ` (${m.fileName})`;
+      if (!(m.servicos?.length)) line += ' ⚠ sem resumo — processar de novo';
       if (m.partialParse) line += ' (resumo OK · NF omitido)';
       lines.push(line);
     });
@@ -1803,9 +1870,7 @@ async function processArmFiles() {
     }
     armPack = mergeArmPack(armPack, built);
     refreshAllSapOnNfs();
-    console.log('[armazem] armPack months:', (armPack.months || []).map(m =>
-      `${m.mesKey || '?'} (${m.servicos?.length || 0} srv, ${armMesLabel(m)})`
-    ).join('; '));
+    armLogPackMonths('after process');
     armPendingFiles = [];
     updateArmFileZone();
     const saved = await persistArmPack(armPack);
@@ -1836,10 +1901,19 @@ async function loadSavedArmazem(silent) {
     const rec = m[armSlot()];
     const pack = parseArmPackFromRec(rec);
     if (pack?.months?.length) {
-      armPack = pack;
+      armPack = armNormalizePackMonths(pack);
       refreshAllSapOnNfs();
+      armLogPackMonths('loaded from cloud');
       updateArmFileZone();
-      if (!silent) armToast(`${pack.months.length} mês(es) carregado(s) da cloud.`);
+      if (armInited) renderArmActiveTab();
+      const stale = (armPack.months || []).filter(m => !(m.servicos?.length)).length;
+      if (!silent) {
+        armToast(
+          `${armPack.months.length} mês(es) carregado(s) da cloud` +
+          (stale ? ` — ${stale} sem resumo (processar de novo)` : '') + '.',
+          stale ? 'error' : 'success'
+        );
+      }
       return true;
     }
   } catch (e) {
