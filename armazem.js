@@ -1,5 +1,5 @@
-// armazem.js v1.0.7
-const ARMAZEM_JS_VERSION = '1.0.7';
+// armazem.js v1.0.8
+const ARMAZEM_JS_VERSION = '1.0.8';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -382,9 +382,14 @@ function normHdrCell(v) {
 function findResumoHeaderRow(matrix) {
   for (let r = 0; r < matrix.length; r++) {
     const row = matrix[r] || [];
+    let hasNome = false;
+    let hasQtde = false;
     for (let c = 0; c < row.length; c++) {
-      if (/tipo de servi/i.test(String(row[c] || ''))) return r;
+      const h = normHdrCell(row[c]);
+      if (/tipo de servi|codigo servi|cod servi/.test(h)) hasNome = true;
+      if (/qtde|quantidade/.test(h)) hasQtde = true;
     }
+    if (hasNome && hasQtde) return r;
   }
   return -1;
 }
@@ -392,24 +397,30 @@ function findResumoHeaderRow(matrix) {
 function scanResumoCols(matrix, hdrRow, fallback) {
   const cols = { ...(fallback || { nome: 1, qtde: 2, unit: 3, valor: 4 }) };
   const row = matrix[hdrRow] || [];
+  let nomeTipo = -1;
+  let nomeCodigo = -1;
   for (let c = 0; c < row.length; c++) {
     const h = normHdrCell(row[c]);
     if (!h) continue;
     if (/qtde|quantidade/.test(h)) cols.qtde = c;
     else if (/valor unit|unitario/.test(h)) cols.unit = c;
     else if (/valor calc|calculado/.test(h)) cols.valor = c;
+    else if (/tipo de servi/.test(h)) nomeTipo = c;
+    else if (/codigo servi|cod servi/.test(h)) nomeCodigo = c;
   }
-  for (let c = 0; c < row.length; c++) {
-    const h = normHdrCell(row[c]);
-    if (/codigo servi|cod servi/.test(h)) cols.nome = c;
-  }
-  if (cols.nome === (fallback?.nome ?? 1)) {
-    for (let c = 0; c < row.length; c++) {
-      const h = normHdrCell(row[c]);
-      if (/tipo de servi/.test(h)) cols.nome = c;
-    }
-  }
+  // v2 Unilog: descriptions live in "Código Serviço"; "Tipo de Serviço" is often blank.
+  if (nomeCodigo >= 0) cols.nome = nomeCodigo;
+  else if (nomeTipo >= 0) cols.nome = nomeTipo;
   return cols;
+}
+
+function resumoRowServiceName(matrix, r, cols) {
+  const tryCols = [cols.nome, 1, 0].filter((c, i, a) => c >= 0 && a.indexOf(c) === i);
+  for (const c of tryCols) {
+    const t = cellText(matrix, r, c);
+    if (t) return t;
+  }
+  return '';
 }
 
 function armFinishServico(rawName, qtde, valorUnit, valor, isNf) {
@@ -423,9 +434,18 @@ function armFinishServico(rawName, qtde, valorUnit, valor, isNf) {
   return { qtde: q, valorUnit: u, valor: calc > 0 ? calc : armNum(valor) };
 }
 
+function normSheetName(name) {
+  return String(name || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function findSheetName(wb, pattern) {
   const re = typeof pattern === 'string' ? new RegExp(pattern, 'i') : pattern;
-  return wb.SheetNames.find(n => re.test(n)) || null;
+  return wb.SheetNames.find(n => re.test(normSheetName(n))) || null;
+}
+
+function findResumoSheetName(wb) {
+  return wb.SheetNames.find(n => /^resumo de servi/.test(normSheetName(n))) || null;
 }
 
 function parseBrDate(s) {
@@ -442,7 +462,7 @@ function isNfPercentualService(name) {
 
 function parseArmazemV2(wb, fileName) {
   const infoName = findSheetName(wb, /^Informa/);
-  const resumoName = findSheetName(wb, /^Resumo de Servi/);
+  const resumoName = findResumoSheetName(wb);
   const diarioName = findSheetName(wb, /^Detalhamento Di/);
   if (!resumoName) throw new Error('Folha "Resumo de Serviços" não encontrada (formato v2).');
 
@@ -482,8 +502,8 @@ function parseArmazemV2(wb, fileName) {
   const cols = scanResumoCols(resumo, hdr);
 
   for (let r = hdr + 1; r < resumo.length; r++) {
-    const nome = cellText(resumo, r, cols.nome) || cellText(resumo, r, 0);
-    const codigo = cellText(resumo, r, cols.nome) || nome;
+    const nome = resumoRowServiceName(resumo, r, cols);
+    const codigo = nome;
     if (!nome) continue;
     if (/^Apura/i.test(nome) || /^Total$/i.test(nome) || /^Impostos/i.test(nome)) continue;
     const isNf = isNfPercentualService(nome);
@@ -658,7 +678,7 @@ function buildMonthRecord(opts) {
 }
 
 function parseArmazemWorkbook(wb, fileName) {
-  const hasV2 = wb.SheetNames.some(n => /Resumo de Servi/i.test(n));
+  const hasV2 = !!findResumoSheetName(wb);
   const rec = hasV2 ? parseArmazemV2(wb, fileName) : parseArmazemV1(wb, fileName);
   if (armCompany() !== 'DFB') {
     rec.companyWarning = 'Módulo configurado para Delta Foods Brasil (DFB).';
@@ -706,7 +726,7 @@ function refreshAllSapOnNfs() {
 }
 
 function detectParserVersion(wb) {
-  return wb.SheetNames.some(n => /Resumo de Servi/i.test(n)) ? 'v2' : 'v1';
+  return findResumoSheetName(wb) ? 'v2' : 'v1';
 }
 
 async function readFileToWorkbook(file) {
