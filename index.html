@@ -372,6 +372,17 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-armazem #arm-procSpin,#page-armazem #arm-procNote{display:none !important;}
 #page-armazem #arm-procSpin:not([hidden]),#page-armazem #arm-procNote:not([hidden]){display:inline-flex !important;}
 #page-armazem #arm-procNote:not([hidden]){display:inline !important;}
+#page-armazem .arm-lancamento-grid{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start;}
+@media(max-width:1000px){#page-armazem .arm-lancamento-grid{grid-template-columns:1fr;}}
+#page-armazem .arm-lanc-panel{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;}
+#page-armazem .arm-lanc-panel h4{margin:0 0 10px;font-size:12px;font-weight:700;color:var(--navy);}
+#page-armazem .arm-entry-row select,#page-armazem .arm-entry-row input[type=text],#page-armazem .arm-entry-row input[type=number]{width:100%;padding:6px 8px;border:1px solid var(--border2);border-radius:4px;font-size:12px;box-sizing:border-box;}
+#page-armazem .arm-entry-row input[type=number]{text-align:right;font-family:var(--mono);}
+#page-armazem .arm-entry-row .arm-val-calc{font-family:var(--mono);font-weight:600;}
+#page-armazem .arm-typo-row td{font-size:11px;}
+#page-armazem .arm-typo-total td{background:#f8fafc;font-weight:700;border-top:2px solid var(--border);}
+#page-armazem .arm-lanc-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center;}
+#page-armazem .arm-nf-upload{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);}
 #page-fretes .empty{text-align:center;padding:40px 16px;color:var(--muted);}
 #page-fretes .cte-detail-table{width:100%;margin-top:6px;}
 #page-fretes .cte-detail-table th{font-size:10px;}
@@ -1718,7 +1729,8 @@ select.cad-inp{cursor:pointer;}
     </div>
 
     <div class="arm-tabs">
-      <div class="arm-tab active" data-tab="carregamento">Carregamento</div>
+      <div class="arm-tab active" data-tab="lancamento">Lançamento mensal</div>
+      <div class="arm-tab" data-tab="carregamento">Carregamento Excel</div>
       <div class="arm-tab" data-tab="mensal">Visão mensal</div>
       <div class="arm-tab" data-tab="resumo">Resumo por mês</div>
       <div class="arm-tab" data-tab="nf">NF 5,5%</div>
@@ -1726,9 +1738,87 @@ select.cad-inp{cursor:pointer;}
       <div class="arm-tab" data-tab="catalogo">Catálogo</div>
     </div>
 
-    <div id="arm-tab-carregamento">
+    <div id="arm-tab-lancamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">
-        Carrega os Excels mensais <em>Receita_Custo DELTA</em> da Unilog (multi-selecção).
+        Lançamento manual mensal — preenche serviços, impostos e valida NFs 5,5% contra SAP (ZFACT).
+        O catálogo inclui serviços dos Excels Unilog; podes adicionar tipos personalizados.
+      </p>
+      <div class="filters" style="margin-bottom:14px;">
+        <label style="font-size:11px;font-weight:600;color:var(--muted);">Mês de referência</label>
+        <select id="arm-lancAno"></select>
+        <select id="arm-lancMes"></select>
+        <button class="btn bg bs" type="button" id="arm-lancLoadBtn">Carregar mês</button>
+      </div>
+      <div class="arm-lancamento-grid">
+        <div class="arm-lanc-panel">
+          <h4>Linhas de serviço</h4>
+          <div class="tbl-wrap" style="max-height:360px;">
+            <table id="arm-lancEntryTbl">
+              <thead><tr>
+                <th style="min-width:220px;">Serviço</th>
+                <th class="right" style="width:90px;">Qt serviço</th>
+                <th class="right" style="width:100px;">Valor unit.</th>
+                <th class="right" style="width:110px;">Valor calc.</th>
+                <th class="no-sort" style="width:36px;"></th>
+              </tr></thead>
+              <tbody id="arm-lancEntryBody"></tbody>
+            </table>
+          </div>
+          <div class="arm-lanc-actions">
+            <button class="btn bg bs" type="button" id="arm-lancAddRowBtn">+ Linha</button>
+            <span style="font-size:11px;color:var(--muted);">ou adiciona serviço novo:</span>
+            <input type="text" id="arm-lancCustomSvc" placeholder="Nome do serviço" style="flex:1;min-width:140px;padding:6px 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;">
+            <button class="btn bg bs" type="button" id="arm-lancAddCustomBtn">Adicionar ao catálogo</button>
+          </div>
+          <div class="filters" style="margin-top:14px;">
+            <label style="font-size:11px;font-weight:600;color:var(--muted);">Impostos do mês (manual)</label>
+            <input type="text" id="arm-lancImpostos" placeholder="0,00" style="width:140px;text-align:right;font-family:var(--mono);">
+          </div>
+          <div class="arm-lanc-actions">
+            <button class="btn bp" type="button" id="arm-lancSaveBtn">💾 Guardar mês</button>
+            <span id="arm-lancSaveNote" style="font-size:11px;color:var(--muted);"></span>
+          </div>
+        </div>
+        <div class="arm-lanc-panel">
+          <h4>Resumo por tipologia</h4>
+          <div id="arm-lancTypology"></div>
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+              <span>Subtotal serviços</span><strong id="arm-lancSubtotal">—</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+              <span>Impostos</span><strong id="arm-lancImpostosDisp">—</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-top:6px;">
+              <span>Total c/ impostos</span><strong id="arm-lancTotal">—</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="arm-nf-upload">
+        <div class="section-title" style="margin-top:0;">Validação NF 5,5% — upload</div>
+        <p style="font-size:11px;color:var(--muted);margin:0 0 10px;">
+          Carrega Excel com todas as NFs usadas pela Unilog no cálculo 5,5%. Cada NF é validada contra o export SAP (ZFACT) do módulo Fretes.
+        </p>
+        <div id="arm-nfUploadSapNote" class="data-warn" style="display:none;margin-bottom:10px;font-size:12px;"></div>
+        <div class="uz" id="arm-nfUploadZone" style="padding:16px;" onclick="document.getElementById('arm-nfUploadInput').click()">
+          <div style="font-size:22px;margin-bottom:6px">🧾</div>
+          <div style="font-size:12px;font-weight:600;">Clica ou arrasta Excel de NFs (mês selecionado acima)</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:4px;">Folha PERCENTUAL SOBRE NF ou colunas NF + Valor</div>
+          <input type="file" id="arm-nfUploadInput" accept=".xlsx,.xls" style="display:none">
+        </div>
+        <div id="arm-nfUploadSummary" style="display:none;margin-top:12px;">
+          <div class="kpis" id="arm-nfUploadKpis" style="margin:0 0 10px;"></div>
+          <div class="tbl-wrap">
+            <table><thead><tr id="arm-nfUploadHead"></tr></thead><tbody id="arm-nfUploadBody"></tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="arm-tab-carregamento" style="display:none;">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">
+        <strong>Legado:</strong> carrega os Excels mensais <em>Receita_Custo DELTA</em> da Unilog (multi-selecção).
         O export SAP NF é reutilizado do módulo <strong>Fretes CT-e</strong> (cobre todos os meses de uma vez).
       </p>
       <div class="sl">Excels mensais Unilog</div>
@@ -1753,7 +1843,7 @@ select.cad-inp{cursor:pointer;}
       <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
         <button class="btn bg bs" id="arm-exportBtn" type="button">Exportar Excel</button>
       </div>
-      <div id="arm-mensalEmpty" class="empty"><div class="empty-i">📅</div><div>Carrega Excels mensais na aba <strong>Carregamento</strong></div></div>
+      <div id="arm-mensalEmpty" class="empty"><div class="empty-i">📅</div><div>Lança dados na aba <strong>Lançamento mensal</strong> ou carrega Excels em Carregamento Excel</div></div>
       <div id="arm-mensalContent" style="display:none;">
         <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Alerta quando o total mensal fica abaixo do mínimo contratual de R$ 120.000.</p>
         <div class="kpis" id="arm-mensalKpis"></div>
@@ -1768,7 +1858,7 @@ select.cad-inp{cursor:pointer;}
       <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
         <button class="btn bg bs" id="arm-exportBtnResumo" type="button" onclick="typeof exportArmazemWorkbook==='function'&&exportArmazemWorkbook()">Exportar Excel</button>
       </div>
-      <div id="arm-acumuladoEmpty" class="empty"><div class="empty-i">📈</div><div>Carrega Excels mensais para ver o resumo por mês (como no Excel Unilog)</div></div>
+      <div id="arm-acumuladoEmpty" class="empty"><div class="empty-i">📈</div><div>Lança na aba <strong>Lançamento mensal</strong> ou carrega Excels para ver resumo e comparativo</div></div>
       <div id="arm-acumuladoContent" style="display:none;">
         <div id="arm-acumuladoComparativo"></div>
         <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Tabelas <strong>Resumo</strong> por mês agrupadas por ano (2025, 2026, …) e secção <strong>Total geral</strong> com soma por tipo (AG vs Área Técnica, excedente vs excedente AT, etc.; variantes HE unificadas).</p>
@@ -1778,10 +1868,10 @@ select.cad-inp{cursor:pointer;}
     </div>
 
     <div id="arm-tab-nf" style="display:none;">
-      <div id="arm-nfEmpty" class="empty"><div class="empty-i">🧾</div><div>Sem linhas de NF 5,5% — carrega Excels mensais</div></div>
+      <div id="arm-nfEmpty" class="empty"><div class="empty-i">🧾</div><div>Sem linhas de NF 5,5% — lança na aba <strong>Lançamento mensal</strong> ou carrega Excels</div></div>
       <div id="arm-nfContent" style="display:none;">
         <div class="kpis" id="arm-nfKpis"></div>
-        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Validação cruzada com SAP NF (módulo Fretes). Apenas taxa 5,5% sobre NF expedida — não inclui armazenagem, HE ou etiquetagem.</p>
+        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Validação cruzada com SAP NF / ZFACT (módulo Fretes). Coluna Δ = valor Unilog − valor SAP. Apenas taxa 5,5% — não inclui armazenagem, HE ou etiquetagem.</p>
         <div class="filters">
           <select id="arm-nfFilterMes"><option value="">Todos os meses</option></select>
           <select id="arm-nfFilterIssue">
@@ -7582,7 +7672,7 @@ function applyResizable(){scheduleColResize();}
 
 </script>
 <script src="fretes.js?v=1.7.12"></script>
-<script src="armazem.js?v=1.0.18" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
+<script src="armazem.js?v=1.0.19" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
 <script>
 if(typeof initArmazem!=='function'){
   const e=document.getElementById('arm-initErr');
