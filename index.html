@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260619280000 -->
+<!DOCTYPE html><!-- v20260626120000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -4505,6 +4505,22 @@ function toast(msg,type='info'){const el=document.getElementById('toast');el.tex
 let reclamacoes=[], recTipos=[], recUsers=[], recSorts={};
 let recLoggedUser=null, recDetailId=null, commentRecId=null, editTipoId=null;
 
+const REC_TIPOS_SEED=[
+  {area:'transporte',nome:'Devolução responsabilidade Unilog',prazo_horas:48},
+  {area:'transporte',nome:'Devolução responsabilidade Delta',prazo_horas:48}
+];
+
+async function autoSeedRecTipos(){
+  const existing=new Set(recTipos.map(t=>t.area+'|'+t.nome));
+  const toIns=REC_TIPOS_SEED.filter(t=>!existing.has(t.area+'|'+t.nome));
+  if(!toIns.length)return false;
+  const{error}=await db.from('reclamacoes_tipos').insert(toIns);
+  if(error){console.warn('autoSeedRecTipos:',error.message);return false;}
+  const{data}=await db.from('reclamacoes_tipos').select('*').eq('ativo',true).order('area').order('nome');
+  if(data)recTipos=data;
+  return true;
+}
+
 // ── LOAD ──
 async function loadReclamacoes(){
   try{
@@ -4516,6 +4532,7 @@ async function loadReclamacoes(){
     if(r1.data)reclamacoes=r1.data;
     if(r2.data)recTipos=r2.data;
     if(r3.data)recUsers=r3.data;
+    await autoSeedRecTipos();
     updateRecBadge();
     renderRecLista();
     populateRecMeses();
