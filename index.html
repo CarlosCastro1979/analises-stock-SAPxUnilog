@@ -431,7 +431,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.4</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.6</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -2632,8 +2632,9 @@ function brlCore(v){return Math.abs(v).toLocaleString('pt-BR',{style:'currency',
 function fmtBrl(v){if(v==null||!Number.isFinite(v))return '—';return brlCore(v);}
 function fmtBrlLiq(v){if(v==null||!Number.isFinite(v))return '—';const s=brlCore(v);if(v>0)return '+'+NBSP+s;if(v<0)return '-'+NBSP+s;return s;}
 function fmtKv(val){const s=String(val);const long=s.length>11;return `<span class="kv-n${long?' long':''}">${s}</span>`;}
-function fmtKvNum(n){if(n==null||!Number.isFinite(n))return fmtKv('—');return fmtKv(Number(n).toLocaleString('pt-BR'));}
-function fmtKvSigned(n){if(n==null||!Number.isFinite(n))return fmtKv('—');const abs=Number(n).toLocaleString('pt-BR');if(n>0)return fmtKv('+'+NBSP+abs);if(n<0)return fmtKv('-'+NBSP+abs);return fmtKv(abs);}
+function fmtPtNum(n,maxDec){if(n==null||n===undefined||n==='')return'—';const v=Number(n);if(!Number.isFinite(v))return'—';const md=maxDec==null?2:maxDec;const scale=Math.pow(10,md);const rounded=Math.round(v*scale)/scale;const eps=1/(scale*10000);if(Math.abs(rounded-Math.round(rounded))<eps)return Math.round(rounded).toLocaleString('pt-BR',{maximumFractionDigits:0});return rounded.toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:md});}
+function fmtKvNum(n){if(n==null||!Number.isFinite(n))return fmtKv('—');return fmtKv(fmtPtNum(n));}
+function fmtKvSigned(n){if(n==null||!Number.isFinite(n))return fmtKv('—');const abs=fmtPtNum(n);if(n>0)return fmtKv('+'+NBSP+abs);if(n<0)return fmtKv('-'+NBSP+abs);return fmtKv(abs);}
 function fmtKvBrl(v){return fmtKv(fmtBrl(v));}
 function fmtKvBrlLiq(v){return fmtKv(fmtBrlLiq(v));}
 function fmtValorDifCell(diff,preco){const p=Number(preco)||0;if(p<=0)return '—';return fmtBrlLiq(diff*p);}
@@ -6234,7 +6235,7 @@ function scheduleTableSort(){
 function innerTab(name,el){el.closest('.page').querySelectorAll('.it').forEach(t=>t.classList.remove('active'));el.classList.add('active');document.getElementById('occView').style.display=name==='view'?'':'none';document.getElementById('occBase').style.display=name==='base'?'':'none';if(name==='base')renderOccBase();if(name==='view')renderOccView();}
 
 // ── UTILS ──
-function fmt(n){if(n===null||n===undefined)return'—';return Number(n).toLocaleString('pt-BR');}
+function fmt(n){if(n===null||n===undefined)return'—';return fmtPtNum(n);}
 function esc(s){return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function jsq(s){return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
 function suspValidarBtn(EAN_norm,Lote_norm){
@@ -7564,7 +7565,7 @@ function applyResizable(){scheduleColResize();}
 
 </script>
 <script src="fretes.js?v=1.7.12"></script>
-<script src="armazem.js?v=1.0.4" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
+<script src="armazem.js?v=1.0.6" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
 <script>
 if(typeof initArmazem!=='function'){
   const e=document.getElementById('arm-initErr');

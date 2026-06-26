@@ -1,5 +1,5 @@
-// armazem.js v1.0.4
-const ARMAZEM_JS_VERSION = '1.0.4';
+// armazem.js v1.0.6
+const ARMAZEM_JS_VERSION = '1.0.6';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -84,18 +84,74 @@ function armWithTimeout(promise, ms, label) {
   ]);
 }
 
-function armNum(v) {
+function parseBrNum(v) {
   if (v === null || v === undefined || v === '') return 0;
   if (typeof v === 'number' && Number.isFinite(v)) return v;
-  const s = String(v).trim().replace(/\s/g, '');
+  let s = String(v).trim().replace(/\s/g, '');
   if (!s || s === '-') return 0;
-  const n = parseFloat(s.replace(/\./g, '').replace(',', '.'));
+  s = s.replace(/^R\$\s?/i, '');
+
+  if (s.includes(',')) {
+    const n = parseFloat(s.replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  if (s.includes('.')) {
+    const parts = s.split('.');
+    if (parts.length > 2) {
+      const n = parseFloat(s.replace(/\./g, ''));
+      return Number.isFinite(n) ? n : 0;
+    }
+    const intPart = parts[0];
+    const fracPart = parts[1] || '';
+    if (!fracPart || /^0+$/.test(fracPart)) {
+      const n = parseFloat(intPart);
+      return Number.isFinite(n) ? n : 0;
+    }
+    if (intPart !== '0' && fracPart.length === 3 && intPart.length >= 1 && intPart.length <= 3) {
+      const n = parseFloat(intPart + fracPart);
+      if (Number.isFinite(n)) return n;
+    }
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  const n = parseFloat(s);
   return Number.isFinite(n) ? n : 0;
+}
+
+function armNum(v) {
+  return parseBrNum(v);
 }
 
 function armFmtMoney(v) {
   if (typeof fmtMoney === 'function') return fmtMoney(v);
   return 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtArmNum(n, maxDec) {
+  if (n == null || n === '') return '—';
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  const md = maxDec == null ? 2 : maxDec;
+  const scale = Math.pow(10, md);
+  const rounded = Math.round(v * scale) / scale;
+  const eps = 1 / (scale * 10000);
+  if (Math.abs(rounded - Math.round(rounded)) < eps) {
+    return Math.round(rounded).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+  }
+  return rounded.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: md });
+}
+
+function fmtArmQty(n) { return fmtArmNum(n, 2); }
+function fmtArmUnit(n) { return fmtArmNum(n, 2); }
+
+function fmtArmPct(n, maxDec) {
+  if (n == null || n === '') return '—';
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  const md = maxDec == null ? 1 : maxDec;
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: md }) + '%';
 }
 
 function armEsc(s) {
@@ -141,15 +197,12 @@ function armResumoRows(month) {
 
 function armFmtResumoQty(v, isNf) {
   if (isNf) return armFmtMoney(v);
-  const n = Number(v) || 0;
-  if (Math.abs(n - Math.round(n)) < 0.0001) return n.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  return fmtArmQty(v);
 }
 
 function armFmtResumoUnit(v, isNf) {
-  if (isNf) return (ARM_NF_RATE * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
-  const n = Number(v) || 0;
-  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  if (isNf) return fmtArmPct(ARM_NF_RATE * 100);
+  return fmtArmUnit(v);
 }
 
 function armResumoRowHtml(s, opts) {
@@ -267,13 +320,68 @@ function parseMonthFromFileName(fileName) {
 
 function sheetToMatrix(ws) {
   if (!ws || !ws['!ref']) return [];
-  return XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+  return XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
 }
 
 function cellText(matrix, r, c) {
   const row = matrix[r];
   if (!row) return '';
-  return String(row[c] ?? '').trim();
+  const v = row[c];
+  if (v === null || v === undefined || v === '') return '';
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  return String(v).trim();
+}
+
+function armCellNum(matrix, r, c) {
+  return armNum(cellText(matrix, r, c));
+}
+
+function normHdrCell(v) {
+  return String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function findResumoHeaderRow(matrix) {
+  for (let r = 0; r < matrix.length; r++) {
+    const row = matrix[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      if (/tipo de servi/i.test(String(row[c] || ''))) return r;
+    }
+  }
+  return -1;
+}
+
+function scanResumoCols(matrix, hdrRow, fallback) {
+  const cols = { ...(fallback || { nome: 1, qtde: 2, unit: 3, valor: 4 }) };
+  const row = matrix[hdrRow] || [];
+  for (let c = 0; c < row.length; c++) {
+    const h = normHdrCell(row[c]);
+    if (!h) continue;
+    if (/qtde|quantidade/.test(h)) cols.qtde = c;
+    else if (/valor unit|unitario/.test(h)) cols.unit = c;
+    else if (/valor calc|calculado/.test(h)) cols.valor = c;
+  }
+  for (let c = 0; c < row.length; c++) {
+    const h = normHdrCell(row[c]);
+    if (/codigo servi|cod servi/.test(h)) cols.nome = c;
+  }
+  if (cols.nome === (fallback?.nome ?? 1)) {
+    for (let c = 0; c < row.length; c++) {
+      const h = normHdrCell(row[c]);
+      if (/tipo de servi/.test(h)) cols.nome = c;
+    }
+  }
+  return cols;
+}
+
+function armFinishServico(rawName, qtde, valorUnit, valor, isNf) {
+  const q = armNum(qtde);
+  if (isNf) {
+    const v = q * ARM_NF_RATE;
+    return { qtde: q, valorUnit: ARM_NF_RATE, valor: v };
+  }
+  const u = armNum(valorUnit);
+  const calc = q * u;
+  return { qtde: q, valorUnit: u, valor: calc > 0 ? calc : armNum(valor) };
 }
 
 function findSheetName(wb, pattern) {
@@ -330,26 +438,30 @@ function parseArmazemV2(wb, fileName) {
   }
 
   const servicos = [];
-  let hdr = -1;
-  for (let r = 0; r < resumo.length; r++) {
-    if (/Tipo de Servi/i.test(cellText(resumo, r, 0))) { hdr = r; break; }
-  }
+  const hdr = findResumoHeaderRow(resumo);
   if (hdr < 0) throw new Error('Cabeçalho do resumo não encontrado.');
+  const cols = scanResumoCols(resumo, hdr);
 
   for (let r = hdr + 1; r < resumo.length; r++) {
-    const nome = cellText(resumo, r, 1) || cellText(resumo, r, 0);
-    const codigo = cellText(resumo, r, 1) || nome;
+    const nome = cellText(resumo, r, cols.nome) || cellText(resumo, r, 0);
+    const codigo = cellText(resumo, r, cols.nome) || nome;
     if (!nome) continue;
     if (/^Apura/i.test(nome) || /^Total$/i.test(nome) || /^Impostos/i.test(nome)) continue;
-    const qtde = armNum(cellText(resumo, r, 2));
-    const unit = armNum(cellText(resumo, r, 3));
-    const valor = armNum(cellText(resumo, r, 4));
-    if (!valor && !qtde) continue;
+    const isNf = isNfPercentualService(nome);
+    const nums = armFinishServico(
+      nome,
+      armCellNum(resumo, r, cols.qtde),
+      armCellNum(resumo, r, cols.unit),
+      armCellNum(resumo, r, cols.valor),
+      isNf
+    );
+    if (!nums.valor && !nums.qtde) continue;
     const norm = normalizeServicoName(nome);
     const cat = resolveCatalogCategory(nome);
     servicos.push({
-      rawName: nome, normName: norm, codigo, qtde, valorUnit: unit, valor,
-      catalogId: cat.id, catalogSure: cat.sure, isNf: isNfPercentualService(nome)
+      rawName: nome, normName: norm, codigo,
+      qtde: nums.qtde, valorUnit: nums.valorUnit, valor: nums.valor,
+      catalogId: cat.id, catalogSure: cat.sure, isNf
     });
   }
 
@@ -365,8 +477,8 @@ function parseArmazemV2(wb, fileName) {
       for (let r = dataHdr + 1; r < m.length; r++) {
         const dt = cellText(m, r, 0);
         const nf = cellText(m, r, 1);
-        const valorNF = armNum(cellText(m, r, 2));
-        const fee = armNum(cellText(m, r, 3));
+        const valorNF = armCellNum(m, r, 2);
+        const fee = armCellNum(m, r, 3);
         if (!nf || nf === '-') continue;
         nfRows.push({
           data: parseBrDate(dt), nf, valorNF, taxa: ARM_NF_RATE,
@@ -386,8 +498,8 @@ function parseArmazemV2(wb, fileName) {
         const svc = cellText(m, r, 1);
         if (!isNfPercentualService(svc)) continue;
         const nf = cellText(m, r, 2);
-        const valorNF = armNum(cellText(m, r, 3));
-        const fee = armNum(cellText(m, r, 4));
+        const valorNF = armCellNum(m, r, 3);
+        const fee = armCellNum(m, r, 4);
         if (!nf || nf === '-') continue;
         nfRows.push({
           data: parseBrDate(dt), nf, valorNF, taxa: ARM_NF_RATE, fee,
@@ -425,19 +537,27 @@ function parseArmazemV1(wb, fileName) {
     if (/^\s*Resumo\s*$/i.test(cellText(m, r, 1))) { resumoHdr = r; break; }
   }
   if (resumoHdr >= 0) {
+    const hdrRow = resumoHdr + 1;
+    const cols = scanResumoCols(m, hdrRow, { nome: 1, qtde: 17, unit: 25, valor: 28 });
     for (let r = resumoHdr + 2; r < m.length; r++) {
-      const nome = cellText(m, r, 1);
+      const nome = cellText(m, r, cols.nome);
       if (!nome) continue;
       if (/^Apura/i.test(nome) || /IMPOSTO/i.test(nome)) continue;
-      const qtde = armNum(cellText(m, r, 17));
-      const unit = armNum(cellText(m, r, 25));
-      const valor = armNum(cellText(m, r, 28));
-      if (!nome || (!valor && !qtde)) continue;
+      const isNf = isNfPercentualService(nome);
+      const nums = armFinishServico(
+        nome,
+        armCellNum(m, r, cols.qtde),
+        armCellNum(m, r, cols.unit),
+        armCellNum(m, r, cols.valor),
+        isNf
+      );
+      if (!nome || (!nums.valor && !nums.qtde)) continue;
       const norm = normalizeServicoName(nome);
       const cat = resolveCatalogCategory(nome);
       servicos.push({
-        rawName: nome, normName: norm, codigo: nome, qtde, valorUnit: unit, valor,
-        catalogId: cat.id, catalogSure: cat.sure, isNf: isNfPercentualService(nome)
+        rawName: nome, normName: norm, codigo: nome,
+        qtde: nums.qtde, valorUnit: nums.valorUnit, valor: nums.valor,
+        catalogId: cat.id, catalogSure: cat.sure, isNf
       });
     }
   }
@@ -453,9 +573,9 @@ function parseArmazemV1(wb, fileName) {
       if (/^Regra:/i.test(cellText(m, rr, 1)) || /^\s*Resumo\s*$/i.test(cellText(m, rr, 1))) break;
       const nf = cellText(m, rr, 7);
       const dt = cellText(m, rr, 1);
-      const valorNF = armNum(cellText(m, rr, 28));
-      const taxa = armNum(cellText(m, rr, 32)) || ARM_NF_RATE;
-      const fee = armNum(cellText(m, rr, 36));
+      const valorNF = armCellNum(m, rr, 28);
+      const taxa = armCellNum(m, rr, 32) || ARM_NF_RATE;
+      const fee = armCellNum(m, rr, 36);
       if (!nf) continue;
       nfRows.push({
         data: parseBrDate(dt), nf, valorNF, taxa, fee,
@@ -1050,7 +1170,7 @@ function renderArmAdicionais() {
         <td>${armEsc(r.mesLabel)}</td>
         <td>${armEsc(r.normName)}</td>
         <td>${armEsc(catalogLabel(cat.id))}${cat.sure ? '' : ' <span class="badge b-min">?</span>'}</td>
-        <td class="right">${(r.qtde || 0).toLocaleString('pt-BR')}</td>
+        <td class="right">${fmtArmQty(r.qtde)}</td>
         <td class="right">${armFmtMoney(r.valor)}</td>
       </tr>`;
     }).join('');
