@@ -1,5 +1,5 @@
-// armazem.js v1.0.19
-const ARMAZEM_JS_VERSION = '1.0.19';
+// armazem.js v1.0.20
+const ARMAZEM_JS_VERSION = '1.0.20';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -2045,19 +2045,6 @@ async function renderArmAcumulado() {
   }
   if (empty) empty.style.display = 'none';
   if (content) content.style.display = 'block';
-
-  const totalServ = months.reduce((s, m) => s + (m.totalServicos || 0), 0);
-  const agg = aggregateResumoByNorm(months);
-  const totalAgg = agg.reduce((s, r) => s + r.valor, 0);
-
-  const kpis = $arm('acumuladoKpis');
-  if (kpis) {
-    kpis.innerHTML = `
-      <div class="kpi"><div class="label">Meses</div><div class="value">${months.length}</div></div>
-      <div class="kpi"><div class="label">Tipos de serviço (total)</div><div class="value">${agg.length}</div></div>
-      <div class="kpi"><div class="label">Soma resumo</div><div class="value">${armFmtMoney(totalAgg)}</div></div>
-      <div class="kpi"><div class="label">Total serviços (faturas)</div><div class="value">${armFmtMoney(totalServ)}</div></div>`;
-  }
 
   if (sections) sections.innerHTML = renderArmResumoSections(months);
   if (comparativo) comparativo.innerHTML = renderArmComparativoTable(months);
