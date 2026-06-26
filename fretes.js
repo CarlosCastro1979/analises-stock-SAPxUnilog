@@ -1,5 +1,5 @@
-// fretes.js v1.7.10
-const FRETES_JS_VERSION = '1.7.8';
+// fretes.js v1.7.11
+const FRETES_JS_VERSION = '1.7.11';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -353,6 +353,7 @@ const MONTH_COLUMNS = [
   { key: 'totalEsperado', label: 'Esperado (6%)', type: 'number', right: true },
   { key: 'excesso', label: 'Excesso', type: 'number', right: true },
   { key: 'pctPagoSobreNF', label: '% pago/NF', type: 'number', right: true },
+  { key: 'qtd_fix165', label: 'Sobr. R$165', type: 'number', right: true },
   { key: 'qtd_min', label: 'Tarifa mín.', type: 'number', right: true },
   { key: 'qtd_flag', label: 'Investigar', type: 'number', right: true }
 ];
@@ -1246,8 +1247,17 @@ function num(v) { return (v === null || v === undefined || v === '') ? 0 : Numbe
 const CTE_PCT_TARGET = 0.06;
 const CTE_PCT_LOW = 0.059;
 const CTE_PCT_HIGH = 0.061;
+/** Recurring flat overcharge seen on high-value NFs (still ~6% because NF is large). */
+const CTE_FIX_SURCHARGE = 165;
+const CTE_FIX_SURCHARGE_LO = 160;
+const CTE_FIX_SURCHARGE_HI = 170;
 
 function fmtPp(v) { return (v * 100).toFixed(2) + ' p.p.'; }
+
+function isFixed165Surcharge(diff) {
+  const d = num(diff);
+  return d >= CTE_FIX_SURCHARGE_LO && d <= CTE_FIX_SURCHARGE_HI;
+}
 
 function normCteKey(cte, idx) {
   const n = cte?.numCte;
@@ -1291,6 +1301,12 @@ function resolveNfCteCount(ctes, qtdFromSource) {
 function analyzeSingleCteMotivo(pago, esperado, pct) {
   const diff = pago - esperado;
   const diffPct = pct - CTE_PCT_TARGET;
+  if (isFixed165Surcharge(diff)) {
+    return {
+      status: 'fix165',
+      motivo: `Sobretaxa fixa ~R$ ${CTE_FIX_SURCHARGE}: pagou ${fmtMoney(pago)} (${fmtPct(pct)} da NF) vs esperado ${fmtMoney(esperado)} — excedente +${fmtMoney(diff)}. Padrão recorrente de cobrança adicional; questionar transportador/Unilog.`
+    };
+  }
   if (pct >= CTE_PCT_LOW && pct <= CTE_PCT_HIGH) {
     return { status: 'ok', motivo: `Conforme: ${fmtMoney(pago)} (${fmtPct(pct)} da NF), esperado ${fmtMoney(esperado)}.` };
   }
@@ -1302,7 +1318,7 @@ function analyzeSingleCteMotivo(pago, esperado, pct) {
   }
   return {
     status: 'min',
-    motivo: `Acima de 6%: pagou ${fmtMoney(pago)} (${fmtPct(pct)}) vs esperado ${fmtMoney(esperado)} — excedente +${fmtMoney(diff)} (+${fmtPp(diffPct)}). Provável tarifa mínima; questionar Unilog se inesperado.`
+    motivo: `Acima de 6,1%: pagou ${fmtMoney(pago)} (${fmtPct(pct)}) vs esperado ${fmtMoney(esperado)} — excedente +${fmtMoney(diff)} (+${fmtPp(diffPct)}). Provável tarifa mínima em NF de baixo valor; distinto da sobretaxa fixa R$ ${CTE_FIX_SURCHARGE}.`
   };
 }
 
@@ -1462,9 +1478,9 @@ function computeSummary(list, fileName) {
   const periodoInicio = dates.length ? new Date(Math.min(...dates)) : null;
   const periodoFim = dates.length ? new Date(Math.max(...dates)) : null;
 
-  const byStatus = { ok: 0, min: 0, dev: 0, flag: 0, low: 0 };
-  const excessoByStatus = { ok: 0, min: 0, dev: 0, flag: 0, low: 0 };
-  const pagoByStatus = { ok: 0, min: 0, dev: 0, flag: 0, low: 0 };
+  const byStatus = { ok: 0, fix165: 0, min: 0, dev: 0, flag: 0, low: 0 };
+  const excessoByStatus = { ok: 0, fix165: 0, min: 0, dev: 0, flag: 0, low: 0 };
+  const pagoByStatus = { ok: 0, fix165: 0, min: 0, dev: 0, flag: 0, low: 0 };
   let nUnicoCte = 0, nMultiplosCte = 0;
   let excessoPositivo = 0, deficit = 0;
 
@@ -1563,7 +1579,7 @@ function sortMonthlyRows(rows, sortState) {
 function aggregateMonthTotals(rows) {
   const t = {
     totalNF: 0, totalValorNF: 0, totalPago: 0, totalEsperado: 0, excesso: 0,
-    qtd_ok: 0, qtd_min: 0, qtd_dev: 0, qtd_flag: 0, qtd_low: 0
+    qtd_ok: 0, qtd_fix165: 0, qtd_min: 0, qtd_dev: 0, qtd_flag: 0, qtd_low: 0
   };
   rows.forEach(m => {
     t.totalNF += m.totalNF;
@@ -1572,6 +1588,7 @@ function aggregateMonthTotals(rows) {
     t.totalEsperado += m.totalEsperado;
     t.excesso += m.excesso;
     t.qtd_ok += m.qtd_ok;
+    t.qtd_fix165 += m.qtd_fix165;
     t.qtd_min += m.qtd_min;
     t.qtd_dev += m.qtd_dev;
     t.qtd_flag += m.qtd_flag;
@@ -1624,6 +1641,7 @@ function monthExportRowFull(m, label) {
     '% pago/NF': m.pctPagoSobreNF,
     'Excesso % vs esperado': m.excessoPct,
     'Conformes': m.qtd_ok,
+    'Sobretaxa R$165': m.qtd_fix165,
     'Tarifa mínima': m.qtd_min,
     'Com devolução': m.qtd_dev,
     'A investigar': m.qtd_flag,
@@ -1666,6 +1684,7 @@ function buildMonthlyExportRows(rows) {
     'Esperado (6%)': r['Esperado (6%)'],
     'Excesso': r['Excesso'],
     '% pago/NF': r['% pago/NF'],
+    'Sobretaxa R$165': r['Sobretaxa R$165'],
     'Tarifa mínima': r['Tarifa mínima'],
     'A investigar': r['A investigar'],
     'Conformes': r['Conformes']
@@ -1692,7 +1711,7 @@ function computeMonthly(list) {
     if (!byMes[m]) byMes[m] = {
       mesRef: m, mesLabel: fmtMesLabel(m), items: [],
       totalNF: 0, totalValorNF: 0, totalPago: 0, totalEsperado: 0, excesso: 0,
-      qtd_ok: 0, qtd_min: 0, qtd_dev: 0, qtd_flag: 0, qtd_low: 0
+      qtd_ok: 0, qtd_fix165: 0, qtd_min: 0, qtd_dev: 0, qtd_flag: 0, qtd_low: 0
     };
     const b = byMes[m];
     b.items.push(x);
@@ -1875,6 +1894,7 @@ function exportFullWorkbook() {
     [],
     ['Categoria', 'Nº NFs', 'Diferença', 'Pago'],
     ['Conforme (~6%)', s.byStatus.ok, s.excessoByStatus.ok, s.pagoByStatus.ok],
+    ['Sobretaxa fixa (~R$ 165)', s.byStatus.fix165, s.excessoByStatus.fix165, s.pagoByStatus.fix165],
     ['Tarifa mínima', s.byStatus.min, s.excessoByStatus.min, s.pagoByStatus.min],
     ['Com devolução', s.byStatus.dev, s.excessoByStatus.dev, s.pagoByStatus.dev],
     ['Sem devolução — investigar', s.byStatus.flag, s.excessoByStatus.flag, s.pagoByStatus.flag],
@@ -1968,7 +1988,7 @@ function getFilteredNFs() {
 
 function renderMonthlyTable() {
   if (!currentNFs.length) {
-    $('monthTableBody').innerHTML = '<tr><td colspan="9" class="empty">Carrega uma análise primeiro.</td></tr>';
+    $('monthTableBody').innerHTML = '<tr><td colspan="10" class="empty">Carrega uma análise primeiro.</td></tr>';
     return;
   }
   monthlyRows = computeMonthly(currentNFs);
@@ -1986,7 +2006,7 @@ function renderMonthlyTable() {
   const body = $('monthTableBody');
   body.innerHTML = displayRows.map(row => {
     if (row.type === 'year') {
-      return `<tr class="month-year-row"><td colspan="9"><strong>${row.label}</strong></td></tr>`;
+      return `<tr class="month-year-row"><td colspan="10"><strong>${row.label}</strong></td></tr>`;
     }
     const isTotal = row.type === 'subtotal' || row.type === 'total';
     const m = row;
@@ -2005,6 +2025,7 @@ function renderMonthlyTable() {
       <td class="right">${fmtMoney(m.totalEsperado)}</td>
       <td class="right" style="color:${m.excesso > 0 ? '#b3261e' : 'inherit'}">${fmtMoney(m.excesso)}</td>
       <td class="right">${fmtPct(m.pctPagoSobreNF)}</td>
+      <td class="right" style="color:${m.qtd_fix165 ? '#c2410c' : 'inherit'}">${m.qtd_fix165}</td>
       <td class="right">${m.qtd_min}</td>
       <td class="right" style="color:${m.qtd_flag ? '#b3261e' : 'inherit'}">${m.qtd_flag}</td>
     </tr>`;
@@ -2051,7 +2072,8 @@ function renderAll() {
     <div class="kpi"><div class="label">Total pago (frete)</div><div class="value">${fmtMoney(s.totalPago)}</div><div class="sub">${fmtPct(s.pctPagoSobreNF)} sobre faturação (meta: 6%)</div></div>
     <div class="kpi"><div class="label">Esperado (6%)</div><div class="value">${fmtMoney(s.totalEsperado)}</div></div>
     <div class="kpi flag"><div class="label">Excesso líquido</div><div class="value">${fmtMoney(s.excesso)}</div><div class="sub">+${fmtPct(s.excessoPct)} vs esperado</div></div>
-    <div class="kpi"><div class="label">NFs conformes</div><div class="value">${s.byStatus.ok}</div><div class="sub">${s.totalNF ? fmtPct(s.byStatus.ok / s.totalNF) : '0%'} do total</div></div>
+    <div class="kpi"><div class="label">NFs conformes</div><div class="value">${s.byStatus.ok}</div><div class="sub">${s.totalNF ? fmtPct(s.byStatus.ok / s.totalNF) : '0%'} do total · sem sobretaxa R$165</div></div>
+    <div class="kpi${s.byStatus.fix165 ? ' flag' : ''}"><div class="label">Sobretaxa ~R$165</div><div class="value">${s.byStatus.fix165}</div><div class="sub">excedente R$160–170 · padrão recorrente</div></div>
     <div class="kpi flag"><div class="label">NFs a investigar ⚠️</div><div class="value">${s.byStatus.flag}</div><div class="sub">múltiplos CT-e sem devolução</div></div>
     ${sapKpi}
   `;
@@ -2072,13 +2094,14 @@ function renderAll() {
     </div>`;
 
   const bd = [
-    { key: 'ok', cls: 'bd-ok', title: 'Conforme (~6%)', desc: '1 CT-e, pago entre 5,9% e 6,1% do valor da NF.' },
-    { key: 'min', cls: 'bd-min', title: 'Tarifa mínima (provável)', desc: '1 CT-e acima de 6% — NF de baixo valor, frete mínimo do transportador.' },
+    { key: 'ok', cls: 'bd-ok', title: 'Conforme (~6%)', desc: '1 CT-e, pago entre 5,9% e 6,1% do valor da NF, sem sobretaxa fixa R$165.' },
+    { key: 'fix165', cls: 'bd-fix165', title: 'Sobretaxa fixa (~R$ 165)', desc: '1 CT-e com excedente entre R$160 e R$170 sobre o esperado (6%) — cobrança adicional recorrente, mesmo quando o % da NF fica ~6%.' },
+    { key: 'min', cls: 'bd-min', title: 'Tarifa mínima (provável)', desc: '1 CT-e acima de 6,1% — típico em NFs de baixo valor (frete mínimo do transportador). Distinto da sobretaxa fixa R$165.' },
     { key: 'dev', cls: 'bd-dev', title: 'Com devolução', desc: 'Múltiplos CT-e com retorno assinalado (ida + volta).' },
     { key: 'flag', cls: 'bd-flag', title: '⚠️ Sem devolução — investigar', desc: 'Múltiplos CT-e sem devolução — cada um pode cobrar % sobre a NF inteira.' },
     { key: 'low', cls: 'bd-low', title: 'Abaixo do esperado', desc: '1 CT-e abaixo de 5,9% — pagou menos que os 6%.' },
   ];
-  $('breakdown').innerHTML = bd.filter(b => b.key !== 'low' || s.byStatus.low).map(b => `
+  $('breakdown').innerHTML = bd.filter(b => (b.key !== 'low' && b.key !== 'fix165') || s.byStatus[b.key]).map(b => `
     <div class="bd-card ${b.cls}${activeSubPanel === b.key ? ' active' : ''}" data-status="${b.key}" role="button" tabindex="0">
       <div class="n">${s.byStatus[b.key]} NF · dif. ${fmtMoney(s.excessoByStatus[b.key])}</div>
       <div class="t"><strong>${b.title}</strong><br>${b.desc}</div>
@@ -2190,6 +2213,7 @@ function renderAnomaliesPanel() {
 
 const CATEGORY_META = {
   ok: { title: 'Conforme (~6%)', cls: 'b-ok' },
+  fix165: { title: 'Sobretaxa fixa (~R$ 165)', cls: 'b-fix165' },
   min: { title: 'Tarifa mínima (provável)', cls: 'b-min' },
   dev: { title: 'Com devolução', cls: 'b-dev' },
   flag: { title: '⚠️ Sem devolução — investigar', cls: 'b-flag' },
@@ -2280,6 +2304,7 @@ function renderSubPanels() {
 
 const statusMeta = {
   ok: { cls: 'b-ok', label: 'Conforme' },
+  fix165: { cls: 'b-fix165', label: 'Sobretaxa R$165' },
   min: { cls: 'b-min', label: 'Tarifa mínima' },
   dev: { cls: 'b-dev', label: 'Com devolução' },
   flag: { cls: 'b-flag', label: '⚠️ Investigar' },

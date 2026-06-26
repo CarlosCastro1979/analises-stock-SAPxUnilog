@@ -229,6 +229,7 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-fretes .bd-card{border-radius:8px;padding:12px 14px;border:1px solid var(--border);cursor:pointer;transition:.15s;}
 #page-fretes .bd-card:hover,#page-fretes .bd-card.active{box-shadow:0 0 0 2px var(--red);border-color:var(--red);}
 #page-fretes .bd-ok{background:#f0fdf4;}#page-fretes .bd-ok .n{color:var(--green);}
+#page-fretes .bd-fix165{background:#fff7ed;}#page-fretes .bd-fix165 .n{color:#c2410c;}
 #page-fretes .bd-min{background:#fffbeb;}#page-fretes .bd-min .n{color:var(--yellow);}
 #page-fretes .bd-dev{background:#eff6ff;}#page-fretes .bd-dev .n{color:var(--blue);}
 #page-fretes .bd-flag{background:#fef2f2;}#page-fretes .bd-flag .n{color:var(--red);}
@@ -256,7 +257,7 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-fretes .anomalies-hint{font-size:11px;color:var(--muted);margin:0 0 12px;font-style:italic;}
 #page-fretes .filters label.filter-chk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;white-space:nowrap;}
 #page-fretes .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;}
-#page-fretes .b-ok{background:#dcfce7;color:var(--green);}#page-fretes .b-min{background:#fef3c7;color:var(--yellow);}
+#page-fretes .b-ok{background:#dcfce7;color:var(--green);}#page-fretes .b-fix165{background:#ffedd5;color:#c2410c;}#page-fretes .b-min{background:#fef3c7;color:var(--yellow);}
 #page-fretes .b-dev{background:#dbeafe;color:var(--blue);}#page-fretes .b-flag{background:#fee2e2;color:var(--red);}
 #page-fretes .b-low{background:#eee;color:#555;}
 #page-fretes .section-title{font-size:12px;font-weight:700;margin:20px 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -1458,6 +1459,7 @@ select.cad-inp{cursor:pointer;}
             <select id="fte-filterStatus">
               <option value="">Todos os estados</option>
               <option value="ok">Conforme (~6%)</option>
+              <option value="fix165">Sobretaxa fixa (~R$ 165)</option>
               <option value="min">Tarifa mínima</option>
               <option value="dev">Múltiplos CT-e — com devolução</option>
               <option value="flag">Múltiplos CT-e — SEM devolução ⚠️</option>
@@ -7382,7 +7384,7 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.7.10"></script>
+<script src="fretes.js?v=1.7.11"></script>
 <script>
 init();
 initMultiselects();
