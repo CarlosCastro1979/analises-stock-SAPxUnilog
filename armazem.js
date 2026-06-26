@@ -1,5 +1,5 @@
-// armazem.js v1.0.9
-const ARMAZEM_JS_VERSION = '1.0.9';
+// armazem.js v1.0.11
+const ARMAZEM_JS_VERSION = '1.0.11';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -15,6 +15,9 @@ let armInited = false;
 let armPack = null;
 let armPendingFiles = [];
 let armActiveTab = 'carregamento';
+let armVendasCache = null;
+let armVendasCacheTs = 0;
+const ARM_VENDAS_CACHE_MS = 60_000;
 let armCatalogOverrides = {};
 let armSorts = {
   mensal: { col: 'mesKey', dir: 1 },
@@ -169,9 +172,10 @@ function armNormServicoUpper(raw) {
     .toUpperCase();
 }
 
-function normalizeServicoName(raw) {
+function normalizeServicoName(raw, opts) {
   const u = armNormServicoUpper(raw);
   if (!u) return '';
+  const forTotal = !!(opts && opts.forTotal);
 
   if (/PERCENTUAL\s+SOBRE\s+NF\s+EXPEDID|ARMAZENAGEM\s+POR\s*%|5[,.]5\s*%/.test(u)) {
     return 'PERCENTUAL SOBRE NF EXPEDIDA';
@@ -187,7 +191,11 @@ function normalizeServicoName(raw) {
   }
   const pos = u.match(/^ARMAZENAGEM\s+POR\s+POSICAO\s+PALLET(\s*\[[^\]]+\])?/);
   if (pos) {
-    return 'ARMAZENAGEM POR POSICAO PALLET' + (pos[1] || '');
+    const suffix = pos[1] || '';
+    if (forTotal && /\[AG\]|\[AT\]|\[AREA\s+TECNICA\]/.test(suffix)) {
+      return 'ARMAZENAGEM POR POSICAO PALLET [AG/AT]';
+    }
+    return 'ARMAZENAGEM POR POSICAO PALLET' + suffix;
   }
   if (/READEQUA/.test(u)) return 'READEQUACAO DE PRODUTOS - POR UNIDADE';
   if (/IMPOSTO|PIS|COFINS|ISS/.test(u)) return 'IMPOSTOS SERVICOS';
@@ -244,7 +252,7 @@ function aggregateResumoByNorm(months) {
   const map = {};
   months.forEach(m => {
     armResumoRows(m).forEach(s => {
-      const norm = normalizeServicoName(s.rawName || s.normName);
+      const norm = normalizeServicoName(s.rawName || s.normName, { forTotal: true });
       if (!norm) return;
       if (!map[norm]) {
         map[norm] = {
@@ -343,8 +351,17 @@ function catalogLabel(id) {
   return CATALOGO_DESPESAS.find(c => c.id === id)?.label || id;
 }
 
+function armCleanFileBase(fileName) {
+  return String(fileName || '')
+    .replace(/\.xlsx?$/i, '')
+    .replace(/_+$/, '')
+    .trim()
+    .replace(/^receita[_\s]*(?:e[_\s]*)?custo\s*delta\s*[-–—:]?\s*/i, '')
+    .trim();
+}
+
 function parseMonthFromFileName(fileName) {
-  const base = String(fileName || '').replace(/\.xlsx?$/i, '');
+  const base = armCleanFileBase(fileName);
   const m = base.match(/(\d{4})\s*$/);
   const year = m ? parseInt(m[1], 10) : null;
   const low = base.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -353,9 +370,9 @@ function parseMonthFromFileName(fileName) {
     const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (low.includes(key)) { month = num; break; }
   }
-  if (!month || !year) return { mesKey: '', mesLabel: base };
+  if (!month || !year) return { mesKey: '', mesLabel: base || String(fileName || '') };
   const mesKey = `${year}-${String(month).padStart(2, '0')}`;
-  const mesLabel = `${String(month).padStart(2, '0')}/${year}`;
+  const mesLabel = armMesNomeLong(mesKey, '');
   return { mesKey, mesLabel };
 }
 
@@ -526,8 +543,7 @@ function parseArmazemV2(wb, fileName, opts) {
 
   if (!meta.mesKey && dataInicial) meta.mesKey = dataInicial.slice(0, 7);
   if (meta.mesKey && !meta.mesLabel) {
-    const [y, m] = meta.mesKey.split('-');
-    meta.mesLabel = `${m}/${y}`;
+    meta.mesLabel = armMesNomeLong(meta.mesKey, '');
   }
 
   const servicos = [];
@@ -707,7 +723,7 @@ function buildMonthRecord(opts) {
     fileName: opts.fileName,
     format: opts.format,
     mesKey: opts.meta?.mesKey || '',
-    mesLabel: opts.meta?.mesLabel || opts.fileName,
+    mesLabel: opts.meta?.mesLabel || armMesNomeLong(opts.meta?.mesKey, '') || opts.fileName,
     dataInicial: opts.dataInicial || '',
     dataFinal: opts.dataFinal || '',
     depositante: opts.depositante || '',
