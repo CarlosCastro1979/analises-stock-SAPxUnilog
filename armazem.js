@@ -1,5 +1,5 @@
-// armazem.js v1.0.17
-const ARMAZEM_JS_VERSION = '1.0.17';
+// armazem.js v1.0.18
+const ARMAZEM_JS_VERSION = '1.0.18';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -500,9 +500,12 @@ function parseInfoSheetValues(info) {
 }
 
 function armGetArmazenagemValor(month) {
-  const subtotal = Number(month.totalServicos) || 0;
+  const fromInfo = Number(month.totalServicos) || 0;
+  const fromRows = armResumoRows(month).reduce((a, s) => a + (Number(s.valor) || 0), 0);
+  const subtotal = fromInfo > 0 ? fromInfo : fromRows;
   const finalVal = Number(month.valorTotal) || 0;
-  return { subtotal, final: finalVal, primary: finalVal > 0 ? finalVal : subtotal };
+  const pago = subtotal > 0 ? subtotal : finalVal;
+  return { subtotal, final: finalVal, pago, primary: pago };
 }
 
 function armFindNfServico(month) {
@@ -640,53 +643,53 @@ function renderArmComparativoTable(months) {
   const years = Object.keys(byYear).sort();
 
   let rows = '';
-  const grand = { final: 0, nfBase: 0, hasNfBase: false };
+  const grand = { pago: 0, nfBase: 0, hasNfBase: false };
 
   years.forEach(year => {
     rows += `<tr class="arm-year-header"><td colspan="5"><strong>${armEsc(year)}</strong></td></tr>`;
-    const yt = { final: 0, nfBase: 0, hasNfBase: false };
+    const yt = { pago: 0, nfBase: 0, hasNfBase: false };
     byYear[year].forEach(m => {
       const arm = armGetArmazenagemValor(m);
       const nfBase = armGetNfBase(m);
-      const pct = armFmtPctGasto(arm.final, nfBase);
+      const pct = armFmtPctGasto(arm.pago, nfBase);
       const mesNome = armMesLabel(m);
       const ano = (m.mesKey || '').slice(0, 4) || '—';
-      yt.final += arm.final;
+      yt.pago += arm.pago;
       if (nfBase > 0) {
         yt.nfBase += nfBase;
         yt.hasNfBase = true;
         grand.hasNfBase = true;
         grand.nfBase += nfBase;
       }
-      grand.final += arm.final;
+      grand.pago += arm.pago;
       rows += `<tr class="arm-comparativo-month">
         <td class="arm-col-mes">${armEsc(mesNome)}</td>
         <td class="arm-col-ano">${armEsc(ano)}</td>
         <td class="right arm-col-num">${nfBase > 0 ? armFmtMoney(nfBase) : '—'}</td>
-        <td class="right arm-col-num">${arm.final > 0 ? armFmtMoney(arm.final) : '—'}</td>
+        <td class="right arm-col-num">${arm.pago > 0 ? armFmtMoney(arm.pago) : '—'}</td>
         <td class="right arm-col-pct">${pct}</td>
       </tr>`;
     });
-    const yPct = armFmtPctGasto(yt.final, yt.hasNfBase ? yt.nfBase : null);
+    const yPct = armFmtPctGasto(yt.pago, yt.hasNfBase ? yt.nfBase : null);
     rows += `<tr class="arm-year-subtotal arm-resumo-subtotal">
       <td colspan="2"><strong>Subtotal ${armEsc(year)}</strong></td>
       <td class="right"><strong>${yt.hasNfBase ? armFmtMoney(yt.nfBase) : '—'}</strong></td>
-      <td class="right"><strong>${yt.final > 0 ? armFmtMoney(yt.final) : '—'}</strong></td>
+      <td class="right"><strong>${yt.pago > 0 ? armFmtMoney(yt.pago) : '—'}</strong></td>
       <td class="right"><strong>${yPct}</strong></td>
     </tr>`;
   });
 
-  const gPct = armFmtPctGasto(grand.final, grand.hasNfBase ? grand.nfBase : null);
+  const gPct = armFmtPctGasto(grand.pago, grand.hasNfBase ? grand.nfBase : null);
   rows += `<tr class="arm-comparativo-total arm-resumo-subtotal">
     <td colspan="2"><strong>Total geral</strong></td>
     <td class="right"><strong>${grand.hasNfBase ? armFmtMoney(grand.nfBase) : '—'}</strong></td>
-    <td class="right"><strong>${grand.final > 0 ? armFmtMoney(grand.final) : '—'}</strong></td>
+    <td class="right"><strong>${grand.pago > 0 ? armFmtMoney(grand.pago) : '—'}</strong></td>
     <td class="right"><strong>${gPct}</strong></td>
   </tr>`;
 
   return `
     <div class="section-title" style="margin-top:0;">Armazenagem vs Vendas (mensal)</div>
-    <p class="arm-comparativo-note">Vendas = valor faturado (qtde da linha <em>% sobre NF expedida</em> no resumo). Pago = total a faturar de armazenagem. % = pago ÷ vendas.</p>
+    <p class="arm-comparativo-note">Vendas = valor faturado (qtde da linha <em>% sobre NF expedida</em> no resumo). Pago = subtotal dos serviços (linha Apuração / Total do resumo, sem impostos). % = pago ÷ vendas.</p>
     <div class="tbl-wrap arm-comparativo-wrap">
       <table id="arm-comparativoTbl" class="arm-comparativo-tbl">
         <colgroup>
@@ -697,7 +700,7 @@ function renderArmComparativoTable(months) {
           <th class="no-sort arm-col-mes">Mês</th>
           <th class="no-sort arm-col-ano">Ano</th>
           <th class="right no-sort arm-col-num" title="Valor faturação expedida (linha % sobre NF expedida)">Vendas (NF expedida)</th>
-          <th class="right no-sort arm-col-num" title="Total a faturar de armazenagem (com impostos)">Pago (armazenagem)</th>
+          <th class="right no-sort arm-col-num" title="Subtotal dos serviços (Apuração no resumo, antes de impostos)">Pago (armazenagem)</th>
           <th class="right no-sort arm-col-pct" title="Pago ÷ vendas">% s/ vendas</th>
         </tr></thead>
         <tbody>${rows}</tbody>
