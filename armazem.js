@@ -548,73 +548,65 @@ function renderArmComparativoTable(months) {
   const years = Object.keys(byYear).sort();
 
   let rows = '';
-  const grand = { subtotal: 0, final: 0, primary: 0, nfBase: 0, hasNfBase: false };
+  const grand = { final: 0, nfBase: 0, hasNfBase: false };
 
   years.forEach(year => {
-    rows += `<tr class="arm-year-header"><td colspan="6"><strong>${armEsc(year)}</strong></td></tr>`;
-    const yt = { subtotal: 0, final: 0, primary: 0, nfBase: 0, hasNfBase: false };
+    rows += `<tr class="arm-year-header"><td colspan="5"><strong>${armEsc(year)}</strong></td></tr>`;
+    const yt = { final: 0, nfBase: 0, hasNfBase: false };
     byYear[year].forEach(m => {
       const arm = armGetArmazenagemValor(m);
       const nfBase = armGetNfBase(m);
-      const pct = armFmtPctGasto(arm.primary, nfBase);
+      const pct = armFmtPctGasto(arm.final, nfBase);
       const mesNome = armMesLabel(m);
       const ano = (m.mesKey || '').slice(0, 4) || '—';
-      yt.subtotal += arm.subtotal;
       yt.final += arm.final;
-      yt.primary += arm.primary;
       if (nfBase > 0) {
         yt.nfBase += nfBase;
         yt.hasNfBase = true;
         grand.hasNfBase = true;
         grand.nfBase += nfBase;
       }
-      grand.subtotal += arm.subtotal;
       grand.final += arm.final;
-      grand.primary += arm.primary;
       rows += `<tr class="arm-comparativo-month">
         <td class="arm-col-mes">${armEsc(mesNome)}</td>
         <td class="arm-col-ano">${armEsc(ano)}</td>
-        <td class="right arm-col-num">${armFmtMoney(arm.subtotal)}</td>
-        <td class="right arm-col-num">${arm.final > 0 ? armFmtMoney(arm.final) : '—'}</td>
         <td class="right arm-col-num">${nfBase > 0 ? armFmtMoney(nfBase) : '—'}</td>
+        <td class="right arm-col-num">${arm.final > 0 ? armFmtMoney(arm.final) : '—'}</td>
         <td class="right arm-col-pct">${pct}</td>
       </tr>`;
     });
-    const yPct = armFmtPctGasto(yt.primary, yt.hasNfBase ? yt.nfBase : null);
+    const yPct = armFmtPctGasto(yt.final, yt.hasNfBase ? yt.nfBase : null);
     rows += `<tr class="arm-year-subtotal arm-resumo-subtotal">
       <td colspan="2"><strong>Subtotal ${armEsc(year)}</strong></td>
-      <td class="right"><strong>${armFmtMoney(yt.subtotal)}</strong></td>
-      <td class="right"><strong>${yt.final > 0 ? armFmtMoney(yt.final) : '—'}</strong></td>
       <td class="right"><strong>${yt.hasNfBase ? armFmtMoney(yt.nfBase) : '—'}</strong></td>
+      <td class="right"><strong>${yt.final > 0 ? armFmtMoney(yt.final) : '—'}</strong></td>
       <td class="right"><strong>${yPct}</strong></td>
     </tr>`;
   });
 
-  const gPct = armFmtPctGasto(grand.primary, grand.hasNfBase ? grand.nfBase : null);
+  const gPct = armFmtPctGasto(grand.final, grand.hasNfBase ? grand.nfBase : null);
   rows += `<tr class="arm-comparativo-total arm-resumo-subtotal">
     <td colspan="2"><strong>Total geral</strong></td>
-    <td class="right"><strong>${armFmtMoney(grand.subtotal)}</strong></td>
-    <td class="right"><strong>${grand.final > 0 ? armFmtMoney(grand.final) : '—'}</strong></td>
     <td class="right"><strong>${grand.hasNfBase ? armFmtMoney(grand.nfBase) : '—'}</strong></td>
+    <td class="right"><strong>${grand.final > 0 ? armFmtMoney(grand.final) : '—'}</strong></td>
     <td class="right"><strong>${gPct}</strong></td>
   </tr>`;
 
   return `
-    <div class="section-title" style="margin-top:0;">Armazenagem vs base NF expedida</div>
-    <p class="arm-comparativo-note">Base NF = valor da faturação expedida (qtde da linha <em>5,5% sobre NF expedida</em> no resumo). % = total a faturar ÷ base NF.</p>
+    <div class="section-title" style="margin-top:0;">Armazenagem vs Vendas (mensal)</div>
+    <p class="arm-comparativo-note">Vendas = valor faturado (qtde da linha <em>% sobre NF expedida</em> no resumo). Pago = total a faturar de armazenagem. % = pago ÷ vendas.</p>
     <div class="tbl-wrap arm-comparativo-wrap">
       <table id="arm-comparativoTbl" class="arm-comparativo-tbl">
         <colgroup>
           <col class="arm-col-mes"><col class="arm-col-ano">
-          <col class="arm-col-num"><col class="arm-col-num"><col class="arm-col-num"><col class="arm-col-pct">
+          <col class="arm-col-num"><col class="arm-col-num"><col class="arm-col-pct">
         </colgroup>
         <thead><tr>
           <th class="no-sort arm-col-mes">Mês</th>
           <th class="no-sort arm-col-ano">Ano</th>
-          <th class="right no-sort arm-col-num" title="Soma serviços (sem impostos)">Subtotal serviços</th>
-          <th class="right no-sort arm-col-num" title="Valor final a faturar (com impostos)">Total a faturar</th>
-          <th class="right no-sort arm-col-num" title="Valor faturação expedida (linha 5,5% NF)">Base NF expedida</th>
-          <th class="right no-sort arm-col-pct" title="Total a faturar ÷ base NF">% s/ NF</th>
+          <th class="right no-sort arm-col-num" title="Valor faturação expedida (linha % sobre NF expedida)">Vendas (NF expedida)</th>
+          <th class="right no-sort arm-col-num" title="Total a faturar de armazenagem (com impostos)">Pago (armazenagem)</th>
+          <th class="right no-sort arm-col-pct" title="Pago ÷ vendas">% s/ vendas</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
