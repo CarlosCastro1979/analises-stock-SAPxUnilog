@@ -348,6 +348,12 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-armazem .section-title{font-size:12px;font-weight:700;margin:20px 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 #page-armazem .arm-resumo-month{margin-bottom:28px;}
 #page-armazem .arm-resumo-month-title{font-size:14px;color:var(--text);margin:0 0 8px;}
+#page-armazem .arm-resumo-year{margin-bottom:32px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+#page-armazem .arm-resumo-year-title{font-size:15px;color:var(--navy);margin:0 0 12px;}
+#page-armazem .arm-comparativo-wrap{max-height:none;margin-bottom:24px;}
+#page-armazem .arm-comparativo-note{font-size:11px;color:var(--muted);margin:-4px 0 10px;}
+#page-armazem tr.arm-year-header td{background:#eef2ff;font-weight:700;font-size:12px;border-bottom:1px solid var(--border);padding:10px;}
+#page-armazem tr.arm-year-subtotal td,#page-armazem tr.arm-comparativo-total td{background:#f8fafc;border-top:1px solid var(--border);}
 #page-armazem .arm-resumo-total-block{margin-top:8px;padding-top:20px;border-top:2px solid var(--border);}
 #page-armazem .arm-resumo-tbl{max-height:none;}
 #page-armazem tr.arm-resumo-subtotal td{background:#f8fafc;border-top:1px solid var(--border);font-weight:600;}
@@ -432,7 +438,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.6</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.7</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1756,7 +1762,8 @@ select.cad-inp{cursor:pointer;}
       </div>
       <div id="arm-acumuladoEmpty" class="empty"><div class="empty-i">📈</div><div>Carrega Excels mensais para ver o resumo por mês (como no Excel Unilog)</div></div>
       <div id="arm-acumuladoContent" style="display:none;">
-        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Tabelas <strong>Resumo</strong> por mês (Novembro, Dezembro, …) e secção <strong>Total</strong> com soma por tipo (AG vs Área Técnica, excedente vs excedente AT, etc.; variantes HE unificadas).</p>
+        <div id="arm-acumuladoComparativo"></div>
+        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Tabelas <strong>Resumo</strong> por mês agrupadas por ano (2025, 2026, …) e secção <strong>Total geral</strong> com soma por tipo (AG vs Área Técnica, excedente vs excedente AT, etc.; variantes HE unificadas).</p>
         <div class="kpis" id="arm-acumuladoKpis"></div>
         <div id="arm-acumuladoSections"></div>
       </div>
@@ -6920,6 +6927,7 @@ async function uploadVendas(){
       const meses=[...new Set(upsertRows.map(r=>r.mes))].sort();
       status.textContent=`✓ ${saved} registos guardados (${meses.join(', ')})`;
       status.style.color='var(--green)';
+      if(typeof armInvalidateVendasCache==='function')armInvalidateVendasCache();
       loadVendasHist();
     }catch(e){status.textContent='Erro: '+e.message;status.style.color='var(--red)';}
   };
@@ -7566,7 +7574,7 @@ function applyResizable(){scheduleColResize();}
 
 </script>
 <script src="fretes.js?v=1.7.12"></script>
-<script src="armazem.js?v=1.0.11" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
+<script src="armazem.js?v=1.0.12" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
 <script>
 if(typeof initArmazem!=='function'){
   const e=document.getElementById('arm-initErr');

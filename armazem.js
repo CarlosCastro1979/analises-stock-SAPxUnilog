@@ -1,5 +1,5 @@
-// armazem.js v1.0.11
-const ARMAZEM_JS_VERSION = '1.0.11';
+// armazem.js v1.0.12
+const ARMAZEM_JS_VERSION = '1.0.12';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -366,14 +366,251 @@ function parseMonthFromFileName(fileName) {
   const year = m ? parseInt(m[1], 10) : null;
   const low = base.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   let month = null;
-  for (const [name, num] of Object.entries(ARM_MESES_PT)) {
+  const meses = Object.entries(ARM_MESES_PT).sort((a, b) => b[0].length - a[0].length);
+  for (const [name, num] of meses) {
     const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    if (low.includes(key)) { month = num; break; }
+    const re = new RegExp('(?:^|[^a-z])' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:[^a-z]|$)');
+    if (re.test(low)) { month = num; break; }
   }
   if (!month || !year) return { mesKey: '', mesLabel: base || String(fileName || '') };
   const mesKey = `${year}-${String(month).padStart(2, '0')}`;
   const mesLabel = armMesNomeLong(mesKey, '');
   return { mesKey, mesLabel };
+}
+
+function armInfoLabelValue(matrix, r, labelRe) {
+  const row = matrix[r] || [];
+  for (let c = 0; c < row.length; c++) {
+    const label = cellText(matrix, r, c);
+    if (!labelRe.test(label)) continue;
+    for (let v = c + 1; v < Math.min(c + 4, row.length); v++) {
+      const t = cellText(matrix, r, v);
+      if (t && t !== '-') return t;
+    }
+  }
+  return '';
+}
+
+function parseInfoSheetValues(info) {
+  const out = {
+    depositante: '', dataInicial: '', dataFinal: '',
+    totalServicos: 0, valorMinimo: ARM_MINIMO_CONTRATUAL,
+    valorApurado: 0, valorTotal: 0
+  };
+  if (!info?.length) return out;
+  for (let r = 0; r < info.length; r++) {
+    const dep = armInfoLabelValue(info, r, /Depositante/i);
+    if (dep) out.depositante = dep;
+    const di = armInfoLabelValue(info, r, /Data Inicial/i);
+    if (di) out.dataInicial = parseBrDate(di);
+    const df = armInfoLabelValue(info, r, /Data Final/i);
+    if (df) out.dataFinal = parseBrDate(df);
+    const ts = armInfoLabelValue(info, r, /Total dos Servi/i);
+    if (ts) out.totalServicos = armNum(ts) || out.totalServicos;
+    const vm = armInfoLabelValue(info, r, /Valor M[ií]nimo Contratual/i);
+    if (vm) out.valorMinimo = armNum(vm) || out.valorMinimo;
+    const va = armInfoLabelValue(info, r, /Valor Apurado/i);
+    if (va) out.valorApurado = armNum(va) || out.valorApurado;
+    const vt = armInfoLabelValue(info, r, /VALOR FINAL A FATURAR|Valor Total \(com impostos\)/i);
+    if (vt) out.valorTotal = armNum(vt) || out.valorTotal;
+  }
+  return out;
+}
+
+function armGetArmazenagemValor(month) {
+  const subtotal = Number(month.totalServicos) || 0;
+  const finalVal = Number(month.valorTotal) || 0;
+  return { subtotal, final: finalVal, primary: finalVal > 0 ? finalVal : subtotal };
+}
+
+function armFmtPctGasto(armVal, vendasVal) {
+  if (!Number.isFinite(vendasVal) || vendasVal <= 0) return '—';
+  if (!Number.isFinite(armVal) || armVal < 0) return '—';
+  return fmtArmPct(armVal / vendasVal * 100, 2);
+}
+
+function armVendasFromSapNf() {
+  const api = sapApi();
+  if (!api?.isSapLoaded?.()) return { byMes: {}, loaded: false, source: null, note: '' };
+  const byMes = {};
+  Object.values(api.getMap()).forEach(entry => {
+    const mk = String(entry.dtEmissao || '').slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(mk)) return;
+    if (!byMes[mk]) byMes[mk] = { valor: 0 };
+    byMes[mk].valor += Number(entry.valorNF) || 0;
+  });
+  const loaded = Object.keys(byMes).length > 0;
+  return {
+    byMes, loaded, source: loaded ? 'sap_nf' : null,
+    note: loaded ? 'Vendas estimadas via export SAP NF (Fretes)' : ''
+  };
+}
+
+async function loadArmVendasByMonth(force) {
+  const now = Date.now();
+  if (!force && armVendasCache && (now - armVendasCacheTs) < ARM_VENDAS_CACHE_MS) return armVendasCache;
+  armVendasCache = { byMes: {}, loaded: false, source: null, note: 'carregar vendas em Dados → Carregar Vendas' };
+  armVendasCacheTs = now;
+
+  if (typeof db !== 'undefined') {
+    try {
+      const { data, error } = await db.from('logistica_vendas').select('mes,ean,qt').limit(50000);
+      if (!error && data?.length) {
+        const precoMap = typeof buildSapPrecoMap === 'function' ? buildSapPrecoMap() : {};
+        const hasPreco = Object.keys(precoMap).length > 0;
+        const byMes = {};
+        data.forEach(r => {
+          const qt = parseFloat(r.qt) || 0;
+          if (qt <= 0) return;
+          if (!byMes[r.mes]) byMes[r.mes] = { valor: 0 };
+          const preco = precoMap[r.ean] || 0;
+          if (hasPreco && preco > 0) byMes[r.mes].valor += qt * preco;
+        });
+        if (hasPreco && Object.values(byMes).some(x => x.valor > 0)) {
+          armVendasCache = { byMes, loaded: true, source: 'vendas', note: 'Vendas (qt × preço SAP, todos os canais)' };
+          return armVendasCache;
+        }
+        armVendasCache.note = 'Vendas carregadas — falta SAP (preços) para calcular valor';
+      }
+    } catch (e) {
+      console.warn('[armazem] vendas', e);
+    }
+  }
+
+  const sap = armVendasFromSapNf();
+  if (sap.loaded) {
+    armVendasCache = sap;
+    return armVendasCache;
+  }
+  return armVendasCache;
+}
+
+function armVendasForMes(vendasPack, mesKey) {
+  const v = vendasPack?.byMes?.[mesKey];
+  if (!v || !Number.isFinite(v.valor) || v.valor <= 0) return null;
+  return v.valor;
+}
+
+function armInvalidateVendasCache() {
+  armVendasCache = null;
+  armVendasCacheTs = 0;
+}
+
+function renderArmComparativoTable(months, vendasPack) {
+  const sorted = [...months].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
+  const byYear = {};
+  sorted.forEach(m => {
+    const y = (m.mesKey || '').slice(0, 4) || '—';
+    if (!byYear[y]) byYear[y] = [];
+    byYear[y].push(m);
+  });
+  const years = Object.keys(byYear).sort();
+
+  let rows = '';
+  const grand = { subtotal: 0, final: 0, primary: 0, vendas: 0, hasVendas: false };
+
+  years.forEach(year => {
+    rows += `<tr class="arm-year-header"><td colspan="6"><strong>${armEsc(year)}</strong></td></tr>`;
+    const yt = { subtotal: 0, final: 0, primary: 0, vendas: 0, hasVendas: false };
+    byYear[year].forEach(m => {
+      const arm = armGetArmazenagemValor(m);
+      const vendas = armVendasForMes(vendasPack, m.mesKey);
+      const pct = armFmtPctGasto(arm.primary, vendas);
+      const mi = parseInt((m.mesKey || '').slice(5, 7), 10);
+      const mesNome = ARM_MESES_NOME[mi] || m.mesLabel || m.mesKey;
+      const ano = (m.mesKey || '').slice(0, 4) || '—';
+      yt.subtotal += arm.subtotal;
+      yt.final += arm.final;
+      yt.primary += arm.primary;
+      if (vendas != null) {
+        yt.vendas += vendas;
+        yt.hasVendas = true;
+        grand.hasVendas = true;
+        grand.vendas += vendas;
+      }
+      grand.subtotal += arm.subtotal;
+      grand.final += arm.final;
+      grand.primary += arm.primary;
+      rows += `<tr class="arm-comparativo-month">
+        <td>${armEsc(mesNome)}</td>
+        <td>${armEsc(ano)}</td>
+        <td class="right">${armFmtMoney(arm.subtotal)}</td>
+        <td class="right">${arm.final > 0 ? armFmtMoney(arm.final) : '—'}</td>
+        <td class="right">${vendas != null ? armFmtMoney(vendas) : '—'}</td>
+        <td class="right">${pct}</td>
+      </tr>`;
+    });
+    const yPct = armFmtPctGasto(yt.primary, yt.hasVendas ? yt.vendas : null);
+    rows += `<tr class="arm-year-subtotal arm-resumo-subtotal">
+      <td colspan="2"><strong>Subtotal ${armEsc(year)}</strong></td>
+      <td class="right"><strong>${armFmtMoney(yt.subtotal)}</strong></td>
+      <td class="right"><strong>${yt.final > 0 ? armFmtMoney(yt.final) : '—'}</strong></td>
+      <td class="right"><strong>${yt.hasVendas ? armFmtMoney(yt.vendas) : '—'}</strong></td>
+      <td class="right"><strong>${yPct}</strong></td>
+    </tr>`;
+  });
+
+  const gPct = armFmtPctGasto(grand.primary, grand.hasVendas ? grand.vendas : null);
+  rows += `<tr class="arm-comparativo-total arm-resumo-subtotal">
+    <td colspan="2"><strong>Total geral</strong></td>
+    <td class="right"><strong>${armFmtMoney(grand.subtotal)}</strong></td>
+    <td class="right"><strong>${grand.final > 0 ? armFmtMoney(grand.final) : '—'}</strong></td>
+    <td class="right"><strong>${grand.hasVendas ? armFmtMoney(grand.vendas) : '—'}</strong></td>
+    <td class="right"><strong>${gPct}</strong></td>
+  </tr>`;
+
+  const note = vendasPack?.loaded
+    ? `<span style="color:var(--green)">${armEsc(vendasPack.note || 'Vendas carregadas')}</span>`
+    : '<span style="color:var(--yellow)">Sem vendas — carregar em Dados → Transferências → Carregar Vendas (ou export SAP NF no módulo Fretes)</span>';
+
+  return `
+    <div class="section-title" style="margin-top:0;">Armazenagem vs Vendas (mensal)</div>
+    <p class="arm-comparativo-note">${note}. % = total a faturar (ou subtotal) ÷ vendas.</p>
+    <div class="tbl-wrap arm-comparativo-wrap">
+      <table id="arm-comparativoTbl">
+        <thead><tr>
+          <th>Mês</th><th>Ano</th>
+          <th class="right" title="Soma serviços (sem impostos)">Subtotal serviços</th>
+          <th class="right" title="Valor final a faturar (com impostos)">Total a faturar</th>
+          <th class="right">Vendas (R$)</th>
+          <th class="right">% s/ Vendas</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderArmResumoSections(months) {
+  const byYear = {};
+  months.forEach(m => {
+    const y = (m.mesKey || '').slice(0, 4) || 'Outros';
+    if (!byYear[y]) byYear[y] = [];
+    byYear[y].push(m);
+  });
+  Object.keys(byYear).forEach(y => {
+    byYear[y].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
+  });
+
+  let html = '';
+  Object.keys(byYear).sort().forEach(year => {
+    html += `<div class="arm-resumo-year"><div class="section-title arm-resumo-year-title">${armEsc(year)}</div>`;
+    html += byYear[year].map(m => {
+      const rows = armResumoRows(m);
+      const titulo = armMesNomeLong(m.mesKey, m.mesLabel);
+      return `<div class="arm-resumo-month">
+        <div class="section-title arm-resumo-month-title">${armEsc(titulo)}</div>
+        ${resumoTableHtml(rows)}
+      </div>`;
+    }).join('');
+    html += '</div>';
+  });
+
+  const agg = aggregateResumoByNorm(months);
+  html += `<div class="arm-resumo-month arm-resumo-total-block">
+    <div class="section-title arm-resumo-month-title">Total geral</div>
+    ${resumoTableHtml(agg, { useNorm: true, total: true })}
+  </div>`;
+  return html;
 }
 
 function sheetToMatrix(ws) {
@@ -521,25 +758,14 @@ function parseArmazemV2(wb, fileName, opts) {
   const info = infoName ? sheetToMatrix(wb.Sheets[infoName]) : [];
   const resumo = sheetToMatrix(wb.Sheets[resumoName]);
 
-  let dataInicial = '';
-  let dataFinal = '';
-  let totalServicos = 0;
-  let valorMinimo = ARM_MINIMO_CONTRATUAL;
-  let valorApurado = 0;
-  let valorTotal = 0;
-
-  let depositante = '';
-  for (let r = 0; r < info.length; r++) {
-    const a = cellText(info, r, 0);
-    const b = cellText(info, r, 1);
-    if (/Depositante/i.test(a)) depositante = b;
-    if (/Data Inicial/i.test(a)) dataInicial = parseBrDate(b);
-    if (/Data Final/i.test(a)) dataFinal = parseBrDate(b);
-    if (/Total dos Servi/i.test(a)) totalServicos = armNum(b);
-    if (/Valor M[ií]nimo Contratual/i.test(a)) valorMinimo = armNum(b) || ARM_MINIMO_CONTRATUAL;
-    if (/Valor Apurado/i.test(a)) valorApurado = armNum(b);
-    if (/VALOR FINAL A FATURAR|Valor Total \(com impostos\)/i.test(a)) valorTotal = armNum(b) || valorTotal;
-  }
+  const infoVals = parseInfoSheetValues(info);
+  let dataInicial = infoVals.dataInicial;
+  let dataFinal = infoVals.dataFinal;
+  let totalServicos = infoVals.totalServicos;
+  let valorMinimo = infoVals.valorMinimo;
+  let valorApurado = infoVals.valorApurado;
+  let valorTotal = infoVals.valorTotal;
+  let depositante = infoVals.depositante;
 
   if (!meta.mesKey && dataInicial) meta.mesKey = dataInicial.slice(0, 7);
   if (meta.mesKey && !meta.mesLabel) {
@@ -981,7 +1207,7 @@ function switchArmTab(tab) {
 
 function renderArmActiveTab() {
   if (armActiveTab === 'mensal') renderArmMensal();
-  if (armActiveTab === 'resumo') renderArmAcumulado();
+  if (armActiveTab === 'resumo') renderArmAcumulado().catch(e => console.warn('[armazem] resumo', e));
   if (armActiveTab === 'nf') renderArmNf();
   if (armActiveTab === 'adicionais') renderArmAdicionais();
   if (armActiveTab === 'catalogo') renderArmCatalogo();
@@ -1120,10 +1346,11 @@ function renderArmMensal() {
   }
 }
 
-function renderArmAcumulado() {
+async function renderArmAcumulado() {
   const empty = $arm('acumuladoEmpty');
   const content = $arm('acumuladoContent');
   const sections = $arm('acumuladoSections');
+  const comparativo = $arm('acumuladoComparativo');
   const months = armPack?.months || [];
   if (!months.length) {
     if (empty) empty.style.display = 'block';
@@ -1137,6 +1364,14 @@ function renderArmAcumulado() {
   const agg = aggregateResumoByNorm(months);
   const totalAgg = agg.reduce((s, r) => s + r.valor, 0);
 
+  const vendasPack = await loadArmVendasByMonth();
+  if (comparativo) {
+    comparativo.innerHTML = renderArmComparativoTable(months, vendasPack);
+    if (typeof enableTableSort === 'function') {
+      enableTableSort('arm-comparativoTbl', { dataRowSelector: 'tr.arm-comparativo-month' });
+    }
+  }
+
   const kpis = $arm('acumuladoKpis');
   if (kpis) {
     kpis.innerHTML = `
@@ -1146,23 +1381,7 @@ function renderArmAcumulado() {
       <div class="kpi"><div class="label">Total serviços (faturas)</div><div class="value">${armFmtMoney(totalServ)}</div></div>`;
   }
 
-  if (sections) {
-    const monthBlocks = months.map(m => {
-      const rows = armResumoRows(m);
-      const titulo = armMesNomeLong(m.mesKey, m.mesLabel);
-      return `<div class="arm-resumo-month">
-        <div class="section-title arm-resumo-month-title">${armEsc(titulo)}</div>
-        ${resumoTableHtml(rows)}
-      </div>`;
-    }).join('');
-
-    const totalBlock = `<div class="arm-resumo-month arm-resumo-total-block">
-      <div class="section-title arm-resumo-month-title">Total</div>
-      ${resumoTableHtml(agg, { useNorm: true, total: true })}
-    </div>`;
-
-    sections.innerHTML = monthBlocks + totalBlock;
-  }
+  if (sections) sections.innerHTML = renderArmResumoSections(months);
 }
 
 function renderArmNf() {
@@ -1603,6 +1822,7 @@ function exportArmazemWorkbook() {
 async function reloadArmazemForCompany() {
   armPack = null;
   armPendingFiles = [];
+  armInvalidateVendasCache();
   loadCatalogOverrides();
   await loadSavedArmazem(true);
   updateArmFileZone();
@@ -1670,3 +1890,4 @@ window.processArmFiles = processArmFiles;
 window.armDoSort = armDoSort;
 window.armSetCatalog = armSetCatalog;
 window.exportArmazemWorkbook = exportArmazemWorkbook;
+window.armInvalidateVendasCache = armInvalidateVendasCache;
