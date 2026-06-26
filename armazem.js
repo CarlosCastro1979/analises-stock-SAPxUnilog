@@ -1,5 +1,5 @@
-// armazem.js v1.0.6
-const ARMAZEM_JS_VERSION = '1.0.6';
+// armazem.js v1.0.7
+const ARMAZEM_JS_VERSION = '1.0.7';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -158,19 +158,40 @@ function armEsc(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 }
 
+function armNormServicoUpper(raw) {
+  return String(raw || '').trim()
+    .replace(/^\[[\d.]+\]\s*/i, '')
+    .replace(/:$/, '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+}
+
 function normalizeServicoName(raw) {
-  let s = String(raw || '').trim();
-  s = s.replace(/^\[[\d.]+\]\s*/i, '');
-  s = s.replace(/\s+/g, ' ').toUpperCase();
-  if (/PERCENTUAL\s+SOBRE\s+NF\s+EXPEDID|ARMAZENAGEM\s+POR\s*%|5[,.]5\s*%/.test(s)) return 'PERCENTUAL SOBRE NF EXPEDIDA';
-  if (/ARMAZENAGEM\s+EXCEDENTE/.test(s)) return 'ARMAZENAGEM EXCEDENTE';
-  if (/ARMAZENAGEM\s+POR\s+POSI/.test(s)) return 'ARMAZENAGEM POR POSICAO PALLET';
-  if (/ETIQUETAGEM/.test(s)) return 'ETIQUETAGEM EAN - POR UNIDADE';
-  if (/READEQUA/.test(s)) return 'READEQUACAO DE PRODUTOS - POR UNIDADE';
-  if (/HORA\s+EXTRA|H\.\s*E|H\.E|\bHE\b/.test(s)) return 'HORA EXTRA';
-  if (/DECARGA\s+DE\s+MERCADORIA/.test(s)) return 'DECARGA DE MERCADORIA - POR PALLET';
-  if (/IMPOSTO|PIS|COFINS|ISS/.test(s)) return 'IMPOSTOS SERVICOS';
-  return s;
+  const u = armNormServicoUpper(raw);
+  if (!u) return '';
+
+  if (/PERCENTUAL\s+SOBRE\s+NF\s+EXPEDID|ARMAZENAGEM\s+POR\s*%|5[,.]5\s*%/.test(u)) {
+    return 'PERCENTUAL SOBRE NF EXPEDIDA';
+  }
+  if (/HORA\s+EXTRA|^H\.\s*E\b|^H\.E\b|\bHE\b/.test(u)) {
+    return 'HORA EXTRA';
+  }
+  if (/ARMAZENAGEM\s+EXCEDENTE/.test(u) && /(\bNA\s+AT\b|AREA\s+TECNICA)/.test(u)) {
+    return 'ARMAZENAGEM EXCEDENTE NA AT';
+  }
+  if (/^ARMAZENAGEM\s+EXCEDENTE/.test(u)) {
+    return 'ARMAZENAGEM EXCEDENTE';
+  }
+  const pos = u.match(/^ARMAZENAGEM\s+POR\s+POSICAO\s+PALLET(\s*\[[^\]]+\])?/);
+  if (pos) {
+    return 'ARMAZENAGEM POR POSICAO PALLET' + (pos[1] || '');
+  }
+  if (/READEQUA/.test(u)) return 'READEQUACAO DE PRODUTOS - POR UNIDADE';
+  if (/IMPOSTO|PIS|COFINS|ISS/.test(u)) return 'IMPOSTOS SERVICOS';
+
+  // ETIQUETAGEM, DECARGA and other lines: keep distinct names (no cross-type merging).
+  return u;
 }
 
 function armMesNomeLong(mesKey, mesLabel) {
@@ -200,8 +221,9 @@ function armFmtResumoQty(v, isNf) {
   return fmtArmQty(v);
 }
 
-function armFmtResumoUnit(v, isNf) {
+function armFmtResumoUnit(v, isNf, unitVaries) {
   if (isNf) return fmtArmPct(ARM_NF_RATE * 100);
+  if (unitVaries || v == null) return '—';
   return fmtArmUnit(v);
 }
 
@@ -211,7 +233,7 @@ function armResumoRowHtml(s, opts) {
   return `<tr>
     <td>${armEsc(nome)}</td>
     <td class="right">${armFmtResumoQty(s.qtde, isNf)}</td>
-    <td class="right">${armFmtResumoUnit(s.valorUnit, isNf)}</td>
+    <td class="right">${armFmtResumoUnit(s.valorUnit, isNf, s.unitVaries)}</td>
     <td class="right">${armFmtMoney(s.valor)}</td>
   </tr>`;
 }
@@ -220,27 +242,44 @@ function aggregateResumoByNorm(months) {
   const map = {};
   months.forEach(m => {
     armResumoRows(m).forEach(s => {
-      const norm = normalizeServicoName(s.rawName);
+      const norm = normalizeServicoName(s.rawName || s.normName);
+      if (!norm) return;
       if (!map[norm]) {
-        map[norm] = { normName: norm, qtde: 0, valor: 0, unitSum: 0, isNf: false, rawVariants: new Set() };
+        map[norm] = {
+          normName: norm, qtde: 0, valor: 0, unitWeighted: 0, unitQty: 0,
+          unitValues: new Set(), isNf: false, rawVariants: new Set()
+        };
       }
       const row = map[norm];
-      row.qtde += s.qtde || 0;
+      const q = s.qtde || 0;
+      const u = s.valorUnit || 0;
+      row.qtde += q;
       row.valor += s.valor || 0;
-      if (s.qtde && s.valorUnit) row.unitSum += s.qtde * s.valorUnit;
+      if (q && u) {
+        row.unitWeighted += q * u;
+        row.unitQty += q;
+        row.unitValues.add(Math.round(u * 10000) / 10000);
+      }
       if (s.isNf) row.isNf = true;
-      row.rawVariants.add(s.rawName);
+      if (s.rawName) row.rawVariants.add(s.rawName);
     });
   });
-  return Object.values(map).map(r => ({
-    normName: r.normName,
-    rawName: r.normName,
-    qtde: r.qtde,
-    valor: r.valor,
-    valorUnit: r.isNf ? ARM_NF_RATE : (r.qtde ? r.unitSum / r.qtde : 0),
-    isNf: r.isNf,
-    rawVariants: [...r.rawVariants]
-  })).sort((a, b) => a.normName.localeCompare(b.normName, 'pt'));
+  return Object.values(map).map(r => {
+    const unitVaries = !r.isNf && r.unitValues.size > 1;
+    let valorUnit = null;
+    if (r.isNf) valorUnit = ARM_NF_RATE;
+    else if (!unitVaries && r.unitQty) valorUnit = r.unitWeighted / r.unitQty;
+    return {
+      normName: r.normName,
+      rawName: r.normName,
+      qtde: r.qtde,
+      valor: r.valor,
+      valorUnit,
+      unitVaries,
+      isNf: r.isNf,
+      rawVariants: [...r.rawVariants]
+    };
+  }).sort((a, b) => a.normName.localeCompare(b.normName, 'pt'));
 }
 
 function resumoTableHtml(rows, opts) {

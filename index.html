@@ -1755,7 +1755,7 @@ select.cad-inp{cursor:pointer;}
       </div>
       <div id="arm-acumuladoEmpty" class="empty"><div class="empty-i">📈</div><div>Carrega Excels mensais para ver o resumo por mês (como no Excel Unilog)</div></div>
       <div id="arm-acumuladoContent" style="display:none;">
-        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Tabelas <strong>Resumo</strong> por mês (Novembro, Dezembro, …) e secção <strong>Total</strong> com tipos normalizados (HE 1+2 → Hora extra, Etiquetagem 1+2 → Etiquetagem EAN, etc.).</p>
+        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Tabelas <strong>Resumo</strong> por mês (Novembro, Dezembro, …) e secção <strong>Total</strong> com soma por tipo (AG vs Área Técnica, excedente vs excedente AT, etc.; variantes HE unificadas).</p>
         <div class="kpis" id="arm-acumuladoKpis"></div>
         <div id="arm-acumuladoSections"></div>
       </div>
@@ -7565,7 +7565,7 @@ function applyResizable(){scheduleColResize();}
 
 </script>
 <script src="fretes.js?v=1.7.12"></script>
-<script src="armazem.js?v=1.0.6" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
+<script src="armazem.js?v=1.0.7" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
 <script>
 if(typeof initArmazem!=='function'){
   const e=document.getElementById('arm-initErr');
