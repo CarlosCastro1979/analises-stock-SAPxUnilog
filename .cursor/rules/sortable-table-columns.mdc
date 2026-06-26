@@ -1,6 +1,6 @@
 ---
 description: All data tables must have sortable column headers (click asc/desc)
-globs: index.html,fretes.js
+globs: index.html,fretes.js,armazem.js
 alwaysApply: true
 ---
 
@@ -13,7 +13,7 @@ Every **information** column in data tables must be sortable (click header → a
 - `enableTableSort(tableOrId, options?)` — DOM sort after render; use for static/dynamic HTML tables.
 - `TableSort.renderDataHead(containerId, columns, sortState, onSort)` — column-definition headers (Fretes NF/mês/anomalias).
 - `TableSort.decorateDoSortHeaders(table)` — adds ▲/▼ indicators to `doSort` / `cadSort` / `vencDoSort` headers.
-- `scheduleTableSort()` — auto-binds `.tw2 table` and `#page-fretes .tbl-wrap table` (called from `scheduleColResize`).
+- `scheduleTableSort()` — auto-binds `.tw2 table`, `#page-fretes .tbl-wrap table`, and `#page-armazem .tbl-wrap table` (called from `scheduleColResize`).
 
 ## Data-driven tables (re-render on sort)
 

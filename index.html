@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260626120000 -->
+<!DOCTYPE html><!-- v20260626180000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -314,6 +314,41 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-fretes .hist-item .nums .v{font-weight:700;font-size:13px;font-family:var(--mono);}
 #page-fretes .hist-item .nums .l{font-size:9px;color:var(--muted);text-transform:uppercase;}
 #page-fretes .muted{color:var(--muted);}
+#page-armazem .arm-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px;flex-wrap:wrap;}
+#page-armazem .arm-tab{padding:10px 16px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
+#page-armazem .arm-tab.active{color:var(--red);border-bottom-color:var(--red);}
+#page-armazem .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0;}
+@media(max-width:900px){#page-armazem .kpis{grid-template-columns:repeat(2,1fr);}}
+#page-armazem .kpi{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;}
+#page-armazem .kpi .label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;font-weight:600;}
+#page-armazem .kpi .value{font-size:20px;font-weight:700;font-family:var(--mono);}
+#page-armazem .kpi .sub{font-size:11px;color:var(--muted);margin-top:2px;}
+#page-armazem .kpi.flag .value{color:var(--red);}
+#page-armazem .filters{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
+#page-armazem .filters select,#page-armazem .filters input{padding:7px 10px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:#fff;}
+#page-armazem .filters input[type=text]{flex:1;min-width:160px;}
+#page-armazem .tbl-wrap{max-height:520px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
+#page-armazem .tbl-wrap table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;}
+#page-armazem .tbl-wrap th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;position:sticky;top:0;background:#fff;z-index:1;}
+#page-armazem .tbl-wrap td{padding:8px 10px;border-bottom:1px solid var(--bg4);vertical-align:top;}
+#page-armazem .right{text-align:right;}
+#page-armazem th.sortable{cursor:pointer;user-select:none;}
+#page-armazem th.sortable .sort-ind{font-size:9px;margin-left:3px;opacity:.35;}
+#page-armazem th.sortable.sorted-asc .sort-ind,#page-armazem th.sortable.sorted-desc .sort-ind{opacity:1;color:var(--red);}
+#page-armazem tr.nf-val-mismatch td{background:#fff8e1 !important;}
+#page-armazem tr.nf-sap-missing td{background:#fef2f2 !important;}
+#page-armazem tr.month-row-high td{background:#fff5f5;}
+#page-armazem .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;}
+#page-armazem .b-ok{background:#dcfce7;color:var(--green);}
+#page-armazem .b-flag{background:#fee2e2;color:var(--red);}
+#page-armazem .b-min{background:#fef3c7;color:var(--yellow);}
+#page-armazem .b-fix165{background:#ffedd5;color:#c2410c;}
+#page-armazem .data-warn{background:#fffbeb;border:1px solid #fcd34d;color:#92400e;border-radius:6px;padding:10px 12px;margin:0 0 12px;font-size:12px;}
+#page-armazem .section-title{font-size:12px;font-weight:700;margin:20px 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+#page-armazem .empty{text-align:center;padding:40px 16px;color:var(--muted);}
+#page-armazem .arm-file-list{font-size:11px;color:var(--muted);max-height:120px;overflow-y:auto;margin-top:8px;text-align:left;}
+#page-armazem .arm-file-list div{padding:2px 0;font-family:var(--mono);}
+#page-armazem .uz.drag{border-color:var(--red);background:#fff5f5;}
 #page-fretes .empty{text-align:center;padding:40px 16px;color:var(--muted);}
 #page-fretes .cte-detail-table{width:100%;margin-top:6px;}
 #page-fretes .cte-detail-table th{font-size:10px;}
@@ -388,7 +423,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.7.10</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.0</span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -409,6 +444,7 @@ select.cad-inp{cursor:pointer;}
   <div class="nt" data-page="transferencias">🔄 Transferências</div>
   <div class="nt" data-page="pecas">🔧 Peças AT</div>
   <div class="nt" data-page="fretes">🚚 Fretes CT-e</div>
+  <div class="nt" data-page="armazem">🏭 Avaliação Armazém</div>
   <div class="nt" data-page="history">📋 Histórico</div>
 </div>
 
@@ -1645,6 +1681,116 @@ select.cad-inp{cursor:pointer;}
   </div>
 </div>
 
+<!-- ══ AVALIAÇÃO ARMAZÉM ══ -->
+<div class="page" id="page-armazem">
+  <div class="card">
+    <div class="ch"><div class="ct">Avaliação Cobrança Armazém Unilog</div></div>
+
+    <div id="arm-dfbGate" class="data-warn" style="display:none;">
+      Este módulo está disponível apenas para <strong>DFB — Delta Foods Brasil</strong>. Muda o seletor de empresa no topo.
+    </div>
+
+    <div class="arm-tabs">
+      <div class="arm-tab active" data-tab="carregamento">Carregamento</div>
+      <div class="arm-tab" data-tab="mensal">Visão mensal</div>
+      <div class="arm-tab" data-tab="acumulado">Resumo acumulado</div>
+      <div class="arm-tab" data-tab="nf">NF 5,5%</div>
+      <div class="arm-tab" data-tab="adicionais">Adicionais</div>
+      <div class="arm-tab" data-tab="catalogo">Catálogo</div>
+    </div>
+
+    <div id="arm-tab-carregamento">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">
+        Carrega os Excels mensais <em>Receita_Custo DELTA</em> da Unilog (multi-selecção).
+        O export SAP NF é reutilizado do módulo <strong>Fretes CT-e</strong> (cobre todos os meses de uma vez).
+      </p>
+      <div class="sl">Excels mensais Unilog</div>
+      <div class="uz" id="arm-fileZone" style="padding:20px;">
+        <div style="font-size:26px;margin-bottom:8px">📊</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta os ficheiros mensais</div>
+        <div style="font-size:11px;color:var(--muted)">Receita_Custo DELTA — .xls (v1) ou .xlsx (v2)</div>
+        <div id="arm-fileFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+        <div id="arm-fileList" class="arm-file-list" style="display:none"></div>
+        <input type="file" id="arm-fileInput" accept=".xlsx,.xls" multiple>
+      </div>
+      <div id="arm-sapNote" class="data-warn" style="margin-top:14px;font-size:12px;"></div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
+        <button class="btn bp" id="arm-procBtn" type="button" disabled>⚡ Processar e Guardar</button>
+        <button class="btn bg" id="arm-loadBtn" type="button">☁️ Carregar último guardado</button>
+        <span id="arm-procSpin" style="display:none"><span class="spin"></span></span>
+      </div>
+    </div>
+
+    <div id="arm-tab-mensal" style="display:none;">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+        <button class="btn bg bs" id="arm-exportBtn" type="button">Exportar Excel</button>
+      </div>
+      <div id="arm-mensalEmpty" class="empty"><div class="empty-i">📅</div><div>Carrega Excels mensais na aba <strong>Carregamento</strong></div></div>
+      <div id="arm-mensalContent" style="display:none;">
+        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Alerta quando o total mensal fica abaixo do mínimo contratual de R$ 120.000.</p>
+        <div class="kpis" id="arm-mensalKpis"></div>
+        <div class="section-title">Resumo por mês</div>
+        <div class="tbl-wrap">
+          <table><thead><tr id="arm-mensalHead"></tr></thead><tbody id="arm-mensalBody"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <div id="arm-tab-acumulado" style="display:none;">
+      <div id="arm-acumuladoEmpty" class="empty"><div class="empty-i">📈</div><div>Carrega vários meses para ver o acumulado por tipo de despesa</div></div>
+      <div id="arm-acumuladoContent" style="display:none;">
+        <div class="kpis" id="arm-acumuladoKpis"></div>
+        <div class="section-title">Soma por tipo de despesa (todos os meses carregados)</div>
+        <div class="tbl-wrap">
+          <table><thead><tr id="arm-acumuladoHead"></tr></thead><tbody id="arm-acumuladoBody"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <div id="arm-tab-nf" style="display:none;">
+      <div id="arm-nfEmpty" class="empty"><div class="empty-i">🧾</div><div>Sem linhas de NF 5,5% — carrega Excels mensais</div></div>
+      <div id="arm-nfContent" style="display:none;">
+        <div class="kpis" id="arm-nfKpis"></div>
+        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Validação cruzada com SAP NF (módulo Fretes). Apenas taxa 5,5% sobre NF expedida — não inclui armazenagem, HE ou etiquetagem.</p>
+        <div class="filters">
+          <select id="arm-nfFilterMes"><option value="">Todos os meses</option></select>
+          <select id="arm-nfFilterIssue">
+            <option value="">Todos</option>
+            <option value="sap-missing">NF ausente no SAP</option>
+            <option value="valor-diff">Δ valor SAP ≠ Unilog</option>
+            <option value="fee-diff">Δ taxa 5,5%</option>
+          </select>
+          <input type="text" id="arm-nfSearch" placeholder="Procurar NF ou cliente…">
+        </div>
+        <div class="tbl-wrap">
+          <table><thead><tr id="arm-nfHead"></tr></thead><tbody id="arm-nfBody"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <div id="arm-tab-adicionais" style="display:none;">
+      <div id="arm-adicionaisEmpty" class="empty"><div class="empty-i">➕</div><div>Sem cobranças adicionais (armazenagem, HE, etiquetagem…)</div></div>
+      <div id="arm-adicionaisContent" style="display:none;">
+        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Serviços faturados separadamente da taxa 5,5% NF — validação operacional (sem cruzamento SAP).</p>
+        <div class="filters">
+          <select id="arm-adFilterMes"><option value="">Todos os meses</option></select>
+        </div>
+        <div class="tbl-wrap">
+          <table><thead><tr id="arm-adicionaisHead"></tr></thead><tbody id="arm-adicionaisBody"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <div id="arm-tab-catalogo" style="display:none;">
+      <div id="arm-catalogWarn" class="data-warn" style="display:none;"></div>
+      <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Mapeamento dos nomes Unilog para categorias do catálogo. Serviços não reconhecidos ficam marcados para validação — alterações guardadas no browser.</p>
+      <div class="tbl-wrap">
+        <table><thead><tr id="arm-catalogHead"></tr></thead><tbody id="arm-catalogBody"></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ══ HISTÓRICO ══ -->
 <div class="page" id="page-history">
   <div class="card">
@@ -1705,7 +1851,7 @@ const db=supabase.createClient(SB_URL,SB_KEY);
 // );
 // ALTER TABLE logistica_excel_files ENABLE ROW LEVEL SECURITY;
 // CREATE POLICY "anon_all" ON logistica_excel_files FOR ALL TO anon USING (true) WITH CHECK (true);
-const EXCEL_SLOTS={STOCK_SAP:'stock_sap',STOCK_UNILOG:'stock_unilog',FRETES_CTE:'fretes_cte',FRETES_SAP_NF:'fretes_sap_nf',FRETES_QUINZENAL:'fretes_quinzenal'};
+const EXCEL_SLOTS={STOCK_SAP:'stock_sap',STOCK_UNILOG:'stock_unilog',FRETES_CTE:'fretes_cte',FRETES_SAP_NF:'fretes_sap_nf',FRETES_QUINZENAL:'fretes_quinzenal',ARMAZEM:'armazem_monthly'};
 let stockSapFileName='',stockUniFileName='',stockSapBuffer=null,stockUniBuffer=null;
 
 function arrayBufferToBase64(buf){
@@ -1931,6 +2077,7 @@ async function init(){
       }
       if(t.dataset.page==='history')renderHistory();
       if(t.dataset.page==='fretes'){initFretes();if(typeof loadSavedFretesFiles==='function')loadSavedFretesFiles(false);if(typeof applyFretesFileLabelsFromMeta==='function')applyFretesFileLabelsFromMeta();}
+      if(t.dataset.page==='armazem'){if(typeof initArmazem==='function')initArmazem();}
       scheduleColResize();
     };
   });
@@ -4195,6 +4342,7 @@ function switchCompany(){
   const alertBadge=document.getElementById('alertBadge');if(alertBadge){alertBadge.textContent='';alertBadge.style.display='none';}
   // Try to load saved data for the new company
   if(typeof reloadFretesForCompany==='function')reloadFretesForCompany();
+  if(typeof reloadArmazemForCompany==='function')reloadArmazemForCompany();
   autoLoadLastExcelFiles();
   toast('Empresa: '+company,'info');
 }
@@ -6055,7 +6203,7 @@ function updateSortHeaders(table){
   if(tableEl)TableSort.decorateDoSortHeaders(tableEl);
 }
 function scheduleTableSort(){
-  document.querySelectorAll('.tw2 table, #page-fretes .tbl-wrap table').forEach(table=>{
+  document.querySelectorAll('.tw2 table, #page-fretes .tbl-wrap table, #page-armazem .tbl-wrap table').forEach(table=>{
     if(table.classList.contains('occ-moves-tbl'))return;
     if(table.querySelector('th[onclick*="doSort"], th[onclick*="cadSort"], th[onclick*="vencDoSort"]')){
       TableSort.decorateDoSortHeaders(table);
@@ -7401,7 +7549,8 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.7.11"></script>
+<script src="fretes.js?v=1.7.12"></script>
+<script src="armazem.js?v=1.0.0"></script>
 <script>
 init();
 initMultiselects();

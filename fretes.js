@@ -1,5 +1,5 @@
-// fretes.js v1.7.11
-const FRETES_JS_VERSION = '1.7.11';
+// fretes.js v1.7.12
+const FRETES_JS_VERSION = '1.7.12';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -4491,3 +4491,14 @@ function initFretes() {
 
   loadSavedFretesFiles(true).catch(() => {});
 }
+
+/** Shared SAP NF map for Fretes + Armazém modules. */
+window.FretesSAP = {
+  getMap: () => sapNfMap,
+  normNFKey,
+  buildSapNfMap,
+  lookupSapEntry,
+  isRelevantValorDiff,
+  isSapLoaded,
+  loadSapRowsFromWorkbook
+};
