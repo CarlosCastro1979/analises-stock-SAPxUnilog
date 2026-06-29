@@ -1,5 +1,5 @@
-// armazem.js v1.0.28
-const ARMAZEM_JS_VERSION = '1.0.28';
+// armazem.js v1.0.29
+const ARMAZEM_JS_VERSION = '1.0.29';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -38,6 +38,9 @@ let armSorts = {
 /** Nome canónico — plain, [AG], [AT], [AREA TECNICA] e [AG/AT] são o mesmo serviço. */
 const ARM_NORM_PALLET_POS = 'ARMAZENAGEM POR POSICAO PALLET (AREA TECNICA)';
 
+/** Nome canónico — [INSUMOS], (INSUMOS) e variantes com INSUMOS no nome. */
+const ARM_NORM_PALLET_INSUMOS = 'ARMAZENAGEM POR POSICAO PALLET (INSUMOS)';
+
 /** Nome canónico — H.E, 22h–07h, domingo/feriado e variantes de acento são o mesmo serviço. */
 const ARM_NORM_HORA_EXTRA = 'HORA EXTRA';
 
@@ -46,6 +49,7 @@ const ARM_NORM_READEQUACAO = 'READEQUACAO DE PRODUTOS - POR UNIDADE';
 
 const ARM_SERVICO_DISPLAY_LABELS = {
   [ARM_NORM_PALLET_POS]: 'Armazenagem por posição pallet (Área técnica)',
+  [ARM_NORM_PALLET_INSUMOS]: 'Armazenagem por posição pallet (Insumos)',
   [ARM_NORM_HORA_EXTRA]: 'Hora extra',
   [ARM_NORM_READEQUACAO]: 'Readequação de produtos - Por unidade'
 };
@@ -54,6 +58,8 @@ const ARM_SERVICO_DISPLAY_LABELS = {
 const ARM_NORM_ALIASES = {
   'ARMAZENAGEM POR POSICAO PALLET [AG/AT]': ARM_NORM_PALLET_POS,
   'ARMAZENAGEM POR POSICAO PALLET': ARM_NORM_PALLET_POS,
+  'ARMAZENAGEM POR POSICAO PALLET [INSUMOS]': ARM_NORM_PALLET_INSUMOS,
+  'ARMAZENAGEM POR POSICAO PALLET (INSUMOS)': ARM_NORM_PALLET_INSUMOS,
   'HORA EXTRA - DOMINGO E FERIADO - HE': ARM_NORM_HORA_EXTRA,
   'HORA EXTRA - DOMINGO E FERIADO': ARM_NORM_HORA_EXTRA,
   'H.E - DOMINGO E FERIADO': ARM_NORM_HORA_EXTRA,
@@ -68,6 +74,7 @@ const ARM_NORM_ALIASES = {
 const ARM_DEFAULT_SERVICOS = [
   'PERCENTUAL SOBRE NF EXPEDIDA',
   ARM_NORM_PALLET_POS,
+  ARM_NORM_PALLET_INSUMOS,
   'ARMAZENAGEM EXCEDENTE',
   ARM_NORM_HORA_EXTRA,
   'ETIQUETAGEM POR UNIDADE',
@@ -79,6 +86,7 @@ const ARM_DEFAULT_SERVICOS = [
 const CATALOGO_DESPESAS = [
   { id: 'nf_percentual', label: '5,5% sobre NF expedida' },
   { id: 'armazenagem', label: 'Armazenagem' },
+  { id: 'armazenagem_insumos', label: 'Armazenagem (Insumos)' },
   { id: 'hora_extra', label: 'Hora extra' },
   { id: 'etiquetagem', label: 'Etiquetagem' },
   { id: 'readequacao', label: 'Readequação de produtos' },
@@ -247,7 +255,8 @@ function normalizeServicoName(raw) {
   if (/^ARMAZENAGEM\s+EXCEDENTE/.test(u)) {
     return 'ARMAZENAGEM EXCEDENTE';
   }
-  if (/^ARMAZENAGEM\s+POR\s+POSICAO\s+PALLET(\s*\[[^\]]+\])?/.test(u)) {
+  if (/^ARMAZENAGEM\s+POR\s+POSICAO\s+PALLET/.test(u)) {
+    if (/\bINSUMOS\b/.test(u)) return ARM_NORM_PALLET_INSUMOS;
     return ARM_NORM_PALLET_POS;
   }
   if (/READEQUA/.test(u)) return ARM_NORM_READEQUACAO;
@@ -396,6 +405,7 @@ function saveCatalogOverrides() {
 function guessCatalogCategory(normName) {
   const n = normalizeServicoName(normName);
   if (n === 'PERCENTUAL SOBRE NF EXPEDIDA') return { id: 'nf_percentual', sure: true };
+  if (n === ARM_NORM_PALLET_INSUMOS) return { id: 'armazenagem_insumos', sure: true };
   if (/ARMAZENAGEM/.test(n)) return { id: 'armazenagem', sure: true };
   if (n === ARM_NORM_HORA_EXTRA || isHoraExtraVariant(n)) return { id: 'hora_extra', sure: true };
   if (/ETIQUETAGEM/.test(n)) return { id: 'etiquetagem', sure: true };
