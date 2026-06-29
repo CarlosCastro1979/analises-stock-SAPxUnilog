@@ -1,5 +1,5 @@
-// armazem.js v1.0.29
-const ARMAZEM_JS_VERSION = '1.0.29';
+// armazem.js v1.0.31
+const ARMAZEM_JS_VERSION = '1.0.31';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -27,7 +27,6 @@ const ARM_VENDAS_CACHE_MS = 60_000;
 let armCatalogOverrides = {};
 let armSorts = {
   mensal: { col: 'mesKey', dir: 1 },
-  comparativo: { col: 'mesKey', dir: 1 },
   acumulado: { col: 'valor', dir: -1 },
   nf: { col: 'nf', dir: 1 },
   nfUpload: { col: 'nf', dir: 1 },
@@ -310,9 +309,7 @@ function armFmtResumoUnit(v, isNf, unitVaries) {
 
 function armResumoRowHtml(s, opts) {
   const isNf = !!s.isNf;
-  const nome = opts?.useNorm
-    ? armServicoDisplayLabel(s.normName)
-    : (s.rawName || s.normName);
+  const nome = armServicoDisplayLabel(s.normName || s.rawName);
   return `<tr>
     <td>${armEsc(nome)}</td>
     <td class="right">${armFmtResumoQty(s.qtde, isNf)}</td>
@@ -1158,6 +1155,11 @@ function armNormalizeMonth(m) {
     })));
   }
   armRepairNfServico(m);
+  if (m.vendasLiq != null && m.vendasLiq !== '') {
+    const vl = armNum(m.vendasLiq);
+    if (vl > 0) m.vendasLiq = vl;
+    else delete m.vendasLiq;
+  }
   return m;
 }
 
@@ -1306,6 +1308,27 @@ function armRepairNfServico(month) {
   }
 }
 
+function armGetVendasLiq(month) {
+  const v = armNum(month?.vendasLiq);
+  return v > 0 ? v : null;
+}
+
+async function armSetVendasLiq(mesKey, rawVal) {
+  const val = armNum(rawVal);
+  const pack = armEnsurePack();
+  const month = (pack.months || []).find(m => m.mesKey === mesKey);
+  if (!month) return;
+  const prev = armGetVendasLiq(month) || 0;
+  if (val === prev) return;
+  if (val > 0) month.vendasLiq = val;
+  else delete month.vendasLiq;
+  month.vendasLiqUpdatedAt = new Date().toISOString();
+  pack.updatedAt = new Date().toISOString();
+  const saved = await persistArmPack(pack);
+  if (saved) armToast('Vendas Liq guardadas.');
+  if (armActiveTab === 'mensal') renderArmMensal();
+}
+
 function armGetNfBase(month) {
   const fromServico = armNfBaseFromServico(armFindNfServico(month));
   const nfSum = (month?.nfRows || []).reduce((a, r) => a + armNum(r.valorNF), 0);
@@ -1388,123 +1411,6 @@ function armVendasForMes(vendasPack, mesKey) {
 function armInvalidateVendasCache() {
   armVendasCache = null;
   armVendasCacheTs = 0;
-}
-
-function renderArmComparativoTable(months) {
-  const cmpGetters = {
-    mesKey: m => m.mesKey,
-    mesLabel: m => armMesLabel(m),
-    ano: m => (m.mesKey || '').slice(0, 4),
-    nfBase: m => armGetNfBase(m),
-    pago: m => armGetArmazenagemValor(m).pago,
-    impostos: m => armGetMonthImpostos(m),
-    pagoComImp: m => armGetMonthPagoComImp(m),
-    pctSem: m => {
-      const nf = armGetNfBase(m);
-      const p = armGetArmazenagemValor(m).pago;
-      return nf > 0 && p >= 0 ? p / nf : -1;
-    },
-    pctCom: m => {
-      const nf = armGetNfBase(m);
-      const t = armGetMonthPagoComImp(m);
-      return nf > 0 && t >= 0 ? t / nf : -1;
-    }
-  };
-  const sorted = armApplySort(months, 'comparativo', cmpGetters);
-  const byYear = {};
-  sorted.forEach(m => {
-    const y = (m.mesKey || '').slice(0, 4) || '—';
-    if (!byYear[y]) byYear[y] = [];
-    byYear[y].push(m);
-  });
-  const years = Object.keys(byYear).sort();
-
-  let rows = '';
-  const grand = { pago: 0, impostos: 0, pagoComImp: 0, nfBase: 0, hasNfBase: false };
-
-  years.forEach(year => {
-    rows += `<tr class="arm-year-header"><td colspan="8"><strong>${armEsc(year)}</strong></td></tr>`;
-    const yt = { pago: 0, impostos: 0, pagoComImp: 0, nfBase: 0, hasNfBase: false };
-    byYear[year].forEach(m => {
-      const arm = armGetArmazenagemValor(m);
-      const nfBase = armGetNfBase(m);
-      const imp = armGetMonthImpostos(m);
-      const pagoComImp = armGetMonthPagoComImp(m);
-      const pctSem = armFmtPctGasto(arm.pago, nfBase);
-      const pctCom = armFmtPctGasto(pagoComImp, nfBase);
-      const mesNome = armMesLabel(m);
-      const ano = (m.mesKey || '').slice(0, 4) || '—';
-      yt.pago += arm.pago;
-      yt.impostos += imp;
-      yt.pagoComImp += pagoComImp;
-      if (nfBase > 0) {
-        yt.nfBase += nfBase;
-        yt.hasNfBase = true;
-        grand.hasNfBase = true;
-        grand.nfBase += nfBase;
-      }
-      grand.pago += arm.pago;
-      grand.impostos += imp;
-      grand.pagoComImp += pagoComImp;
-      rows += `<tr class="arm-comparativo-month">
-        <td class="arm-col-mes">${armEsc(mesNome)}</td>
-        <td class="arm-col-ano">${armEsc(ano)}</td>
-        <td class="right arm-col-num">${nfBase > 0 ? armFmtMoney(nfBase) : '—'}</td>
-        <td class="right arm-col-num">${arm.pago > 0 ? armFmtMoney(arm.pago) : '—'}</td>
-        <td class="right arm-col-num">${imp > 0 ? armFmtMoney(imp) : '—'}</td>
-        <td class="right arm-col-num">${pagoComImp > 0 ? armFmtMoney(pagoComImp) : '—'}</td>
-        <td class="right arm-col-pct" title="Pago sem impostos ÷ NF base">${pctSem}</td>
-        <td class="right arm-col-pct" title="(Pago + impostos) ÷ NF base">${pctCom}</td>
-      </tr>`;
-    });
-    const yPctSem = armFmtPctGasto(yt.pago, yt.hasNfBase ? yt.nfBase : null);
-    const yPctCom = armFmtPctGasto(yt.pagoComImp, yt.hasNfBase ? yt.nfBase : null);
-    rows += `<tr class="arm-year-subtotal arm-resumo-subtotal">
-      <td colspan="2"><strong>Subtotal ${armEsc(year)}</strong></td>
-      <td class="right"><strong>${yt.hasNfBase ? armFmtMoney(yt.nfBase) : '—'}</strong></td>
-      <td class="right"><strong>${yt.pago > 0 ? armFmtMoney(yt.pago) : '—'}</strong></td>
-      <td class="right"><strong>${yt.impostos > 0 ? armFmtMoney(yt.impostos) : '—'}</strong></td>
-      <td class="right"><strong>${yt.pagoComImp > 0 ? armFmtMoney(yt.pagoComImp) : '—'}</strong></td>
-      <td class="right"><strong>${yPctSem}</strong></td>
-      <td class="right"><strong>${yPctCom}</strong></td>
-    </tr>`;
-  });
-
-  const gPctSem = armFmtPctGasto(grand.pago, grand.hasNfBase ? grand.nfBase : null);
-  const gPctCom = armFmtPctGasto(grand.pagoComImp, grand.hasNfBase ? grand.nfBase : null);
-  rows += `<tr class="arm-comparativo-total arm-resumo-subtotal">
-    <td colspan="2"><strong>Total geral</strong></td>
-    <td class="right"><strong>${grand.hasNfBase ? armFmtMoney(grand.nfBase) : '—'}</strong></td>
-    <td class="right"><strong>${grand.pago > 0 ? armFmtMoney(grand.pago) : '—'}</strong></td>
-    <td class="right"><strong>${grand.impostos > 0 ? armFmtMoney(grand.impostos) : '—'}</strong></td>
-    <td class="right"><strong>${grand.pagoComImp > 0 ? armFmtMoney(grand.pagoComImp) : '—'}</strong></td>
-    <td class="right"><strong>${gPctSem}</strong></td>
-    <td class="right"><strong>${gPctCom}</strong></td>
-  </tr>`;
-
-  return `
-    <div class="section-title" style="margin-top:0;">Armazenagem vs Vendas (mensal)</div>
-    <p class="arm-comparativo-note">Vendas = base NF expedida (linha % sobre NF ou soma NFs validadas). Pago = subtotal serviços sem impostos. <strong>Total pago (c/ impostos)</strong> = pago + impostos (gross-up Unilog). <strong>% s/ vendas</strong> = pago ÷ vendas. <strong>% c/ impostos</strong> = total pago ÷ vendas.</p>
-    <div class="tbl-wrap arm-comparativo-wrap">
-      <table id="arm-comparativoTbl" class="arm-comparativo-tbl" data-managed-sort="arm">
-        <colgroup>
-          <col class="arm-col-mes"><col class="arm-col-ano">
-          <col class="arm-col-num"><col class="arm-col-num"><col class="arm-col-num"><col class="arm-col-num">
-          <col class="arm-col-pct"><col class="arm-col-pct">
-        </colgroup>
-        <thead><tr>
-          ${sortTh('comparativo', 'mesLabel', 'Mês', 'arm-col-mes')}
-          ${sortTh('comparativo', 'ano', 'Ano', 'right arm-col-ano')}
-          ${sortTh('comparativo', 'nfBase', 'Vendas (NF base)', 'right arm-col-num')}
-          ${sortTh('comparativo', 'pago', 'Pago (s/ impostos)', 'right arm-col-num')}
-          ${sortTh('comparativo', 'impostos', 'Impostos', 'right arm-col-num')}
-          ${sortTh('comparativo', 'pagoComImp', 'Total pago (c/ impostos)', 'right arm-col-num')}
-          ${sortTh('comparativo', 'pctSem', '% s/ vendas', 'right arm-col-pct')}
-          ${sortTh('comparativo', 'pctCom', '% c/ impostos', 'right arm-col-pct')}
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
 }
 
 function renderArmResumoSections(months) {
@@ -2064,6 +1970,18 @@ function mergeArmPack(prev, next) {
   }
   const replaceMes = new Set();
   const replaceFile = new Set();
+  const prevByKey = new Map();
+  prev.months.forEach(m => {
+    const mk = String(m.mesKey || '').trim();
+    if (/^\d{4}-\d{2}$/.test(mk)) prevByKey.set(mk, m);
+  });
+  next.months = (next.months || []).map(m => {
+    const prevM = prevByKey.get(m.mesKey);
+    if (prevM && armGetVendasLiq(prevM) && !armGetVendasLiq(m)) {
+      return { ...m, vendasLiq: prevM.vendasLiq, vendasLiqUpdatedAt: prevM.vendasLiqUpdatedAt || '' };
+    }
+    return m;
+  });
   next.months.forEach(m => {
     const mk = String(m.mesKey || '').trim();
     if (/^\d{4}-\d{2}$/.test(mk)) replaceMes.add(mk);
@@ -2118,6 +2036,8 @@ function slimArmPackForPersist(pack) {
       valorApurado: n.valorApurado, valorTotal: n.valorTotal, belowMin: n.belowMin,
       impostos: armNum(n.impostos),
       impostosManual: !!n.impostosManual,
+      vendasLiq: armGetVendasLiq(n) || undefined,
+      vendasLiqUpdatedAt: n.vendasLiqUpdatedAt || '',
       entrySource: n.entrySource || (n.format === 'manual' ? 'manual' : 'excel'),
       manualUpdatedAt: n.manualUpdatedAt || '',
       servicos: n.servicos, nfRows: n.nfRows, adicionais: n.adicionais,
@@ -2331,27 +2251,46 @@ function renderArmMensal() {
   if (empty) empty.style.display = 'none';
   if (content) content.style.display = 'block';
 
-  const below = months.filter(m => m.belowMin).length;
-  const total = months.reduce((s, m) => s + m.totalServicos, 0);
+  const totalPago = months.reduce((s, m) => s + armGetArmazenagemValor(m).pago, 0);
+  const totalComImp = months.reduce((s, m) => s + armGetMonthPagoComImp(m), 0);
+  const totalAdicionais = months.reduce((s, m) => s + (m.adicionais || []).reduce((a, x) => a + x.valor, 0), 0);
+  const pctRows = months.filter(m => armGetNfBase(m) > 0);
+  const avgArmPct = pctRows.length
+    ? pctRows.reduce((s, m) => s + armGetArmazenagemValor(m).pago / armGetNfBase(m), 0) / pctRows.length * 100
+    : null;
   const kpis = $arm('mensalKpis');
   if (kpis) {
     kpis.innerHTML = `
       <div class="kpi"><div class="label">Meses</div><div class="value">${months.length}</div></div>
-      <div class="kpi"><div class="label">Total serviços</div><div class="value">${armFmtMoney(total)}</div></div>
-      <div class="kpi${below ? ' flag' : ''}"><div class="label">Meses &lt; mínimo</div><div class="value">${below}</div><div class="sub">Mín. ${armFmtMoney(ARM_MINIMO_CONTRATUAL)}</div></div>
-      <div class="kpi"><div class="label">NFs 5,5%</div><div class="value">${months.reduce((s, m) => s + (m.nfRows?.length || 0), 0)}</div></div>`;
+      <div class="kpi"><div class="label">Total pago (s/ imp.)</div><div class="value">${armFmtMoney(totalPago)}</div></div>
+      <div class="kpi"><div class="label">Total pago (c/ imp.)</div><div class="value">${armFmtMoney(totalComImp)}</div></div>
+      <div class="kpi"><div class="label">Adicionais</div><div class="value">${armFmtMoney(totalAdicionais)}</div></div>
+      <div class="kpi"><div class="label">Média armazenagem %</div><div class="value">${avgArmPct != null ? fmtArmPct(avgArmPct, 2) : '—'}</div><div class="sub">Pago s/ imp. ÷ NF base</div></div>`;
   }
 
   const rows = armApplySort(months, 'mensal', {
     mesKey: r => r.mesKey,
     mesLabel: r => armMesLabel(r),
-    totalServicos: r => r.totalServicos,
+    totalServicos: r => armGetArmazenagemValor(r).pago,
     impostos: r => armGetMonthImpostos(r),
     pagoComImp: r => armGetMonthPagoComImp(r),
-    valorMinimo: r => r.valorMinimo,
-    belowMin: r => r.belowMin ? 1 : 0,
-    nfCount: r => r.nfRows?.length || 0,
-    adicionais: r => (r.adicionais || []).reduce((s, a) => s + a.valor, 0)
+    adicionais: r => (r.adicionais || []).reduce((s, a) => s + a.valor, 0),
+    armazenagemPct: r => {
+      const nf = armGetNfBase(r);
+      const p = armGetArmazenagemValor(r).pago;
+      return nf > 0 && p >= 0 ? p / nf : -1;
+    },
+    vendasLiq: r => armGetVendasLiq(r) ?? -1,
+    pctVendasLiq: r => {
+      const vl = armGetVendasLiq(r);
+      const p = armGetArmazenagemValor(r).pago;
+      return vl > 0 && p >= 0 ? p / vl : -1;
+    },
+    pctVendasLiqCom: r => {
+      const vl = armGetVendasLiq(r);
+      const t = armGetMonthPagoComImp(r);
+      return vl > 0 && t >= 0 ? t / vl : -1;
+    }
   });
 
   const body = $arm('mensalBody');
@@ -2359,20 +2298,25 @@ function renderArmMensal() {
     body.innerHTML = rows.map(m => {
       const addVal = (m.adicionais || []).reduce((s, a) => s + a.valor, 0);
       const imp = armGetMonthImpostos(m);
+      const pago = armGetArmazenagemValor(m).pago;
       const pagoComImp = armGetMonthPagoComImp(m);
-      const cls = m.belowMin ? 'month-row-high' : '';
-      const src = m.entrySource === 'manual' ? ' <span class="badge b-ok">Manual</span>' : '';
+      const nfBase = armGetNfBase(m);
+      const armPct = armFmtPctGasto(pago, nfBase);
+      const vendasLiq = armGetVendasLiq(m);
+      const pctVl = armFmtPctGasto(pago, vendasLiq);
+      const pctVlCom = armFmtPctGasto(pagoComImp, vendasLiq);
       const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
-      return `<tr class="${cls}">
-        <td>${armEsc(armMesLabel(m))}${src}</td>
-        <td class="right">${armFmtMoney(m.totalServicos)}</td>
+      const vlDisplay = vendasLiq ? fmtArmNum(vendasLiq, 2) : '';
+      return `<tr>
+        <td>${armEsc(armMesLabel(m))}${partial}</td>
+        <td class="right">${pago > 0 ? armFmtMoney(pago) : '—'}</td>
         <td class="right">${imp > 0 ? armFmtMoney(imp) : '—'}</td>
         <td class="right">${pagoComImp > 0 ? armFmtMoney(pagoComImp) : '—'}</td>
-        <td class="right">${armFmtMoney(m.valorMinimo)}</td>
-        <td>${m.belowMin ? '<span class="badge b-flag">Abaixo mínimo</span>' : '<span class="badge b-ok">OK</span>'}</td>
-        <td class="right">${m.nfRows?.length || 0}${m.nfSkipped ? ' <span class="badge b-warn" title="Detalhe NF omitido">—</span>' : ''}</td>
         <td class="right">${armFmtMoney(addVal)}</td>
-        <td style="font-size:10px;color:var(--muted)">${armEsc(m.fileName)}${partial}</td>
+        <td class="right" title="Pago s/ impostos ÷ NF base (vendas expedidas)">${armPct}</td>
+        <td class="right"><input type="text" class="fi arm-vendas-liq-input" data-mes="${armEsc(m.mesKey)}" value="${armEsc(vlDisplay)}" placeholder="R$ …" onblur="typeof armSetVendasLiq==='function'&&armSetVendasLiq('${armEsc(m.mesKey)}',this.value)" style="width:110px;text-align:right;font-size:11px;padding:4px 6px;"></td>
+        <td class="right" title="Pago s/ impostos ÷ Vendas Liq">${pctVl}</td>
+        <td class="right" title="Total pago c/ impostos ÷ Vendas Liq">${pctVlCom}</td>
       </tr>`;
     }).join('');
   }
@@ -2384,19 +2328,19 @@ function renderArmMensal() {
       ${sortTh('mensal', 'totalServicos', 'Pago (s/ imp.)', 'right')}
       ${sortTh('mensal', 'impostos', 'Impostos', 'right')}
       ${sortTh('mensal', 'pagoComImp', 'Total pago (c/ imp.)', 'right')}
-      ${sortTh('mensal', 'valorMinimo', 'Mínimo contratual', 'right')}
-      ${sortTh('mensal', 'belowMin', 'Alerta')}
-      ${sortTh('mensal', 'nfCount', 'NFs 5,5%', 'right')}
       ${sortTh('mensal', 'adicionais', 'Adicionais', 'right')}
-      <th>Origem</th>`;
+      ${sortTh('mensal', 'armazenagemPct', 'Armazenagem %', 'right')}
+      ${sortTh('mensal', 'vendasLiq', 'Vendas Liq', 'right')}
+      ${sortTh('mensal', 'pctVendasLiq', '% s/ vendas liq', 'right')}
+      ${sortTh('mensal', 'pctVendasLiqCom', '% c/ imp. s/ vendas liq', 'right')}`;
   }
+  if (typeof scheduleTableSort === 'function') scheduleTableSort();
 }
 
 async function renderArmAcumulado() {
   const empty = $arm('acumuladoEmpty');
   const content = $arm('acumuladoContent');
   const sections = $arm('acumuladoSections');
-  const comparativo = $arm('acumuladoComparativo');
   const months = armNormalizePackMonths({ months: armPack?.months || [] }).months;
   if (!months.length) {
     if (empty) empty.style.display = 'block';
@@ -2407,7 +2351,6 @@ async function renderArmAcumulado() {
   if (content) content.style.display = 'block';
 
   if (sections) sections.innerHTML = renderArmResumoSections(months);
-  if (comparativo) comparativo.innerHTML = renderArmComparativoTable(months);
   if (typeof scheduleColResize === 'function') scheduleColResize();
 }
 
@@ -2832,16 +2775,23 @@ function exportArmazemWorkbook() {
   );
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(totalAoa), 'Total');
 
-  const mensal = months.map(m => ({
-    Mes: armMesLabel(m), Total: m.totalServicos,
-    Impostos: armGetMonthImpostos(m),
-    TotalComImpostos: armGetMonthPagoComImp(m),
-    Minimo: m.valorMinimo,
-    AbaixoMinimo: m.belowMin ? 'SIM' : 'NÃO',
-    NFs: m.nfRows?.length || 0,
-    Adicionais: (m.adicionais || []).reduce((s, a) => s + a.valor, 0),
-    Ficheiro: m.fileName
-  }));
+  const mensal = months.map(m => {
+    const pago = armGetArmazenagemValor(m).pago;
+    const nfBase = armGetNfBase(m);
+    const vendasLiq = armGetVendasLiq(m);
+    const pagoComImp = armGetMonthPagoComImp(m);
+    return {
+      Mes: armMesLabel(m),
+      PagoSemImpostos: pago,
+      Impostos: armGetMonthImpostos(m),
+      TotalComImpostos: pagoComImp,
+      Adicionais: (m.adicionais || []).reduce((s, a) => s + a.valor, 0),
+      ArmazenagemPct: nfBase > 0 ? pago / nfBase : '',
+      VendasLiq: vendasLiq || '',
+      PctSobreVendasLiq: vendasLiq > 0 ? pago / vendasLiq : '',
+      PctComImpSobreVendasLiq: vendasLiq > 0 ? pagoComImp / vendasLiq : ''
+    };
+  });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mensal), 'Visão mensal');
 
   const nfs = months.flatMap(m => (m.nfRows || []).map(r => ({
@@ -2971,6 +2921,7 @@ function initArmazem() {
 
 window.initArmazem = initArmazem;
 window.refreshArmazemSapValidation = refreshArmazemSapValidation;
+window.armSetVendasLiq = armSetVendasLiq;
 window.armEnsureSapLoaded = armEnsureSapLoaded;
 window.armOnFileSelected = armOnFileSelected;
 window.processArmFiles = processArmFiles;
