@@ -1,5 +1,5 @@
-// armazem.js v1.0.27
-const ARMAZEM_JS_VERSION = '1.0.27';
+// armazem.js v1.0.28
+const ARMAZEM_JS_VERSION = '1.0.28';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -21,6 +21,7 @@ let armActiveTab = 'lancamento';
 let armVendasCache = null;
 let armVendasCacheTs = 0;
 let armLancamentoDraft = null;
+let armLancamentoSummaryTimer = null;
 let armNfUploadRows = [];
 const ARM_VENDAS_CACHE_MS = 60_000;
 let armCatalogOverrides = {};
@@ -653,9 +654,9 @@ function armLancamentoRowHtml(s, idx) {
   const unitVal = isNf ? fmtArmPct(ARM_NF_RATE * 100) : fmtArmNum(s.valorUnit, 2);
   const unitReadonly = isNf ? 'readonly tabindex="-1"' : '';
   return `<tr class="arm-entry-row" data-idx="${idx}">
-    <td><select data-field="servico" onchange="armLancamentoRowChange(${idx})">${armServiceSelectOptions(s.rawName || s.normName)}</select></td>
-    <td class="right"><input type="text" data-field="qtde" value="${armEsc(qtyVal)}" oninput="armLancamentoRowChange(${idx})" style="text-align:right;"></td>
-    <td class="right"><input type="text" data-field="unit" value="${armEsc(unitVal)}" ${unitReadonly} oninput="armLancamentoRowChange(${idx})" style="text-align:right;"></td>
+    <td><select data-field="servico" onchange="armLancamentoServicoChange(${idx})">${armServiceSelectOptions(s.rawName || s.normName)}</select></td>
+    <td class="right"><input type="text" data-field="qtde" value="${armEsc(qtyVal)}" oninput="armLancamentoRowPreview(${idx})" onblur="armLancamentoRowCommit(${idx})" style="text-align:right;"></td>
+    <td class="right"><input type="text" data-field="unit" value="${armEsc(unitVal)}" ${unitReadonly} oninput="armLancamentoRowPreview(${idx})" onblur="armLancamentoRowCommit(${idx})" style="text-align:right;"></td>
     <td class="right arm-val-calc">${armFmtMoney(s.valor || 0)}</td>
     <td><button type="button" class="btn bg bs" style="padding:2px 6px;font-size:10px;" onclick="armLancamentoRemoveRow(${idx})" title="Remover">✕</button></td>
   </tr>`;
@@ -720,15 +721,64 @@ function armRefreshLancamentoSummary() {
   }
 }
 
-function armLancamentoRowChange(idx) {
-  if (!armLancamentoDraft?.servicos?.[idx]) return;
+function armLancamentoRowValues(idx) {
   const row = document.querySelector(`#arm-lancEntryBody tr[data-idx="${idx}"]`);
-  if (!row) return;
-  const rawName = row.querySelector('[data-field=servico]')?.value || '';
-  const qtde = row.querySelector('[data-field=qtde]')?.value;
-  const unit = row.querySelector('[data-field=unit]')?.value;
-  armLancamentoDraft.servicos[idx] = armBuildServicoFromEntry(rawName, qtde, unit);
-  renderArmLancamentoForm();
+  if (!row) return null;
+  return {
+    row,
+    rawName: row.querySelector('[data-field=servico]')?.value || '',
+    qtde: row.querySelector('[data-field=qtde]')?.value,
+    unit: row.querySelector('[data-field=unit]')?.value
+  };
+}
+
+/** Live preview while typing — updates draft + valor cell, never re-renders inputs. */
+function armLancamentoRowPreview(idx) {
+  if (!armLancamentoDraft?.servicos?.[idx]) return;
+  const vals = armLancamentoRowValues(idx);
+  if (!vals) return;
+  armLancamentoDraft.servicos[idx] = armBuildServicoFromEntry(vals.rawName, vals.qtde, vals.unit);
+  const s = armLancamentoDraft.servicos[idx];
+  const valCell = vals.row.querySelector('.arm-val-calc');
+  if (valCell) valCell.textContent = armFmtMoney(s.valor || 0);
+  clearTimeout(armLancamentoSummaryTimer);
+  armLancamentoSummaryTimer = setTimeout(armRefreshLancamentoSummary, 120);
+}
+
+/** Parse row on blur — format inputs, refresh summary; no full table re-render. */
+function armLancamentoRowCommit(idx) {
+  if (!armLancamentoDraft?.servicos?.[idx]) return;
+  const vals = armLancamentoRowValues(idx);
+  if (!vals) return;
+  clearTimeout(armLancamentoSummaryTimer);
+  armLancamentoDraft.servicos[idx] = armBuildServicoFromEntry(vals.rawName, vals.qtde, vals.unit);
+  const s = armLancamentoDraft.servicos[idx];
+  const qtInp = vals.row.querySelector('[data-field=qtde]');
+  const unitInp = vals.row.querySelector('[data-field=unit]');
+  if (qtInp) qtInp.value = fmtArmNum(s.qtde, 2);
+  if (unitInp && !s.isNf) unitInp.value = fmtArmNum(s.valorUnit, 2);
+  else if (unitInp && s.isNf) unitInp.value = fmtArmPct(ARM_NF_RATE * 100);
+  const valCell = vals.row.querySelector('.arm-val-calc');
+  if (valCell) valCell.textContent = armFmtMoney(s.valor || 0);
+  armRefreshLancamentoSummary();
+}
+
+/** Serviço change may toggle NF unit readonly — re-render that row only. */
+function armLancamentoServicoChange(idx) {
+  armLancamentoRowCommit(idx);
+  const draft = armLancamentoDraft;
+  const body = $arm('lancEntryBody');
+  if (!body || !draft?.servicos?.[idx]) return;
+  const oldRow = body.querySelector(`tr[data-idx="${idx}"]`);
+  if (!oldRow) return;
+  const tmp = document.createElement('tbody');
+  tmp.innerHTML = armLancamentoRowHtml(draft.servicos[idx], idx);
+  oldRow.replaceWith(tmp.firstElementChild);
+  if (typeof scheduleTableSort === 'function') scheduleTableSort();
+}
+
+function armLancamentoRowChange(idx) {
+  armLancamentoRowCommit(idx);
 }
 
 function armLancamentoAddRow() {
@@ -767,12 +817,24 @@ function armLancamentoAddCustomService() {
   armToast(`Serviço «${norm}» adicionado ao catálogo.`, 'success');
 }
 
+function armLancamentoCommitAllRows() {
+  const draft = armLancamentoDraft;
+  if (!draft?.servicos?.length) return;
+  clearTimeout(armLancamentoSummaryTimer);
+  draft.servicos.forEach((_, idx) => {
+    const vals = armLancamentoRowValues(idx);
+    if (!vals) return;
+    draft.servicos[idx] = armBuildServicoFromEntry(vals.rawName, vals.qtde, vals.unit);
+  });
+}
+
 async function armSaveLancamento() {
   if (armCompany() !== 'DFB') {
     armToast('Avaliação Armazém disponível apenas para DFB.', 'error');
     return;
   }
   if (!armLancamentoDraft) armLoadLancamentoDraft();
+  armLancamentoCommitAllRows();
   const draft = armLancamentoDraft;
   if (!draft?.mesKey) {
     armToast('Seleciona mês de referência.', 'error');
@@ -2907,6 +2969,9 @@ window.armSetCatalog = armSetCatalog;
 window.exportArmazemWorkbook = exportArmazemWorkbook;
 window.armInvalidateVendasCache = armInvalidateVendasCache;
 window.armLancamentoRowChange = armLancamentoRowChange;
+window.armLancamentoRowPreview = armLancamentoRowPreview;
+window.armLancamentoRowCommit = armLancamentoRowCommit;
+window.armLancamentoServicoChange = armLancamentoServicoChange;
 window.armLancamentoRemoveRow = armLancamentoRemoveRow;
 window.armLancamentoAddRow = armLancamentoAddRow;
 window.armLancamentoAddCustomService = armLancamentoAddCustomService;
