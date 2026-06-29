@@ -1,5 +1,5 @@
 // armazem.js v1.0.31
-const ARMAZEM_JS_VERSION = '1.0.31';
+const ARMAZEM_JS_VERSION = '1.0.32';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -1327,6 +1327,7 @@ async function armSetVendasLiq(mesKey, rawVal) {
   const saved = await persistArmPack(pack);
   if (saved) armToast('Vendas Liq guardadas.');
   if (armActiveTab === 'mensal') renderArmMensal();
+  if (armActiveTab === 'adicionais') renderArmAdicionais();
 }
 
 function armGetNfBase(month) {
@@ -2451,17 +2452,102 @@ function renderArmNf() {
   }
 }
 
+function armMesShortLabel(mesKey) {
+  const m = String(mesKey || '').match(/^(\d{4})-(\d{2})$/);
+  if (!m) return mesKey || '—';
+  const mi = parseInt(m[2], 10);
+  return (ARM_MESES_NOME[mi] || m[2]).slice(0, 3);
+}
+
+function armAdicionaisPivotServices(months) {
+  const byNorm = new Map();
+  months.forEach(m => {
+    (m.adicionais || []).forEach(a => {
+      const norm = a.normName || normalizeServicoName(a.rawName);
+      if (!byNorm.has(norm)) {
+        byNorm.set(norm, {
+          normName: norm,
+          displayLabel: armServicoDisplayLabel(norm),
+          byMes: {}
+        });
+      }
+      const svc = byNorm.get(norm);
+      svc.byMes[m.mesKey] = (svc.byMes[m.mesKey] || 0) + armNum(a.valor);
+    });
+  });
+  return byNorm;
+}
+
+function renderArmAdicionaisMatrixHtml(year, mesKeys, monthsByKey, services) {
+  const monthCells = mesKeys.map(mk => {
+    const m = monthsByKey.get(mk);
+    const title = armEsc(armMesNomeLong(mk, m ? armMesLabel(m) : ''));
+    return `<th class="right" title="${title}">${armEsc(armMesShortLabel(mk))}</th>`;
+  }).join('');
+
+  const serviceRows = services.map(svc => {
+    let rowTotal = 0;
+    const cells = mesKeys.map(mk => {
+      const v = svc.byMes[mk] || 0;
+      if (v > 0) rowTotal += v;
+      return `<td class="right">${v > 0 ? armFmtMoney(v) : '—'}</td>`;
+    }).join('');
+    return `<tr>
+      <td>${armEsc(svc.displayLabel)}</td>
+      ${cells}
+      <td class="right arm-ad-subtotal-col">${rowTotal > 0 ? armFmtMoney(rowTotal) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  let vlYearTotal = 0;
+  const vlCells = mesKeys.map(mk => {
+    const vl = armGetVendasLiq(monthsByKey.get(mk));
+    if (vl) vlYearTotal += vl;
+    return `<td class="right">${vl ? armFmtMoney(vl) : '—'}</td>`;
+  }).join('');
+
+  let grandTotal = 0;
+  const totalCells = mesKeys.map(mk => {
+    let colTotal = 0;
+    services.forEach(svc => { colTotal += svc.byMes[mk] || 0; });
+    grandTotal += colTotal;
+    return `<td class="right">${colTotal > 0 ? armFmtMoney(colTotal) : '—'}</td>`;
+  }).join('');
+
+  return `<div class="arm-adicionais-year arm-resumo-year">
+    <div class="section-title arm-resumo-year-title">${armEsc(year)}</div>
+    <div class="tbl-wrap">
+      <table class="arm-adicionais-matrix" data-managed-sort="1">
+        <thead><tr>
+          <th>Serviço</th>
+          ${monthCells}
+          <th class="right arm-ad-subtotal-col">Total</th>
+        </tr></thead>
+        <tbody>
+          ${serviceRows}
+          <tr class="arm-ad-vl-row">
+            <td>Vendas Liq</td>
+            ${vlCells}
+            <td class="right arm-ad-subtotal-col">${vlYearTotal > 0 ? armFmtMoney(vlYearTotal) : '—'}</td>
+          </tr>
+          <tr class="arm-ad-total-row">
+            <td>Total adicionais</td>
+            ${totalCells}
+            <td class="right arm-ad-subtotal-col">${grandTotal > 0 ? armFmtMoney(grandTotal) : '—'}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
 function renderArmAdicionais() {
   const empty = $arm('adicionaisEmpty');
   const content = $arm('adicionaisContent');
+  const sections = $arm('adicionaisSections');
   const months = armPack?.months || [];
-  const rows = [];
-  months.forEach(m => {
-    (m.adicionais || []).forEach(a => {
-      rows.push({ ...a, mesKey: m.mesKey, mesLabel: armMesLabel(m), fileName: m.fileName });
-    });
-  });
-  if (!rows.length) {
+  const hasAdicionais = months.some(m => (m.adicionais || []).length > 0);
+  if (!hasAdicionais) {
     if (empty) empty.style.display = 'block';
     if (content) content.style.display = 'none';
     return;
@@ -2469,46 +2555,28 @@ function renderArmAdicionais() {
   if (empty) empty.style.display = 'none';
   if (content) content.style.display = 'block';
 
-  const filterMes = $arm('adFilterMes')?.value || '';
-  let filtered = filterMes ? rows.filter(r => r.mesKey === filterMes) : rows;
-  filtered = armApplySort(filtered, 'adicionais', {
-    mesLabel: r => r.mesLabel,
-    normName: r => r.normName,
-    valor: r => r.valor,
-    qtde: r => r.qtde
+  const serviceMap = armAdicionaisPivotServices(months);
+  const byYear = {};
+  months.forEach(m => {
+    const y = (m.mesKey || '').slice(0, 4);
+    if (!/^\d{4}$/.test(y)) return;
+    if (!byYear[y]) byYear[y] = { mesKeys: new Set(), monthsByKey: new Map() };
+    byYear[y].mesKeys.add(m.mesKey);
+    byYear[y].monthsByKey.set(m.mesKey, m);
   });
 
-  const mesSel = $arm('adFilterMes');
-  if (mesSel && !mesSel._armBound) {
-    mesSel._armBound = true;
-    mesSel.innerHTML = '<option value="">Todos os meses</option>' +
-      months.map(m => `<option value="${armEsc(m.mesKey)}">${armEsc(armMesLabel(m))}</option>`).join('');
-    mesSel.addEventListener('change', renderArmAdicionais);
-  }
+  const html = Object.keys(byYear).sort().map(year => {
+    const { mesKeys, monthsByKey } = byYear[year];
+    const sortedMesKeys = [...mesKeys].sort();
+    const yearServices = [...serviceMap.values()]
+      .filter(s => sortedMesKeys.some(mk => (s.byMes[mk] || 0) > 0))
+      .sort((a, b) => a.displayLabel.localeCompare(b.displayLabel, 'pt'));
+    if (!yearServices.length) return '';
+    return renderArmAdicionaisMatrixHtml(year, sortedMesKeys, monthsByKey, yearServices);
+  }).filter(Boolean).join('');
 
-  const thead = $arm('adicionaisHead');
-  if (thead) {
-    thead.innerHTML = `
-      ${sortTh('adicionais', 'mesLabel', 'Mês')}
-      ${sortTh('adicionais', 'normName', 'Serviço')}
-      <th>Catálogo</th>
-      ${sortTh('adicionais', 'qtde', 'Qtde', 'right')}
-      ${sortTh('adicionais', 'valor', 'Valor', 'right')}`;
-  }
-
-  const body = $arm('adicionaisBody');
-  if (body) {
-    body.innerHTML = filtered.map(r => {
-      const cat = resolveCatalogCategory(r.rawName);
-      return `<tr>
-        <td>${armEsc(r.mesLabel)}</td>
-        <td>${armEsc(r.normName)}</td>
-        <td>${armEsc(catalogLabel(cat.id))}${cat.sure ? '' : ' <span class="badge b-min">?</span>'}</td>
-        <td class="right">${fmtArmQty(r.qtde)}</td>
-        <td class="right">${armFmtMoney(r.valor)}</td>
-      </tr>`;
-    }).join('');
-  }
+  if (sections) sections.innerHTML = html;
+  if (typeof scheduleColResize === 'function') scheduleColResize();
 }
 
 function renderArmCatalogo() {

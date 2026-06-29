@@ -371,6 +371,11 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-armazem .arm-typo-total td{background:#f8fafc;font-weight:700;border-top:2px solid var(--border);}
 #page-armazem .arm-lanc-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center;}
 #page-armazem .arm-nf-upload{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);}
+#page-armazem .arm-adicionais-year{margin-bottom:32px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+#page-armazem .arm-adicionais-matrix th:first-child,#page-armazem .arm-adicionais-matrix td:first-child{text-align:left;min-width:200px;max-width:320px;}
+#page-armazem .arm-adicionais-matrix .arm-ad-vl-row td{color:var(--muted);font-style:italic;}
+#page-armazem .arm-adicionais-matrix .arm-ad-total-row td{background:#f8fafc;font-weight:700;border-top:2px solid var(--border);}
+#page-armazem .arm-adicionais-matrix .arm-ad-subtotal-col{border-left:1px solid var(--border);font-weight:600;}
 #page-fretes .empty{text-align:center;padding:40px 16px;color:var(--muted);}
 #page-fretes .cte-detail-table{width:100%;margin-top:6px;}
 #page-fretes .cte-detail-table th{font-size:10px;}
@@ -1876,13 +1881,8 @@ select.cad-inp{cursor:pointer;}
     <div id="arm-tab-adicionais" style="display:none;">
       <div id="arm-adicionaisEmpty" class="empty"><div class="empty-i">➕</div><div>Sem cobranças adicionais (armazenagem, HE, etiquetagem…)</div></div>
       <div id="arm-adicionaisContent" style="display:none;">
-        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Serviços faturados separadamente da taxa 5,5% NF — validação operacional (sem cruzamento SAP).</p>
-        <div class="filters">
-          <select id="arm-adFilterMes"><option value="">Todos os meses</option></select>
-        </div>
-        <div class="tbl-wrap">
-          <table><thead><tr id="arm-adicionaisHead"></tr></thead><tbody id="arm-adicionaisBody"></tbody></table>
-        </div>
+        <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Matriz por ano — serviços adicionais (fora da taxa 5,5% NF). <strong>Vendas Liq</strong> é editável na aba Visão mensal.</p>
+        <div id="arm-adicionaisSections"></div>
       </div>
     </div>
 
@@ -7657,7 +7657,7 @@ function applyResizable(){scheduleColResize();}
 
 </script>
 <script src="fretes.js?v=1.7.13"></script>
-<script src="armazem.js?v=1.0.31" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
+<script src="armazem.js?v=1.0.32" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
 <script>
 if(typeof initArmazem!=='function'){
   const e=document.getElementById('arm-initErr');
