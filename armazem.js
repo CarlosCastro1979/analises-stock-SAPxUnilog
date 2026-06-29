@@ -1,5 +1,5 @@
-// armazem.js v1.0.24
-const ARMAZEM_JS_VERSION = '1.0.24';
+// armazem.js v1.0.26
+const ARMAZEM_JS_VERSION = '1.0.26';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -34,12 +34,34 @@ let armSorts = {
   catalogo: { col: 'servico', dir: 1 }
 };
 
+/** Nome canónico — plain, [AG], [AT], [AREA TECNICA] e [AG/AT] são o mesmo serviço. */
+const ARM_NORM_PALLET_POS = 'ARMAZENAGEM POR POSICAO PALLET (AREA TECNICA)';
+
+/** Nome canónico — H.E, 22h–07h, domingo/feriado e variantes de acento são o mesmo serviço. */
+const ARM_NORM_HORA_EXTRA = 'HORA EXTRA';
+
+const ARM_SERVICO_DISPLAY_LABELS = {
+  [ARM_NORM_PALLET_POS]: 'Armazenagem por posição pallet (Área técnica)',
+  [ARM_NORM_HORA_EXTRA]: 'Hora extra'
+};
+
+/** Chaves legadas de overrides de catálogo → normName actual. */
+const ARM_NORM_ALIASES = {
+  'ARMAZENAGEM POR POSICAO PALLET [AG/AT]': ARM_NORM_PALLET_POS,
+  'ARMAZENAGEM POR POSICAO PALLET': ARM_NORM_PALLET_POS,
+  'HORA EXTRA - DOMINGO E FERIADO - HE': ARM_NORM_HORA_EXTRA,
+  'HORA EXTRA - DOMINGO E FERIADO': ARM_NORM_HORA_EXTRA,
+  'H.E - DOMINGO E FERIADO': ARM_NORM_HORA_EXTRA,
+  'H.E 2A A 6A DE 22HS AS 07HS E AOS SABADOS': ARM_NORM_HORA_EXTRA,
+  '2A A 6A DE 22HS AS 07HS E AOS SABADOS - H.E': ARM_NORM_HORA_EXTRA
+};
+
 /** Catálogo essencial do dropdown (variantes obscuras via «+ novo serviço»). */
 const ARM_DEFAULT_SERVICOS = [
   'PERCENTUAL SOBRE NF EXPEDIDA',
-  'ARMAZENAGEM POR POSICAO PALLET [AG/AT]',
+  ARM_NORM_PALLET_POS,
   'ARMAZENAGEM EXCEDENTE',
-  'HORA EXTRA',
+  ARM_NORM_HORA_EXTRA,
   'ETIQUETAGEM POR UNIDADE',
   'READEQUACAO DE PRODUTOS - POR UNIDADE',
   'DESCARGA DE VEICULO',
@@ -191,10 +213,9 @@ function armNormServicoUpper(raw) {
     .toUpperCase();
 }
 
-function normalizeServicoName(raw, opts) {
+function normalizeServicoName(raw) {
   const u = armNormServicoUpper(raw);
   if (!u) return '';
-  const forTotal = !!(opts && opts.forTotal);
 
   if (/PERCENTUAL\s+SOBRE\s+NF\s+EXPEDID|ARMAZENAGEM\s+POR\s*%|5[,.]5\s*%/.test(u)) {
     return 'PERCENTUAL SOBRE NF EXPEDIDA';
@@ -208,19 +229,23 @@ function normalizeServicoName(raw, opts) {
   if (/^ARMAZENAGEM\s+EXCEDENTE/.test(u)) {
     return 'ARMAZENAGEM EXCEDENTE';
   }
-  const pos = u.match(/^ARMAZENAGEM\s+POR\s+POSICAO\s+PALLET(\s*\[[^\]]+\])?/);
-  if (pos) {
-    const suffix = pos[1] || '';
-    if (forTotal && /\[AG\]|\[AT\]|\[AREA\s+TECNICA\]/.test(suffix)) {
-      return 'ARMAZENAGEM POR POSICAO PALLET [AG/AT]';
-    }
-    return 'ARMAZENAGEM POR POSICAO PALLET' + suffix;
+  if (/^ARMAZENAGEM\s+POR\s+POSICAO\s+PALLET(\s*\[[^\]]+\])?/.test(u)) {
+    return ARM_NORM_PALLET_POS;
   }
   if (/READEQUA/.test(u)) return 'READEQUACAO DE PRODUTOS - POR UNIDADE';
   if (/IMPOSTO|PIS|COFINS|ISS/.test(u)) return 'IMPOSTOS SERVICOS';
 
   // ETIQUETAGEM, DECARGA and other lines: keep distinct names (no cross-type merging).
   return u;
+}
+
+function armServicoDisplayLabel(normOrRaw) {
+  const norm = normalizeServicoName(normOrRaw);
+  return ARM_SERVICO_DISPLAY_LABELS[norm] || norm;
+}
+
+function armCatalogOverrideKey(norm) {
+  return ARM_NORM_ALIASES[norm] || norm;
 }
 
 function armMesNomeLong(mesKey, mesLabel) {
@@ -258,7 +283,9 @@ function armFmtResumoUnit(v, isNf, unitVaries) {
 
 function armResumoRowHtml(s, opts) {
   const isNf = !!s.isNf;
-  const nome = opts?.useNorm ? s.normName : (s.rawName || s.normName);
+  const nome = opts?.useNorm
+    ? armServicoDisplayLabel(s.normName)
+    : (s.rawName || s.normName);
   return `<tr>
     <td>${armEsc(nome)}</td>
     <td class="right">${armFmtResumoQty(s.qtde, isNf)}</td>
@@ -271,7 +298,7 @@ function aggregateResumoByNorm(months) {
   const map = {};
   months.forEach(m => {
     armResumoRows(m).forEach(s => {
-      const norm = normalizeServicoName(s.rawName || s.normName, { forTotal: true });
+      const norm = normalizeServicoName(s.rawName || s.normName);
       if (!norm) return;
       if (!map[norm]) {
         map[norm] = {
@@ -361,7 +388,10 @@ function guessCatalogCategory(normName) {
 
 function resolveCatalogCategory(rawName) {
   const norm = normalizeServicoName(rawName);
-  if (armCatalogOverrides[norm]) return { id: armCatalogOverrides[norm], sure: true, norm, raw: rawName };
+  const overrideKey = armCatalogOverrideKey(norm);
+  if (armCatalogOverrides[overrideKey] || armCatalogOverrides[norm]) {
+    return { id: armCatalogOverrides[overrideKey] || armCatalogOverrides[norm], sure: true, norm, raw: rawName };
+  }
   const g = guessCatalogCategory(norm);
   return { id: g.id, sure: g.sure, norm, raw: rawName };
 }
@@ -592,10 +622,10 @@ function armServiceSelectOptions(selected) {
   const cat = armGetServiceCatalog();
   const selNorm = normalizeServicoName(selected);
   let html = cat.map(name =>
-    `<option value="${armEsc(name)}" ${normalizeServicoName(name) === selNorm ? 'selected' : ''}>${armEsc(name)}</option>`
+    `<option value="${armEsc(name)}" ${normalizeServicoName(name) === selNorm ? 'selected' : ''}>${armEsc(armServicoDisplayLabel(name))}</option>`
   ).join('');
   if (selected && selNorm && !cat.some(n => normalizeServicoName(n) === selNorm)) {
-    html += `<option value="${armEsc(selected)}" selected>${armEsc(selected)}</option>`;
+    html += `<option value="${armEsc(selected)}" selected>${armEsc(armServicoDisplayLabel(selected))}</option>`;
   }
   return html;
 }
@@ -988,6 +1018,40 @@ function armMesLabel(m) {
   return fallback || '—';
 }
 
+function armMergeServicosByNorm(servicos) {
+  const map = new Map();
+  (servicos || []).forEach(s => {
+    const norm = normalizeServicoName(s.rawName || s.normName);
+    if (!norm) return;
+    const prev = map.get(norm);
+    if (!prev) {
+      map.set(norm, { ...s, normName: norm });
+      return;
+    }
+    const q1 = Number(prev.qtde) || 0;
+    const q2 = Number(s.qtde) || 0;
+    const v1 = Number(prev.valor) || 0;
+    const v2 = Number(s.valor) || 0;
+    const u1 = Number(prev.valorUnit) || 0;
+    const u2 = Number(s.valorUnit) || 0;
+    const qtde = q1 + q2;
+    const valor = v1 + v2;
+    let valorUnit = prev.valorUnit;
+    if (!prev.isNf && !s.isNf && qtde > 0 && (u1 || u2)) {
+      valorUnit = ((q1 * u1) + (q2 * u2)) / qtde;
+    }
+    map.set(norm, {
+      ...prev,
+      normName: norm,
+      qtde,
+      valor,
+      valorUnit,
+      isNf: prev.isNf || s.isNf
+    });
+  });
+  return [...map.values()];
+}
+
 function armNormalizeMonth(m) {
   if (!m) return m;
   let mesKey = String(m.mesKey || '').trim();
@@ -998,6 +1062,12 @@ function armNormalizeMonth(m) {
   }
   m.mesKey = mesKey;
   m.mesLabel = armMesLabel({ mesKey, mesLabel: m.mesLabel, fileName: m.fileName });
+  if (m.servicos?.length) {
+    m.servicos = armMergeServicosByNorm(m.servicos.map(s => ({
+      ...s,
+      normName: normalizeServicoName(s.rawName || s.normName)
+    })));
+  }
   armRepairNfServico(m);
   return m;
 }
