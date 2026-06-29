@@ -1,4 +1,4 @@
-// armazem.js v1.0.31
+// armazem.js v1.0.32
 const ARMAZEM_JS_VERSION = '1.0.32';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
