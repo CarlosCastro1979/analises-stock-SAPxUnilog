@@ -1,5 +1,5 @@
-// armazem.js v1.0.26
-const ARMAZEM_JS_VERSION = '1.0.26';
+// armazem.js v1.0.27
+const ARMAZEM_JS_VERSION = '1.0.27';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -40,9 +40,13 @@ const ARM_NORM_PALLET_POS = 'ARMAZENAGEM POR POSICAO PALLET (AREA TECNICA)';
 /** Nome canónico — H.E, 22h–07h, domingo/feriado e variantes de acento são o mesmo serviço. */
 const ARM_NORM_HORA_EXTRA = 'HORA EXTRA';
 
+/** Nome canónico — [8], [8.2], acento e plain são o mesmo serviço. */
+const ARM_NORM_READEQUACAO = 'READEQUACAO DE PRODUTOS - POR UNIDADE';
+
 const ARM_SERVICO_DISPLAY_LABELS = {
   [ARM_NORM_PALLET_POS]: 'Armazenagem por posição pallet (Área técnica)',
-  [ARM_NORM_HORA_EXTRA]: 'Hora extra'
+  [ARM_NORM_HORA_EXTRA]: 'Hora extra',
+  [ARM_NORM_READEQUACAO]: 'Readequação de produtos - Por unidade'
 };
 
 /** Chaves legadas de overrides de catálogo → normName actual. */
@@ -53,7 +57,10 @@ const ARM_NORM_ALIASES = {
   'HORA EXTRA - DOMINGO E FERIADO': ARM_NORM_HORA_EXTRA,
   'H.E - DOMINGO E FERIADO': ARM_NORM_HORA_EXTRA,
   'H.E 2A A 6A DE 22HS AS 07HS E AOS SABADOS': ARM_NORM_HORA_EXTRA,
-  '2A A 6A DE 22HS AS 07HS E AOS SABADOS - H.E': ARM_NORM_HORA_EXTRA
+  '2A A 6A DE 22HS AS 07HS E AOS SABADOS - H.E': ARM_NORM_HORA_EXTRA,
+  'READEQUACAO DE PRODUTOS - POR UNIDADE': ARM_NORM_READEQUACAO,
+  '[8] READEQUACAO DE PRODUTOS - POR UNIDADE': ARM_NORM_READEQUACAO,
+  '[8.2] READEQUACAO DE PRODUTOS - POR UNIDADE': ARM_NORM_READEQUACAO
 };
 
 /** Catálogo essencial do dropdown (variantes obscuras via «+ novo serviço»). */
@@ -63,7 +70,7 @@ const ARM_DEFAULT_SERVICOS = [
   'ARMAZENAGEM EXCEDENTE',
   ARM_NORM_HORA_EXTRA,
   'ETIQUETAGEM POR UNIDADE',
-  'READEQUACAO DE PRODUTOS - POR UNIDADE',
+  ARM_NORM_READEQUACAO,
   'DESCARGA DE VEICULO',
   'CONFERENCIA DE MERCADORIA'
 ];
@@ -213,6 +220,16 @@ function armNormServicoUpper(raw) {
     .toUpperCase();
 }
 
+/** H.E / hora extra — mesma tarifa; variantes de acento, 22h–07h e domingo/feriado. */
+function isHoraExtraVariant(u) {
+  if (/HORA\s+EXTRA/.test(u)) return true;
+  if (/(^|[\s\-])H\.?\s*E([\s\-]|$)/.test(u)) return true;
+  if (/\bHE\b/.test(u) && /DOMINGO|FERIADO|22\s*HS|22HS|HORA|SABADOS?/.test(u)) return true;
+  if (/22\s*HS|22HS/.test(u) && /(07\s*HS|07HS|SABADOS?|\b6\s*A\b)/.test(u)) return true;
+  if (/DOMINGO\s+E\s+FERIADO/.test(u)) return true;
+  return false;
+}
+
 function normalizeServicoName(raw) {
   const u = armNormServicoUpper(raw);
   if (!u) return '';
@@ -220,8 +237,8 @@ function normalizeServicoName(raw) {
   if (/PERCENTUAL\s+SOBRE\s+NF\s+EXPEDID|ARMAZENAGEM\s+POR\s*%|5[,.]5\s*%/.test(u)) {
     return 'PERCENTUAL SOBRE NF EXPEDIDA';
   }
-  if (/HORA\s+EXTRA|^H\.\s*E\b|^H\.E\b|\bHE\b/.test(u)) {
-    return 'HORA EXTRA';
+  if (isHoraExtraVariant(u)) {
+    return ARM_NORM_HORA_EXTRA;
   }
   if (/ARMAZENAGEM\s+EXCEDENTE/.test(u) && /(\bNA\s+AT\b|AREA\s+TECNICA)/.test(u)) {
     return 'ARMAZENAGEM EXCEDENTE NA AT';
@@ -232,7 +249,7 @@ function normalizeServicoName(raw) {
   if (/^ARMAZENAGEM\s+POR\s+POSICAO\s+PALLET(\s*\[[^\]]+\])?/.test(u)) {
     return ARM_NORM_PALLET_POS;
   }
-  if (/READEQUA/.test(u)) return 'READEQUACAO DE PRODUTOS - POR UNIDADE';
+  if (/READEQUA/.test(u)) return ARM_NORM_READEQUACAO;
   if (/IMPOSTO|PIS|COFINS|ISS/.test(u)) return 'IMPOSTOS SERVICOS';
 
   // ETIQUETAGEM, DECARGA and other lines: keep distinct names (no cross-type merging).
@@ -379,9 +396,9 @@ function guessCatalogCategory(normName) {
   const n = normalizeServicoName(normName);
   if (n === 'PERCENTUAL SOBRE NF EXPEDIDA') return { id: 'nf_percentual', sure: true };
   if (/ARMAZENAGEM/.test(n)) return { id: 'armazenagem', sure: true };
-  if (/HORA\s+EXTRA/.test(n)) return { id: 'hora_extra', sure: true };
+  if (n === ARM_NORM_HORA_EXTRA || isHoraExtraVariant(n)) return { id: 'hora_extra', sure: true };
   if (/ETIQUETAGEM/.test(n)) return { id: 'etiquetagem', sure: true };
-  if (/READEQUACAO/.test(n)) return { id: 'readequacao', sure: true };
+  if (n === ARM_NORM_READEQUACAO) return { id: 'readequacao', sure: true };
   if (/IMPOSTO/.test(n)) return { id: 'impostos', sure: true };
   return { id: 'outros', sure: false };
 }
@@ -716,7 +733,7 @@ function armLancamentoRowChange(idx) {
 
 function armLancamentoAddRow() {
   if (!armLancamentoDraft) armLoadLancamentoDraft();
-  armLancamentoDraft.servicos.push(armBuildServicoFromEntry('HORA EXTRA', 0, 0));
+  armLancamentoDraft.servicos.push(armBuildServicoFromEntry(ARM_NORM_HORA_EXTRA, 0, 0));
   renderArmLancamentoForm();
 }
 
