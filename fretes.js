@@ -1,5 +1,5 @@
-// fretes.js v1.7.13
-const FRETES_JS_VERSION = '1.7.13';
+// fretes.js v1.7.16
+const FRETES_JS_VERSION = '1.7.16';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -63,6 +63,30 @@ function setSapZoneLoaded(name) {
   const zone = $('sapZone');
   if (fn) fn.textContent = name ? '✓ ' + name : '';
   zone?.classList.toggle('loaded', !!name);
+}
+
+function fteSetProcessing(active, label) {
+  const spin = $('procSpin');
+  const btn = $('procBtn');
+  const loadBtn = $('loadLastBtn');
+  const note = $('procNote');
+  if (spin) {
+    spin.hidden = !active;
+    spin.style.display = active ? 'inline-flex' : 'none';
+  }
+  if (note) {
+    if (active && label) {
+      note.textContent = label;
+      note.hidden = false;
+      note.style.display = 'inline';
+    } else {
+      note.textContent = '';
+      note.hidden = true;
+      note.style.display = 'none';
+    }
+  }
+  if (btn) btn.disabled = active || !(fteCteBuffer || fteQzPendingFiles.length || quinzenalPack?.files?.length);
+  if (loadBtn) loadBtn.disabled = !!active;
 }
 
 function checkFteBtn() {
@@ -375,11 +399,33 @@ const FIELD_ALIASES = {
   peso: ['peso', 'peso kg', 'peso (kg)']
 };
 
+/** Line-level billing (sum per NF). Doc-level totals repeat on every row — never sum those. */
+const SAP_LINE_VALOR_ALIASES = [
+  'valor bruto', 'vl bruto', 'val bruto', 'valor linha', 'vl linha', 'valor item',
+  'val faturamento', 'valor faturamento', 'valor mercadoria'
+];
+const SAP_DOC_VALOR_ALIASES = [
+  'doc total', 'doc. total', 'doctotal', 'valor documento', 'valor total', 'total nf', 'total documento',
+  'total do documento', 'total geral', 'valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf',
+  'vl documento', 'vlr total', 'vlr documento', 'montante documento', 'montante doc'
+];
+const SAP_VALOR_FALLBACK_ALIASES = ['montante', 'vl total'];
+/** Never use as NF billing base — valor líquido, impostos, taxa 5,5%, etc. */
+const SAP_VALOR_EXCLUDE_ALIASES = [
+  'valor liquido', 'vl liquido', 'liquido',
+  'imposto', 'impostos', 'icms', 'pis', 'cofins', 'ipi', 'iss',
+  'taxa', 'frete', 'fee', 'armazenagem', 'comissao', 'comissão',
+  '5,5', '5.5', 'percentual', '%'
+];
+/** ZFACT export: D=Nota Fiscal (3), N=valor bruto (13). */
+const SAP_ZFACT_BRUTO_COL = 13;
+
 const SAP_ALIASES = {
   nf: ['nota fiscal', 'nf', 'n nota fiscal', 'num nota fiscal', 'num. nota fiscal', 'notafiscal', 'nº nf', 'numero nf', 'docnum'],
   dtEmissao: ['dt emissao', 'data emissao', 'dt emissão', 'data emissão', 'data doc', 'dt nf', 'data nf', 'data nota fiscal'],
   cliente: ['cliente', 'nome cliente', 'razao social', 'razão social', 'destinatario', 'destinatário', 'cardname', 'nome do cliente'],
-  valorNF: ['valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf', 'valor total', 'total nf', 'valor documento', 'montante', 'valor']
+  material: ['material', 'cod material', 'cod. material', 'codigo material', 'item code', 'cod item', 'cod. item', 'nº item', 'num item', 'item no', 'produto'],
+  valorNF: [...SAP_LINE_VALOR_ALIASES, ...SAP_DOC_VALOR_ALIASES, ...SAP_VALOR_FALLBACK_ALIASES]
 };
 
 /** SAP NF export layout: col B=cliente, C=data emissão, D=NF (0-based indices). */
@@ -568,21 +614,76 @@ function findField(row, field) {
   return null;
 }
 
-function findSapField(row, field) {
-  const aliases = SAP_ALIASES[field];
+function sapHeaderMatchesField(hdr, aliases) {
+  const h = normCol(hdr);
+  if (!h) return false;
+  return aliases.some(alias => h === alias || h.includes(alias) || alias.includes(h));
+}
+
+function sapHeaderIsExcluded(hdr) {
+  return sapHeaderMatchesField(hdr, SAP_VALOR_EXCLUDE_ALIASES);
+}
+
+function findSapFieldKeyByAliases(row, aliases, opts = {}) {
   const entries = Object.entries(row);
+  const skipExcluded = opts.skipExcluded !== false;
+  const keyOk = (k) => !skipExcluded || !sapHeaderIsExcluded(k);
   for (const alias of aliases) {
-    const hit = entries.find(([k]) => normCol(k) === alias);
-    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[1];
+    const hit = entries.find(([k]) => keyOk(k) && normCol(k) === alias);
+    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[0];
   }
   for (const alias of aliases) {
     const hit = entries.find(([k]) => {
+      if (!keyOk(k)) return false;
       const nk = normCol(k);
       return nk.includes(alias) || alias.includes(nk);
     });
-    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[1];
+    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[0];
   }
   return null;
+}
+
+function findSapFieldByAliases(row, aliases) {
+  const key = findSapFieldKeyByAliases(row, aliases);
+  if (!key) return null;
+  const v = row[key];
+  return v !== null && v !== undefined && v !== '' ? v : null;
+}
+
+function findSapField(row, field) {
+  return findSapFieldByAliases(row, SAP_ALIASES[field]);
+}
+
+function findSapValorFields(row) {
+  const docKey = findSapFieldKeyByAliases(row, SAP_DOC_VALOR_ALIASES);
+  const doc = docKey ? row[docKey] : null;
+  let lineKey = findSapFieldKeyByAliases(row, SAP_LINE_VALOR_ALIASES);
+  if (lineKey && docKey && lineKey === docKey) lineKey = null;
+  const line = lineKey ? row[lineKey] : null;
+  const fallback = !line && !doc ? findSapFieldByAliases(row, SAP_VALOR_FALLBACK_ALIASES) : null;
+  return { line, doc, fallback, primary: line || doc || fallback };
+}
+
+function resolveSapValorColFromHeader(headerRow) {
+  let lineCol = null;
+  let docCol = null;
+  (headerRow || []).forEach((hdr, j) => {
+    if (sapHeaderIsExcluded(hdr)) return;
+    const h = normCol(hdr);
+    if (h === 'valor bruto' || h.startsWith('valor bruto')) lineCol = j;
+  });
+  if (lineCol == null) {
+    (headerRow || []).forEach((hdr, j) => {
+      if (sapHeaderIsExcluded(hdr)) return;
+      if (sapHeaderMatchesField(hdr, SAP_LINE_VALOR_ALIASES)) lineCol = j;
+    });
+  }
+  (headerRow || []).forEach((hdr, j) => {
+    if (sapHeaderIsExcluded(hdr)) return;
+    if (sapHeaderMatchesField(hdr, SAP_DOC_VALOR_ALIASES)) docCol = j;
+  });
+  if (lineCol != null && lineCol === docCol) lineCol = null;
+  return { lineCol, docCol };
 }
 
 function normalizeRow(row) {
@@ -665,6 +766,140 @@ function looksLikeSapNfCell(v) {
   return key.length >= 4 && key.length <= 12;
 }
 
+/** Max plausible NF billing amount in ZFACT warehouse exports (R$). */
+const SAP_VALOR_MAX = 5_000_000;
+
+function hasSapValorFormatting(v) {
+  const s = String(v).trim().replace(/\s/g, '');
+  return /^R\$/i.test(s) || s.includes(',');
+}
+
+/** Reject SAP doc entry / NF identifiers mistaken for monetary valor (no R$/comma). */
+function looksLikeSapDocOrNfNumber(v) {
+  if (v === null || v === undefined || v === '') return false;
+  if (hasSapValorFormatting(v)) return false;
+  const key = normNFKey(v);
+  if (key.length >= 8) return true;
+  const s = String(v).trim().replace(/\s/g, '').replace(/^R\$/i, '');
+  if (/^\d{7,}$/.test(s)) return true;
+  if (typeof v === 'number' && Number.isInteger(v) && Math.abs(v) >= 1_000_000) return true;
+  return false;
+}
+
+/** Parse NF monetary values from SAP/ZFACT exports (BR format, R$, thousands). */
+function parseSapNum(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  let s = String(v).trim().replace(/\s/g, '');
+  if (!s || s === '-') return 0;
+  s = s.replace(/^R\$\s?/i, '');
+  if (s.includes(',')) {
+    const n = parseFloat(s.replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (s.includes('.')) {
+    const parts = s.split('.');
+    if (parts.length > 2) {
+      const n = parseFloat(s.replace(/\./g, ''));
+      return Number.isFinite(n) ? n : 0;
+    }
+    const intPart = parts[0];
+    const fracPart = parts[1] || '';
+    if (!fracPart || /^0+$/.test(fracPart)) {
+      const n = parseFloat(intPart);
+      return Number.isFinite(n) ? n : 0;
+    }
+    if (intPart !== '0' && fracPart.length === 3 && intPart.length >= 1 && intPart.length <= 3) {
+      const n = parseFloat(intPart + fracPart);
+      if (Number.isFinite(n)) return n;
+    }
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function looksLikeSapValorCell(v, opts = {}) {
+  if (v === null || v === undefined || v === '') return false;
+  const n = parseSapNum(v);
+  if (!(n > 0) || n > SAP_VALOR_MAX) return false;
+  if (looksLikeSapDocOrNfNumber(v)) return false;
+  const s = String(v).trim().replace(/\s/g, '');
+  if (/^R\$/i.test(s) || s.includes(',')) return true;
+  if (/^\d{1,3}$/.test(s) && n < 1000) return false;
+  if (opts.trustColumn) {
+    if (typeof v === 'number' && Number.isInteger(v) && v >= 1e9) return false;
+    return true;
+  }
+  return n >= 10 || s.includes('.') || (typeof v === 'number' && !Number.isInteger(v));
+}
+
+/** Console self-check for SAP valor heuristics — run once at module load. */
+function _debugSapValorSamples() {
+  const accept = [
+    [43200, true],
+    ['43.200,00', true],
+    ['43200', true],
+    [1234.56, true],
+    ['1.234,56', true],
+    [999999, true]
+  ];
+  const reject = [
+    [9540067078, false],
+    ['9540067078', false],
+    ['9.540.067.078,00', false],
+    [9540067312, false],
+    [9540067546, false],
+    [0, false],
+    ['', false]
+  ];
+  const all = [...accept, ...reject];
+  const mismatches = all.filter(([v, exp]) => looksLikeSapValorCell(v, { trustColumn: true }) !== exp);
+  if (mismatches.length) {
+    console.warn('[SAP valor] sample mismatches:', mismatches.map(([v, exp]) => ({
+      v, expected: exp, got: looksLikeSapValorCell(v, { trustColumn: true })
+    })));
+  } else {
+    console.debug('[SAP valor] samples OK:', accept.length + reject.length, 'cases');
+  }
+}
+_debugSapValorSamples();
+
+/** ZFACT: col D=NF, col N=valor bruto — never scan Valor Líquido (J) or impostos. */
+function pickSapValorFromLine(line, colIdx, headerRow) {
+  const idx = colIdx || activeSapColIdx;
+  if (!idx || !Array.isArray(line)) return { line: null, doc: null };
+
+  const headerValor = resolveSapValorColFromHeader(headerRow);
+  const out = { line: null, doc: null };
+  const nfKey = normNFKey(line[idx.nf]);
+  const isSameNf = (v) => nfKey && normNFKey(v) === nfKey;
+
+  const tryLine = (v) => {
+    if (v != null && v !== '' && !isSameNf(v) && looksLikeSapValorCell(v, { trustColumn: true })) {
+      out.line = v;
+    }
+  };
+  const tryDoc = (v) => {
+    if (v != null && v !== '' && !isSameNf(v) && looksLikeSapValorCell(v, { trustColumn: true })) {
+      out.doc = v;
+    }
+  };
+
+  if (headerValor.lineCol != null) tryLine(line[headerValor.lineCol]);
+  if (headerValor.docCol != null) tryDoc(line[headerValor.docCol]);
+
+  if (!out.line && line.length > SAP_ZFACT_BRUTO_COL) tryLine(line[SAP_ZFACT_BRUTO_COL]);
+
+  if (!out.line && idx.valorNF != null && idx.valorNF !== headerValor.docCol) {
+    tryLine(line[idx.valorNF]);
+  }
+
+  if (out.line && out.doc && sapValoresClose(parseSapNum(out.line), parseSapNum(out.doc))) out.line = null;
+  return out;
+}
+
 function looksLikeSapDataRow(line, colIdx) {
   const idx = colIdx || activeSapColIdx;
   if (!Array.isArray(line) || line.length <= idx.nf) return false;
@@ -689,7 +924,7 @@ function applySapColPositionalFallback(row, line, headerRow, standardLayout, col
   const nf = line[idx.nf];
   const cliente = line[idx.cliente];
   const dtRaw = line[idx.dtEmissao];
-  const valorRaw = idx.valorNF != null ? line[idx.valorNF] : null;
+  const picked = pickSapValorFromLine(line, idx, headerRow);
 
   if (nf !== null && nf !== undefined && String(nf).trim() !== '') row.nf = nf;
   if (cliente !== null && cliente !== undefined && String(cliente).trim() !== '') {
@@ -700,9 +935,17 @@ function applySapColPositionalFallback(row, line, headerRow, standardLayout, col
     row.dtEmissao = parsed;
     row._sapDateSource = 'colC';
   }
-  if (valorRaw !== null && valorRaw !== undefined && valorRaw !== '' && !row.valorNF) {
-    row.valorNF = valorRaw;
+  if (picked.line != null && picked.line !== '') {
+    const dupDoc = row.valorDoc != null && row.valorDoc !== ''
+      && sapValoresClose(sapParsedValor(picked.line), sapParsedValor(row.valorDoc));
+    if (!dupDoc && (!row.valorLine || !looksLikeSapValorCell(row.valorLine, { trustColumn: true }))) {
+      row.valorLine = picked.line;
+    }
   }
+  if (picked.doc != null && picked.doc !== '') {
+    if (!row.valorDoc || !looksLikeSapValorCell(row.valorDoc, { trustColumn: true })) row.valorDoc = picked.doc;
+  }
+  row.valorNF = row.valorLine ?? row.valorDoc ?? row.valorNF;
   row._sapPositionalLayout = true;
   return row;
 }
@@ -720,40 +963,51 @@ function isStandardSapNfLayout(headerRow, sampleRows, colIdx) {
   return hits >= 2;
 }
 
-function scoreSapLayout(dataLines, colIdx) {
+function scoreSapLayout(dataLines, colIdx, headerRow) {
   let hits = 0;
+  let valorHits = 0;
   for (const line of (dataLines || []).slice(0, 15)) {
     if (looksLikeSapDataRow(line, colIdx)) hits++;
+    const v = pickSapValorFromLine(line, colIdx, headerRow);
+    if (looksLikeSapValorCell(v.line || v.doc)) valorHits++;
   }
-  return hits;
+  return { hits, valorHits, score: hits * 10 + valorHits };
 }
 
 function resolveSapColIdx(headerRow, dataLines) {
+  const headerValor = resolveSapValorColFromHeader(headerRow);
+  const brutoCol = headerValor.lineCol ?? SAP_ZFACT_BRUTO_COL;
   const layouts = [
-    { cliente: 1, dtEmissao: 2, nf: 3, valorNF: 4, label: 'B/C/D/E' },
-    { cliente: 0, dtEmissao: 1, nf: 2, valorNF: 3, label: 'A/B/C/D' },
-    { cliente: 2, dtEmissao: 3, nf: 4, valorNF: 5, label: 'C/D/E/F' }
+    { cliente: 1, dtEmissao: 2, nf: 3, valorNF: brutoCol, label: 'B/C/D/N (ZFACT)' },
+    { cliente: 1, dtEmissao: 2, nf: 3, valorNF: headerValor.lineCol ?? 4, label: 'B/C/D/E' },
+    { cliente: 1, dtEmissao: 2, nf: 3, valorNF: headerValor.lineCol ?? 5, label: 'B/C/D/F' },
+    { cliente: 1, dtEmissao: 2, nf: 3, valorNF: headerValor.lineCol ?? 6, label: 'B/C/D/G' },
+    { cliente: 0, dtEmissao: 1, nf: 2, valorNF: headerValor.lineCol ?? 3, label: 'A/B/C/D' },
+    { cliente: 2, dtEmissao: 3, nf: 4, valorNF: headerValor.lineCol ?? 5, label: 'C/D/E/F' },
+    { cliente: 2, dtEmissao: 3, nf: 4, valorNF: headerValor.lineCol ?? 6, label: 'C/D/E/G' }
   ];
   for (const layout of layouts) {
     if (headerRow &&
         isSapHeaderAtCol(headerRow, layout.cliente, 'cliente') &&
         isSapHeaderAtCol(headerRow, layout.dtEmissao, 'dtEmissao') &&
         isSapHeaderAtCol(headerRow, layout.nf, 'nf')) {
-      console.debug('[SAP NF] Layout por cabeçalho:', layout.label);
+      console.debug('[SAP NF] Layout por cabeçalho:', layout.label,
+        headerValor.lineCol != null ? `(valor bruto col ${headerValor.lineCol})` : '');
       return layout;
     }
   }
   let best = layouts[0];
-  let bestScore = 0;
+  let bestResult = { hits: 0, valorHits: 0, score: 0 };
   for (const layout of layouts) {
-    const s = scoreSapLayout(dataLines, layout);
-    if (s > bestScore) {
-      bestScore = s;
+    const r = scoreSapLayout(dataLines, layout, headerRow);
+    if (r.score > bestResult.score || (r.score === bestResult.score && r.hits > bestResult.hits)) {
+      bestResult = r;
       best = layout;
     }
   }
-  if (bestScore >= 2) {
-    console.debug('[SAP NF] Layout detectado por dados:', best.label, `(${bestScore} linhas)`);
+  if (bestResult.hits >= 2 || (bestResult.hits >= 1 && bestResult.valorHits >= 1)) {
+    console.debug('[SAP NF] Layout detectado por dados:', best.label,
+      `(${bestResult.hits} linhas, ${bestResult.valorHits} valores)`);
     return best;
   }
   console.debug('[SAP NF] Layout padrão B/C/D (fallback)');
@@ -805,6 +1059,7 @@ function parseSapSheetRows(sheet) {
 
   activeSapColIdx = resolveSapColIdx(headerRow, dataLines);
   const standardLayout = isStandardSapNfLayout(headerRow, dataLines, activeSapColIdx);
+  const hasMaterialCol = (headerRow || []).some(h => sapHeaderMatchesField(h, SAP_ALIASES.material));
   if (standardLayout) {
     console.debug('[SAP NF] Layout padrão: col. B=cliente, C=data emissão, D=nota fiscal');
   }
@@ -815,7 +1070,9 @@ function parseSapSheetRows(sheet) {
     const obj = {};
     headerRow.forEach((h, j) => { if (h) obj[h] = line[j] ?? null; });
     let row = normalizeSapRow(obj);
+    row._hasMaterialCol = hasMaterialCol;
     row = applySapColPositionalFallback(row, line, headerRow, standardLayout, activeSapColIdx);
+    row = sanitizeSapRowValors(row);
     if (i < 3) logSapRowDebug(line, row, i, activeSapColIdx);
     rows.push(row);
   }
@@ -824,11 +1081,16 @@ function parseSapSheetRows(sheet) {
 
 function normalizeSapRow(row) {
   const dtRaw = findSapField(row, 'dtEmissao');
+  const valores = findSapValorFields(row);
+  const materialRaw = findSapField(row, 'material');
   return {
     nf: findSapField(row, 'nf'),
     dtEmissao: parseSapBrDate(dtRaw),
     cliente: findSapField(row, 'cliente'),
-    valorNF: findSapField(row, 'valorNF')
+    material: materialRaw != null && materialRaw !== '' ? String(materialRaw).trim() : '',
+    valorLine: valores.line,
+    valorDoc: valores.doc,
+    valorNF: valores.primary
   };
 }
 
@@ -912,23 +1174,294 @@ function loadSapRowsFromWorkbook(wb) {
   return best;
 }
 
+/** Skip header/subtotal rows when ZFACT has a material/item column. */
+function sapRowIsBillableLine(r) {
+  if (!r._hasMaterialCol) return true;
+  return !!(r.material && String(r.material).trim());
+}
+
+function sapParsedValor(v) {
+  if (!looksLikeSapValorCell(v, { trustColumn: true })) return 0;
+  return parseSapNum(v);
+}
+
+/** Line-level valor bruto from ZFACT row — validated before aggregation. */
+function sapRowLineValor(r) {
+  return sapParsedValor(r.valorLine ?? (!r.valorDoc ? r.valorNF : null));
+}
+
+/** Doc-level NF total — same on every line; must not be summed across rows. */
+function sapRowDocValor(r) {
+  return sapParsedValor(r.valorDoc);
+}
+
+function sapValoresClose(a, b, eps = 0.01) {
+  return Math.abs(a - b) < eps;
+}
+
+/** Drop valorLine when it duplicates valorDoc (doc total mistaken for line bruto). */
+function sanitizeSapRowValors(r) {
+  const doc = sapParsedValor(r.valorDoc);
+  const line = sapParsedValor(r.valorLine);
+  if (doc > 0 && line > 0 && sapValoresClose(line, doc)) r.valorLine = null;
+  return r;
+}
+
+function finalizeSapNfValor(acc) {
+  const vals = acc.lineVals || [];
+  const lineSum = acc.lineSum;
+  const doc = acc.docVal > 0 ? acc.docVal : 0;
+  const distinctMaterials = acc.materialKeys ? acc.materialKeys.size : 0;
+
+  // User spec: GROUP BY NF, SUM valor bruto — every billable line counts.
+  if (vals.length > 0) {
+    const allIdentical = vals.every(v => sapValoresClose(v, vals[0]));
+
+    // Multiple distinct material lines: always SUM (even when bruto matches).
+    if (acc.hasMaterialCol && distinctMaterials >= 2) return lineSum;
+
+    if (allIdentical) {
+      // Doc total repeated as line bruto on every row.
+      if (doc > 0 && sapValoresClose(vals[0], doc)) return doc;
+      // Export without material column: same NF total on each positional row.
+      if (!acc.hasMaterialCol) return vals[0];
+      // Single material row repeated in export.
+      if (distinctMaterials <= 1) return vals[0];
+    }
+    return lineSum;
+  }
+
+  if (doc > 0) return doc;
+
+  if (acc.fallbackVals.length) {
+    const fb = acc.fallbackVals;
+    if (fb.every(v => sapValoresClose(v, fb[0]))) return fb[0];
+    return fb.reduce((a, b) => a + b, 0);
+  }
+  return 0;
+}
+
+const SAP_NF_DEBUG_KEYS = new Set(['99635', '99636', '99641', '99633', '18596', '2223', '18591']);
+
 function buildSapNfMap(rows) {
   const map = {};
+
+  function ensureAcc(r, key) {
+    if (!map[key]) {
+      map[key] = {
+        nf: r.nf,
+        cliente: r.cliente ? String(r.cliente).trim() : '',
+        dtEmissao: parseSapBrDate(r.dtEmissao),
+        lineSum: 0,
+        lineCount: 0,
+        lineVals: [],
+        docVal: 0,
+        fallbackVals: [],
+        hasMaterialCol: false,
+        materialKeys: new Set()
+      };
+    }
+    return map[key];
+  }
+
+  // Pass 1: doc total from every row (incl. NF header rows without material).
   rows.forEach(r => {
+    r = sanitizeSapRowValors(r);
     const nf = r.nf;
     if (nf === null || nf === undefined || String(nf).trim() === '') return;
     const key = normNFKey(nf);
     if (!key) return;
-    const entry = {
-      nf,
-      cliente: r.cliente ? String(r.cliente).trim() : '',
-      dtEmissao: parseSapBrDate(r.dtEmissao),
-      valorNF: num(r.valorNF)
+    const docValor = sapRowDocValor(r);
+    if (docValor > 0) {
+      const acc = ensureAcc(r, key);
+      acc.docVal = Math.max(acc.docVal, docValor);
+    }
+  });
+
+  rows.forEach(r => {
+    r = sanitizeSapRowValors(r);
+    const nf = r.nf;
+    if (nf === null || nf === undefined || String(nf).trim() === '') return;
+    if (!sapRowIsBillableLine(r)) return;
+    const key = normNFKey(nf);
+    if (!key) return;
+
+    const lineValor = sapRowLineValor(r);
+    const docValor = sapRowDocValor(r);
+    const cliente = r.cliente ? String(r.cliente).trim() : '';
+    const dtEmissao = parseSapBrDate(r.dtEmissao);
+
+    const acc = ensureAcc(r, key);
+
+    if (r._hasMaterialCol) acc.hasMaterialCol = true;
+    if (r._hasMaterialCol && r.material) {
+      const matKey = String(r.material).trim();
+      if (matKey) acc.materialKeys.add(matKey);
+    }
+
+    if (docValor > 0) {
+      acc.docVal = Math.max(acc.docVal, docValor);
+    }
+    if (lineValor > 0) {
+      acc.lineSum += lineValor;
+      acc.lineCount++;
+      acc.lineVals.push(lineValor);
+    } else if (!r.valorLine && !r.valorDoc && r.valorNF) {
+      const fb = sapParsedValor(r.valorNF);
+      if (fb > 0) acc.fallbackVals.push(fb);
+    }
+
+    if (!acc.cliente && cliente) acc.cliente = cliente;
+    if (!acc.dtEmissao && dtEmissao) acc.dtEmissao = dtEmissao;
+  });
+
+  const multiLine = Object.values(map).filter(e => e.lineCount > 1).length;
+  if (multiLine) {
+    console.debug('[SAP NF] ZFACT agregação: %d NFs com várias linhas (valor bruto somado) de %d NFs únicas',
+      multiLine, Object.keys(map).length);
+  }
+
+  Object.keys(map).forEach(key => {
+    const acc = map[key];
+    const valorNF = finalizeSapNfValor(acc);
+    if (SAP_NF_DEBUG_KEYS.has(key)) {
+      console.debug('[SAP NF] buildSapNfMap debug', key, {
+        nf: acc.nf,
+        lineCount: acc.lineCount,
+        lineVals: acc.lineVals,
+        lineSum: acc.lineSum,
+        docVal: acc.docVal,
+        fallbackVals: acc.fallbackVals,
+        valorNF
+      });
+    }
+    map[key] = {
+      nf: acc.nf,
+      cliente: acc.cliente,
+      dtEmissao: acc.dtEmissao,
+      valorNF
     };
-    map[key] = entry;
   });
   return map;
 }
+
+/** Console self-check — ZFACT aggregation must match Unilog NF total semantics. */
+function _debugBuildSapNfMapAggregation() {
+  const rows = [
+    { nf: '97723', cliente: 'A', dtEmissao: '01/01/2025', valorLine: '1.000,00' },
+    { nf: '97723-1', cliente: 'A', dtEmissao: '01/01/2025', valorLine: '2.500,50' },
+    { nf: '88888', cliente: 'B', dtEmissao: '02/01/2025', valorLine: 9540067078 },
+    { nf: '88888', cliente: 'B', dtEmissao: '02/01/2025', valorLine: '500,00' },
+    { nf: '99999', cliente: 'C', dtEmissao: '03/01/2025', valorLine: '' },
+    { nf: '99635', cliente: 'RALLU', dtEmissao: '01/05/2026', valorDoc: '49.937,37' },
+    { nf: '99635', cliente: 'RALLU', dtEmissao: '01/05/2026', valorDoc: '49.937,37' },
+    { nf: '99635', cliente: 'RALLU', dtEmissao: '01/05/2026', valorDoc: '49.937,37' },
+    { nf: '99635', cliente: 'RALLU', dtEmissao: '01/05/2026', valorLine: '10.000,00' },
+    { nf: '99635', cliente: 'RALLU', dtEmissao: '01/05/2026', valorLine: '20.000,00' },
+    { nf: '99635', cliente: 'RALLU', dtEmissao: '01/05/2026', valorLine: '19.937,37' }
+  ];
+  const map = buildSapNfMap(rows);
+  const mapDocOnly = buildSapNfMap([
+    { nf: '99635', valorDoc: '49.937,37' },
+    { nf: '99635', valorDoc: '49.937,37' },
+    { nf: '99635', valorDoc: '49.937,37' }
+  ]);
+  const mapBrutoRepeat = buildSapNfMap([
+    { nf: '99635', valorLine: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37' }
+  ]);
+  const mapDupPositional = buildSapNfMap([
+    { nf: '99635', valorLine: '49.937,37', valorDoc: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37', valorDoc: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37', valorDoc: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37', valorDoc: '49.937,37' }
+  ]);
+  const mapLineDocSameRow = buildSapNfMap([
+    { nf: '99635', valorLine: '10.000,00', valorDoc: '49.937,37' },
+    { nf: '99635', valorLine: '20.000,00', valorDoc: '49.937,37' },
+    { nf: '99635', valorLine: '19.937,37', valorDoc: '49.937,37' }
+  ]);
+  const mapInflatedRepeat = buildSapNfMap([
+    { nf: '99635', valorLine: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37' },
+    { nf: '99635', valorLine: '25.000,00' }
+  ]);
+  const map99635brutoZfact = buildSapNfMap([
+    { nf: '000099635-2', _hasMaterialCol: true, material: 'SKU1', valorLine: '641,50' },
+    { nf: '000099635-2', _hasMaterialCol: true, material: 'SKU2', valorLine: '1.453,33' },
+    { nf: '000099635-2', _hasMaterialCol: true, material: 'SKU3', valorLine: '4.542,08' },
+    { nf: '000099635-2', _hasMaterialCol: true, material: 'SKU4', valorLine: '43.300,46' }
+  ]);
+  const map99635feeLines = buildSapNfMap([
+    { nf: '99635', _hasMaterialCol: true, material: 'SKU1', valorLine: '641,50' },
+    { nf: '99635', _hasMaterialCol: true, material: 'SKU2', valorLine: '10.000,00' },
+    { nf: '99635', _hasMaterialCol: true, material: 'SKU3', valorLine: '39.295,87' }
+  ]);
+  const map99636bruto = buildSapNfMap([
+    { nf: '99636', _hasMaterialCol: true, material: 'SKU1', valorLine: '30.000,00' },
+    { nf: '99636', _hasMaterialCol: true, material: 'SKU2', valorLine: '28.266,08' }
+  ]);
+  const map99636lineDoc = buildSapNfMap([
+    { nf: '99636', _hasMaterialCol: true, material: 'SKU1', valorLine: '30.000,00', valorDoc: '58.266,08' },
+    { nf: '99636', _hasMaterialCol: true, material: 'SKU2', valorLine: '28.266,08', valorDoc: '58.266,08' }
+  ]);
+  const map2223 = buildSapNfMap([
+    { nf: '2223', material: 'X', valorLine: '12.345,67' }
+  ]);
+  const map18591 = buildSapNfMap([
+    { nf: '000018591', material: 'Y', valorLine: '8.500,00' },
+    { nf: '000018591', material: 'Z', valorLine: '1.200,50' }
+  ]);
+  const map99641 = buildSapNfMap([
+    { nf: '000099641-2', _hasMaterialCol: true, material: '', valorLine: '0,00' },
+    { nf: '000099641-2', _hasMaterialCol: true, material: 'SKU-A', valorLine: '331,90' },
+    { nf: '000099641-2', _hasMaterialCol: true, material: 'SKU-B', valorLine: '331,90' }
+  ]);
+  const ok97723 = Math.abs((map['97723']?.valorNF || 0) - 3500.5) < 0.01;
+  const ok88888 = Math.abs((map['88888']?.valorNF || 0) - 500) < 0.01;
+  const ok99999 = map['99999']?.valorNF === 0;
+  const ok99635lines = Math.abs((map['99635']?.valorNF || 0) - 49937.37) < 0.01;
+  const ok99635doc = Math.abs((mapDocOnly['99635']?.valorNF || 0) - 49937.37) < 0.01;
+  const ok99635repeat = Math.abs((mapBrutoRepeat['99635']?.valorNF || 0) - 49937.37) < 0.01;
+  const ok99635dupPos = Math.abs((mapDupPositional['99635']?.valorNF || 0) - 49937.37) < 0.01;
+  const ok99635lineDoc = Math.abs((mapLineDocSameRow['99635']?.valorNF || 0) - 49937.37) < 0.01;
+  const ok99635inflate = Math.abs((mapInflatedRepeat['99635']?.valorNF || 0) - 174812.11) < 0.01;
+  const ok99635brutoZfact = Math.abs((map99635brutoZfact['99635']?.valorNF || 0) - 49937.37) < 0.01;
+  const ok99635feeLines = Math.abs((map99635feeLines['99635']?.valorNF || 0) - 49937.37) < 0.01;
+  const ok99636bruto = Math.abs((map99636bruto['99636']?.valorNF || 0) - 58266.08) < 0.01;
+  const ok99636lineDoc = Math.abs((map99636lineDoc['99636']?.valorNF || 0) - 58266.08) < 0.01;
+  const ok2223 = Math.abs((map2223['2223']?.valorNF || 0) - 12345.67) < 0.01;
+  const ok18591 = Math.abs((map18591['18591']?.valorNF || 0) - 9700.5) < 0.01;
+  const ok99641 = Math.abs((map99641['99641']?.valorNF || 0) - 663.8) < 0.01;
+  if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat || !ok99635dupPos
+      || !ok99635lineDoc || !ok99635inflate || !ok99635brutoZfact || !ok99635feeLines || !ok99636bruto
+      || !ok99636lineDoc || !ok2223 || !ok18591 || !ok99641) {
+    console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
+      ok97723, got97723: map['97723']?.valorNF,
+      ok88888, got88888: map['88888']?.valorNF,
+      ok99999, got99999: map['99999']?.valorNF,
+      ok99635lines, got99635lines: map['99635']?.valorNF,
+      ok99635doc, got99635doc: mapDocOnly['99635']?.valorNF,
+      ok99635repeat, got99635repeat: mapBrutoRepeat['99635']?.valorNF,
+      ok99635dupPos, got99635dupPos: mapDupPositional['99635']?.valorNF,
+      ok99635lineDoc, got99635lineDoc: mapLineDocSameRow['99635']?.valorNF,
+      ok99635inflate, got99635inflate: mapInflatedRepeat['99635']?.valorNF,
+      ok99635brutoZfact, got99635brutoZfact: map99635brutoZfact['99635']?.valorNF,
+      ok99635feeLines, got99635feeLines: map99635feeLines['99635']?.valorNF,
+      ok99636bruto, got99636bruto: map99636bruto['99636']?.valorNF,
+      ok99636lineDoc, got99636lineDoc: map99636lineDoc['99636']?.valorNF,
+      ok2223, got2223: map2223['2223']?.valorNF,
+      ok18591, got18591: map18591['18591']?.valorNF,
+      ok99641, got99641: map99641['99641']?.valorNF
+    });
+  } else {
+    console.debug('[SAP NF] buildSapNfMap aggregation OK');
+  }
+}
+_debugBuildSapNfMapAggregation();
 
 /** Relevant SAP vs Unilog NF value gap: abs diff > R$1 AND > 0.5% of the larger value. */
 const SAP_VALOR_DIFF_MIN_ABS = 1.0;
@@ -1053,13 +1586,18 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
     }
     sapNfMap = buildSapNfMap(rows);
     const nMapped = Object.keys(sapNfMap).length;
+    const nWithValor = Object.values(sapNfMap).filter(e => parseSapNum(e.valorNF) > 0).length;
     if (!opts.silent) {
-      console.log('[SAP] Map size:', nMapped, 'keys (canonical NF)');
+      console.log('[SAP] Map size:', nMapped, 'NFs únicas (', rows.length, 'linhas ZFACT), with valor:', nWithValor);
     }
 
     reEnrichAfterSapLoad();
     if (typeof window.refreshArmazemSapValidation === 'function') {
-      window.refreshArmazemSapValidation();
+      try {
+        window.refreshArmazemSapValidation();
+      } catch (armErr) {
+        console.warn('[SAP] refreshArmazemSapValidation', armErr);
+      }
     }
 
     const nMatched = currentSummary?.nSapMatched ?? countSapMatches(currentNFs);
@@ -1097,26 +1635,36 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
 function selectCteFile(file) {
   if (!file) return;
   fteCteFileName = file.name;
+  const fn = $('cteFn');
+  if (fn) fn.textContent = '⏳ A ler ' + file.name + '…';
   const reader = new FileReader();
   reader.onload = (e) => {
     fteCteBuffer = e.target.result;
     setCteZoneLoaded(file.name);
     fteToast('CT-e seleccionado — clica Processar e Guardar');
   };
-  reader.onerror = () => fteToastError('Erro ao ler ficheiro CT-e.');
+  reader.onerror = () => {
+    if (fn) fn.textContent = '';
+    fteToastError('Erro ao ler ficheiro CT-e.');
+  };
   reader.readAsArrayBuffer(file);
 }
 
 function selectSapFile(file) {
   if (!file) return;
   fteSapFileName = file.name;
+  const fn = $('sapFn');
+  if (fn) fn.textContent = '⏳ A ler ' + file.name + '…';
   const reader = new FileReader();
   reader.onload = (e) => {
     fteSapBuffer = e.target.result;
     setSapZoneLoaded(file.name);
     fteToast('SAP NF seleccionado');
   };
-  reader.onerror = () => fteToastError('Erro ao ler ficheiro SAP.');
+  reader.onerror = () => {
+    if (fn) fn.textContent = '';
+    fteToastError('Erro ao ler ficheiro SAP.');
+  };
   reader.readAsArrayBuffer(file);
 }
 
@@ -1155,10 +1703,7 @@ async function processAndSaveFretes() {
     fteToastError('Selecciona pelo menos um ficheiro (CT-e/NF ou quinzenais).');
     return;
   }
-  const spin = $('procSpin');
-  const procBtn = $('procBtn');
-  if (spin) spin.style.display = '';
-  if (procBtn) procBtn.disabled = true;
+  fteSetProcessing(true, 'A processar…');
 
   const errors = [];
   let cteProcessed = false;
@@ -1167,12 +1712,14 @@ async function processAndSaveFretes() {
   try {
     // Process quinzenais in memory first (not blocked by CT-e cloud save)
     if (hasQzPending) {
+      fteSetProcessing(true, 'A processar quinzenais…');
       const ok = await processQuinzenalPending();
       if (!ok) return;
       qzProcessed = true;
     }
 
     if (hasCte) {
+      fteSetProcessing(true, 'A processar CT-e / SAP…');
       sapNfMap = {};
       const ok = processArrayBufferCte(fteCteBuffer, fteCteFileName);
       if (!ok) return;
@@ -1181,6 +1728,8 @@ async function processAndSaveFretes() {
       }
       cteProcessed = true;
     }
+
+    fteSetProcessing(true, 'A guardar na cloud…');
 
     // Persist independently — quinzenais must not be skipped when CT-e save fails
     let qzSaved = true;
@@ -1225,8 +1774,7 @@ async function processAndSaveFretes() {
     console.error('[fretes] processAndSave', err);
     fteToastError('Erro: ' + (err.message || err));
   } finally {
-    if (spin) spin.style.display = 'none';
-    checkFteBtn();
+    fteSetProcessing(false);
   }
 }
 
@@ -2609,6 +3157,13 @@ async function restoreCteFromRec(cteRec, sapRec, silent = false) {
   if (!cteRec?.file_data) return false;
   const co = fteCompany();
   if (_fteLoadedCompany === co && currentNFs.length && lastCtePack?.fileName === cteRec.file_name) {
+    if (sapRec?.file_data) {
+      processArrayBufferSap(
+        base64ToArrayBuffer(sapRec.file_data),
+        sapRec.file_name || 'sap.xlsx',
+        { silent: true }
+      );
+    }
     return true;
   }
   _fteSkipAutosave = true;
@@ -2659,7 +3214,11 @@ async function ensureCteLoadedForQz(silent = true) {
 
 async function loadSavedFretesFiles(silent = false) {
   if (_fteLoadSavedPromise) return _fteLoadSavedPromise;
-  _fteLoadSavedPromise = _loadSavedFretesFilesImpl(silent).finally(() => { _fteLoadSavedPromise = null; });
+  if (!silent) fteSetProcessing(true, 'A carregar da cloud…');
+  _fteLoadSavedPromise = _loadSavedFretesFilesImpl(silent).finally(() => {
+    if (!silent) fteSetProcessing(false);
+    _fteLoadSavedPromise = null;
+  });
   return _fteLoadSavedPromise;
 }
 
@@ -4521,6 +5080,7 @@ function initFretes() {
 window.FretesSAP = {
   getMap: () => sapNfMap,
   normNFKey,
+  parseSapNum,
   buildSapNfMap,
   lookupSapEntry,
   isRelevantValorDiff,

@@ -1374,6 +1374,15 @@ function armGetMensalPagoSemImp(month) {
   return armGetNfFee(month) + armGetAdicionaisSum(month);
 }
 
+/** Valor cobrado na rubrica 5,5% sobre NF expedida (armazenagem principal). */
+function armGetArmazenagemRubricaValor(month) {
+  const nf = armFindNfServico(month);
+  if (nf && Number(nf.valor) > 0) return Number(nf.valor);
+  return (month?.servicos || [])
+    .filter(s => s.isNf || s.catalogId === 'nf_percentual')
+    .reduce((a, s) => a + (Number(s.valor) || 0), 0);
+}
+
 function armFmtPctGasto(armVal, nfBase) {
   if (!Number.isFinite(nfBase) || nfBase <= 0) return '—';
   if (!Number.isFinite(armVal) || armVal < 0) return '—';
@@ -1507,6 +1516,10 @@ function normHdrCell(v) {
   return String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+function armResumoNomeHdrRe(h) {
+  return /tipo de servi|codigo servi|cod servi|descricao.*servi|nome.*servi|^servico$|^descricao$/.test(h);
+}
+
 function findResumoHeaderRow(matrix) {
   for (let r = 0; r < matrix.length; r++) {
     const row = matrix[r] || [];
@@ -1514,8 +1527,8 @@ function findResumoHeaderRow(matrix) {
     let hasQtde = false;
     for (let c = 0; c < row.length; c++) {
       const h = normHdrCell(row[c]);
-      if (/tipo de servi|codigo servi|cod servi/.test(h)) hasNome = true;
-      if (/qtde|quantidade/.test(h)) hasQtde = true;
+      if (armResumoNomeHdrRe(h)) hasNome = true;
+      if (/qtde\s*servi|qtde|quantidade|qtd\b/.test(h)) hasQtde = true;
     }
     if (hasNome && hasQtde) return r;
   }
@@ -1523,40 +1536,141 @@ function findResumoHeaderRow(matrix) {
 }
 
 function scanResumoCols(matrix, hdrRow, fallback) {
-  const cols = { ...(fallback || { nome: 1, qtde: 2, unit: 3, valor: 4 }) };
+  const cols = {
+    ...(fallback || { nome: 1, qtde: 2, unit: 3, valor: 4 }),
+    nomeTipo: -1,
+    nomeCodigo: -1,
+    nomeDesc: -1
+  };
   const row = matrix[hdrRow] || [];
-  let nomeTipo = -1;
-  let nomeCodigo = -1;
   for (let c = 0; c < row.length; c++) {
     const h = normHdrCell(row[c]);
     if (!h) continue;
-    if (/qtde\s*servi|qtde|quantidade/.test(h)) cols.qtde = c;
+    if (/qtde\s*servi|qtde|quantidade|qtd\b/.test(h)) cols.qtde = c;
     else if (/valor unit|unitario/.test(h)) cols.unit = c;
-    else if (/valor calc|calculado/.test(h)) cols.valor = c;
-    else if (/tipo de servi/.test(h)) nomeTipo = c;
-    else if (/codigo servi|cod servi/.test(h)) nomeCodigo = c;
+    else if (/valor calc|calculado|valor total|valor servi/.test(h)) cols.valor = c;
+    else if (/tipo de servi/.test(h)) cols.nomeTipo = c;
+    else if (/codigo servi|cod servi/.test(h)) cols.nomeCodigo = c;
+    else if (/descricao.*servi|^descricao$|nome.*servi|^servico$/.test(h)) cols.nomeDesc = c;
   }
-  // v2 Unilog: descriptions live in "Código Serviço"; "Tipo de Serviço" is often blank.
-  if (nomeCodigo >= 0) cols.nome = nomeCodigo;
-  else if (nomeTipo >= 0) cols.nome = nomeTipo;
+  // Default nome col for resumoRowServiceName fallbacks (prefer descriptive columns at row level).
+  if (cols.nomeDesc >= 0) cols.nome = cols.nomeDesc;
+  else if (cols.nomeTipo >= 0) cols.nome = cols.nomeTipo;
+  else if (cols.nomeCodigo >= 0) cols.nome = cols.nomeCodigo;
   return cols;
+}
+
+function resumoServiceNameScore(text) {
+  const s = String(text ?? '').trim();
+  if (!s || s === '-') return 0;
+  const hasAlpha = /[A-Za-zÀ-ú]/.test(s);
+  return s.length + (hasAlpha ? 250 : (/^\d+$/.test(s) ? -50 : 0));
 }
 
 function resumoRowServiceName(matrix, r, cols) {
   const seen = new Set();
-  const tryCols = [];
-  for (const c of [cols.nome, 1, 0, 2, 3, 4, 5]) {
-    if (c >= 0 && !seen.has(c)) { seen.add(c); tryCols.push(c); }
-  }
-  for (const c of tryCols) {
+  const candidates = [];
+  const tryCol = (c) => {
+    if (c == null || c < 0 || seen.has(c)) return;
+    seen.add(c);
     const t = cellText(matrix, r, c);
-    if (t) return t;
+    if (t === '' || t === null || t === undefined) return;
+    candidates.push(String(t).trim());
+  };
+  for (const c of [cols.nomeDesc, cols.nomeTipo, cols.nomeCodigo, cols.nome, 1, 0, 2, 3, 4, 5, 6]) {
+    tryCol(c);
   }
-  return '';
+  if (!candidates.length) return '';
+  candidates.sort((a, b) => resumoServiceNameScore(b) - resumoServiceNameScore(a));
+  return candidates[0];
 }
 
 function armIsResumoFooterRow(nome) {
   return /^Apura|^Total\b|^Impostos/i.test(String(nome || '').trim());
+}
+
+function parseResumoServicosFromMatrix(matrix, opts) {
+  const servicos = [];
+  const hdr = findResumoHeaderRow(matrix);
+  if (hdr < 0) return { servicos, hdr: -1, cols: null };
+  const cols = scanResumoCols(matrix, hdr, opts?.colFallback);
+  for (let r = hdr + 1; r < matrix.length; r++) {
+    const nome = resumoRowServiceName(matrix, r, cols);
+    if (!nome) continue;
+    if (armIsResumoFooterRow(nome)) continue;
+    const isNf = isNfPercentualService(nome);
+    const nums = armFinishServico(
+      nome,
+      armCellNum(matrix, r, cols.qtde),
+      armCellNum(matrix, r, cols.unit),
+      armCellNum(matrix, r, cols.valor),
+      isNf
+    );
+    if (!nums.valor && !nums.qtde) continue;
+    const norm = normalizeServicoName(nome);
+    const cat = resolveCatalogCategory(nome);
+    servicos.push({
+      rawName: nome, normName: norm, codigo: nome,
+      qtde: nums.qtde, valorUnit: nums.valorUnit, valor: nums.valor,
+      catalogId: cat.id, catalogSure: cat.sure, isNf
+    });
+  }
+  return { servicos, hdr, cols };
+}
+
+function parseV1LegacyResumoServicos(matrix) {
+  const servicos = [];
+  let resumoHdr = -1;
+  for (let r = 0; r < matrix.length; r++) {
+    const t0 = cellText(matrix, r, 0);
+    const t1 = cellText(matrix, r, 1);
+    if (/^\s*Resumo\s*$/i.test(t1) || /^\s*Resumo\s*$/i.test(t0)) { resumoHdr = r; break; }
+  }
+  if (resumoHdr < 0) return servicos;
+  const hdrRow = resumoHdr + 1;
+  const cols = scanResumoCols(matrix, hdrRow, { nome: 1, qtde: 17, unit: 25, valor: 28 });
+  for (let r = resumoHdr + 2; r < matrix.length; r++) {
+    const nome = resumoRowServiceName(matrix, r, cols);
+    if (!nome) continue;
+    if (/^Apura/i.test(nome) || /IMPOSTO/i.test(nome)) continue;
+    const isNf = isNfPercentualService(nome);
+    const nums = armFinishServico(
+      nome,
+      armCellNum(matrix, r, cols.qtde),
+      armCellNum(matrix, r, cols.unit),
+      armCellNum(matrix, r, cols.valor),
+      isNf
+    );
+    if (!nome || (!nums.valor && !nums.qtde)) continue;
+    const norm = normalizeServicoName(nome);
+    const cat = resolveCatalogCategory(nome);
+    servicos.push({
+      rawName: nome, normName: norm, codigo: nome,
+      qtde: nums.qtde, valorUnit: nums.valorUnit, valor: nums.valor,
+      catalogId: cat.id, catalogSure: cat.sure, isNf
+    });
+  }
+  return servicos;
+}
+
+function armGuessWrongFileError(wb, fileName) {
+  if (findResumoSheetName(wb)) return null;
+  for (const n of wb.SheetNames || []) {
+    const m = sheetToMatrix(wb.Sheets[n]);
+    if (findResumoHeaderRow(m) >= 0) return null;
+  }
+  const fn = String(fileName || '');
+  if (/zfact|z_fact/i.test(fn)) {
+    return 'Ficheiro ZFACT (SAP NF) — carrega em Fretes → Excel SAP NF. Armazém espera Receita_Custo DELTA (Unilog).';
+  }
+  try {
+    const sapLoad = sapApi()?.loadSapRowsFromWorkbook?.(wb);
+    if (sapLoad?.valid >= 5) {
+      return 'Parece export SAP NF (ZFACT) — carrega em Fretes CT-e, não no Armazém. Aqui usa Receita_Custo DELTA da Unilog.';
+    }
+  } catch (_) { /* ignore */ }
+  const sheets = (wb.SheetNames || []).join(', ') || '(nenhuma)';
+  return `Nenhum serviço no bloco Resumo — folhas: ${sheets}. Esperado folha "Resumo de Serviços" (v2) ou bloco Resumo (v1).`;
 }
 
 function armLogParsedMonth(record, fileName) {
@@ -1593,8 +1707,20 @@ function findSheetName(wb, pattern) {
   return wb.SheetNames.find(n => re.test(normSheetName(n))) || null;
 }
 
+function isArmResumoSheetName(name) {
+  const s = normSheetName(name);
+  return /^resumo(\s+(de\s+)?)?servi/.test(s) || s === 'resumo';
+}
+
 function findResumoSheetName(wb) {
-  return wb.SheetNames.find(n => /^resumo de servi/.test(normSheetName(n))) || null;
+  const names = wb.SheetNames || [];
+  const byPattern = names.find(n => isArmResumoSheetName(n));
+  if (byPattern) return byPattern;
+  for (const n of names) {
+    const m = sheetToMatrix(wb.Sheets[n]);
+    if (findResumoHeaderRow(m) >= 0) return n;
+  }
+  return null;
 }
 
 function isArmBloatSheet(name) {
@@ -1608,7 +1734,7 @@ function pickBillingSheets(sheetNames) {
   const v2Keep = names.filter(n => {
     if (isArmBloatSheet(n)) return false;
     const s = normSheetName(n);
-    return /^resumo de servi/.test(s) || /^informa/.test(s);
+    return isArmResumoSheetName(n) || /^informa/.test(s);
   });
   if (v2Keep.length) return v2Keep;
   const v1Keep = names.filter(n => !isArmBloatSheet(n));
@@ -1656,33 +1782,11 @@ function parseArmazemV2(wb, fileName, opts) {
     meta.mesLabel = armMesNomeLong(meta.mesKey, '');
   }
 
-  const servicos = [];
   const hdr = findResumoHeaderRow(resumo);
   if (hdr < 0) throw new Error('Cabeçalho do resumo não encontrado.');
   const cols = scanResumoCols(resumo, hdr);
-
-  for (let r = hdr + 1; r < resumo.length; r++) {
-    const nome = resumoRowServiceName(resumo, r, cols);
-    const codigo = nome;
-    if (!nome) continue;
-    if (armIsResumoFooterRow(nome)) continue;
-    const isNf = isNfPercentualService(nome);
-    const nums = armFinishServico(
-      nome,
-      armCellNum(resumo, r, cols.qtde),
-      armCellNum(resumo, r, cols.unit),
-      armCellNum(resumo, r, cols.valor),
-      isNf
-    );
-    if (!nums.valor && !nums.qtde) continue;
-    const norm = normalizeServicoName(nome);
-    const cat = resolveCatalogCategory(nome);
-    servicos.push({
-      rawName: nome, normName: norm, codigo,
-      qtde: nums.qtde, valorUnit: nums.valorUnit, valor: nums.valor,
-      catalogId: cat.id, catalogSure: cat.sure, isNf
-    });
-  }
+  const parsedResumo = parseResumoServicosFromMatrix(resumo);
+  const servicos = parsedResumo.servicos;
 
   const totalCalc = servicos.filter(s => !/IMPOSTO/i.test(s.normName)).reduce((a, s) => a + s.valor, 0);
   console.log(`[armazem] parseV2 resumo`, {
@@ -1749,48 +1853,31 @@ function parseArmazemV2(wb, fileName, opts) {
 
 function parseArmazemV1(wb, fileName, opts) {
   const skipNfDetail = !!opts?.skipNfDetail;
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const m = sheetToMatrix(sheet);
   const meta = parseMonthFromFileName(fileName);
 
   let depositante = '';
-  for (let r = 0; r < Math.min(20, m.length); r++) {
-    for (let c = 0; c < 10; c++) {
-      const v = cellText(m, r, c);
-      if (/DELTA FOODS|14830817000100/i.test(v)) depositante = v;
+  let servicos = [];
+  let mainMatrix = sheetToMatrix(wb.Sheets[wb.SheetNames[0]]);
+  for (const sheetName of wb.SheetNames || []) {
+    if (isArmBloatSheet(sheetName)) continue;
+    const m = sheetToMatrix(wb.Sheets[sheetName]);
+    if (!depositante) {
+      for (let r = 0; r < Math.min(20, m.length); r++) {
+        for (let c = 0; c < 10; c++) {
+          const v = cellText(m, r, c);
+          if (/DELTA FOODS|14830817000100/i.test(v)) depositante = v;
+        }
+      }
+    }
+    const fromHeader = parseResumoServicosFromMatrix(m);
+    const fromLegacy = parseV1LegacyResumoServicos(m);
+    const found = fromHeader.servicos.length >= fromLegacy.length ? fromHeader.servicos : fromLegacy;
+    if (found.length > servicos.length) {
+      servicos = found;
+      mainMatrix = m;
     }
   }
-
-  const servicos = [];
-  let resumoHdr = -1;
-  for (let r = 0; r < m.length; r++) {
-    if (/^\s*Resumo\s*$/i.test(cellText(m, r, 1))) { resumoHdr = r; break; }
-  }
-  if (resumoHdr >= 0) {
-    const hdrRow = resumoHdr + 1;
-    const cols = scanResumoCols(m, hdrRow, { nome: 1, qtde: 17, unit: 25, valor: 28 });
-    for (let r = resumoHdr + 2; r < m.length; r++) {
-      const nome = resumoRowServiceName(m, r, cols);
-      if (!nome) continue;
-      if (/^Apura/i.test(nome) || /IMPOSTO/i.test(nome)) continue;
-      const isNf = isNfPercentualService(nome);
-      const nums = armFinishServico(
-        nome,
-        armCellNum(m, r, cols.qtde),
-        armCellNum(m, r, cols.unit),
-        armCellNum(m, r, cols.valor),
-        isNf
-      );
-      if (!nome || (!nums.valor && !nums.qtde)) continue;
-      const norm = normalizeServicoName(nome);
-      const cat = resolveCatalogCategory(nome);
-      servicos.push({
-        rawName: nome, normName: norm, codigo: nome,
-        qtde: nums.qtde, valorUnit: nums.valorUnit, valor: nums.valor,
-        catalogId: cat.id, catalogSure: cat.sure, isNf
-      });
-    }
-  }
+  const m = mainMatrix;
 
   const nfRows = [];
   if (!skipNfDetail) {
@@ -1954,7 +2041,7 @@ function applySapToArmNf(row) {
   const sap = api.lookupSapEntry(row.nf);
   out.sapFound = !!sap;
   out.sapMissing = !sap;
-  out.sapValor = sap ? armNum(sap.valorNF) : null;
+  out.sapValor = sap ? sap.valorNF : null;
   out.sapCliente = sap?.cliente || '';
   out.valorDiff = sap && api.isRelevantValorDiff(out.valorUnilog, out.sapValor);
   return out;
@@ -2184,6 +2271,21 @@ function sortTh(tableId, col, label, cls) {
   return `<th class="sortable ${cls || ''} ${sorted}" onclick="armDoSort('${tableId}','${col}')">${label}<span class="sort-ind">${ind}</span></th>`;
 }
 
+const ARM_MENSAL_COLS = 9;
+
+function armEnsureTableCols(table, nCols) {
+  if (!table || !nCols) return;
+  table.dataset.managedSort = 'arm';
+  delete table.dataset.domSortBound;
+  let cg = table.querySelector('colgroup');
+  if (!cg) {
+    cg = document.createElement('colgroup');
+    table.insertBefore(cg, table.firstChild);
+  }
+  while (cg.children.length < nCols) cg.appendChild(document.createElement('col'));
+  while (cg.children.length > nCols) cg.removeChild(cg.lastChild);
+}
+
 function switchArmTab(tab) {
   armActiveTab = tab;
   document.querySelectorAll('#page-armazem .arm-tab').forEach(t => {
@@ -2273,6 +2375,148 @@ function updateArmFileZone() {
   if (btn) btn.disabled = !armPendingFiles.length;
 }
 
+function armAggregateMensalTotals(monthRows) {
+  const t = { vendasLiq: 0, armazenagem: 0, adicionais: 0, pago: 0, impostos: 0, pagoComImp: 0 };
+  monthRows.forEach(m => {
+    const vl = armGetVendasLiq(m);
+    if (vl > 0) t.vendasLiq += vl;
+    t.armazenagem += armGetNfFee(m);
+    t.adicionais += armGetAdicionaisSum(m);
+    t.pago += armGetMensalPagoSemImp(m);
+    t.impostos += armGetMonthImpostos(m);
+    t.pagoComImp += armGetMonthPagoComImp(m);
+  });
+  return t;
+}
+
+function buildArmMensalDisplayRows(sorted, groupByYear) {
+  if (!groupByYear) {
+    const out = sorted.map(m => ({ type: 'month', month: m }));
+    if (sorted.length) {
+      out.push({ type: 'total', label: 'Total geral', ...armAggregateMensalTotals(sorted) });
+    }
+    return out;
+  }
+  const out = [];
+  const dated = sorted.filter(m => /^\d{4}-\d{2}$/.test(String(m.mesKey || '')));
+  const other = sorted.filter(m => !/^\d{4}-\d{2}$/.test(String(m.mesKey || '')));
+  let lastYear = null;
+  let yearGroup = [];
+  dated.forEach(m => {
+    const year = String(m.mesKey).slice(0, 4);
+    if (lastYear && year !== lastYear && yearGroup.length) {
+      out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...armAggregateMensalTotals(yearGroup) });
+      yearGroup = [];
+    }
+    if (year !== lastYear) {
+      out.push({ type: 'year', label: year, year });
+      lastYear = year;
+    }
+    out.push({ type: 'month', month: m });
+    yearGroup.push(m);
+  });
+  if (yearGroup.length && lastYear) {
+    out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...armAggregateMensalTotals(yearGroup) });
+  }
+  other.forEach(m => out.push({ type: 'month', month: m }));
+  return out;
+}
+
+function armMensalTotalsRowHtml(label, t, trCls) {
+  const pctVl = armFmtPctGasto(t.pago, t.vendasLiq);
+  const pctVlCom = armFmtPctGasto(t.pagoComImp, t.vendasLiq);
+  return `<tr class="${trCls}">
+    <td><strong>${armEsc(label)}</strong></td>
+    <td class="right">${t.vendasLiq > 0 ? armFmtMoney(t.vendasLiq) : '—'}</td>
+    <td class="right">${t.armazenagem > 0 ? armFmtMoney(t.armazenagem) : '—'}</td>
+    <td class="right">${t.adicionais > 0 ? armFmtMoney(t.adicionais) : '—'}</td>
+    <td class="right">${t.pago > 0 ? armFmtMoney(t.pago) : '—'}</td>
+    <td class="right">${t.impostos > 0 ? armFmtMoney(t.impostos) : '—'}</td>
+    <td class="right">${t.pagoComImp > 0 ? armFmtMoney(t.pagoComImp) : '—'}</td>
+    <td class="right" title="Pago s/ impostos ÷ Vendas Liq">${pctVl}</td>
+    <td class="right" title="Total pago c/ impostos ÷ Vendas Liq">${pctVlCom}</td>
+  </tr>`;
+}
+
+function armMensalMonthRowHtml(m) {
+  const armFee = armGetNfFee(m);
+  const addVal = armGetAdicionaisSum(m);
+  const imp = armGetMonthImpostos(m);
+  const pago = armGetMensalPagoSemImp(m);
+  const pagoComImp = armGetMonthPagoComImp(m);
+  const vendasLiq = armGetVendasLiq(m);
+  const pctVl = armFmtPctGasto(pago, vendasLiq);
+  const pctVlCom = armFmtPctGasto(pagoComImp, vendasLiq);
+  const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
+  const vlDisplay = vendasLiq ? fmtArmNum(vendasLiq, 2) : '';
+  return `<tr class="arm-mensal-month-row">
+    <td>${armEsc(armMesLabel(m))}${partial}</td>
+    <td class="right"><input type="text" class="fi arm-vendas-liq-input" data-mes="${armEsc(m.mesKey)}" value="${armEsc(vlDisplay)}" placeholder="R$ …" onblur="typeof armSetVendasLiq==='function'&&armSetVendasLiq('${armEsc(m.mesKey)}',this.value)" style="width:110px;text-align:right;font-size:11px;padding:4px 6px;"></td>
+    <td class="right" title="Taxa 5,5% sobre NF expedida">${armFee > 0 ? armFmtMoney(armFee) : '—'}</td>
+    <td class="right">${addVal > 0 ? armFmtMoney(addVal) : '—'}</td>
+    <td class="right">${pago > 0 ? armFmtMoney(pago) : '—'}</td>
+    <td class="right">${imp > 0 ? armFmtMoney(imp) : '—'}</td>
+    <td class="right">${pagoComImp > 0 ? armFmtMoney(pagoComImp) : '—'}</td>
+    <td class="right" title="Pago s/ impostos ÷ Vendas Liq">${pctVl}</td>
+    <td class="right" title="Total pago c/ impostos ÷ Vendas Liq">${pctVlCom}</td>
+  </tr>`;
+}
+
+function armMensalExportRowFromMonth(m) {
+  const pago = armGetMensalPagoSemImp(m);
+  const vendasLiq = armGetVendasLiq(m);
+  const pagoComImp = armGetMonthPagoComImp(m);
+  return {
+    Mes: armMesLabel(m),
+    VendasLiq: vendasLiq || '',
+    Armazenagem55: armGetNfFee(m),
+    Adicionais: armGetAdicionaisSum(m),
+    PagoSemImpostos: pago,
+    Impostos: armGetMonthImpostos(m),
+    TotalComImpostos: pagoComImp,
+    PctSobreVendasLiq: vendasLiq > 0 ? pago / vendasLiq : '',
+    PctComImpSobreVendasLiq: vendasLiq > 0 ? pagoComImp / vendasLiq : ''
+  };
+}
+
+function armMensalExportRowFromTotals(t, label) {
+  return {
+    Mes: label,
+    VendasLiq: t.vendasLiq || '',
+    Armazenagem55: t.armazenagem || '',
+    Adicionais: t.adicionais,
+    PagoSemImpostos: t.pago,
+    Impostos: t.impostos,
+    TotalComImpostos: t.pagoComImp,
+    PctSobreVendasLiq: t.vendasLiq > 0 ? t.pago / t.vendasLiq : '',
+    PctComImpSobreVendasLiq: t.vendasLiq > 0 ? t.pagoComImp / t.vendasLiq : ''
+  };
+}
+
+function buildArmMensalExportRows(months) {
+  const sorted = [...months].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
+  const out = [];
+  const dated = sorted.filter(m => /^\d{4}-\d{2}$/.test(String(m.mesKey || '')));
+  const other = sorted.filter(m => !/^\d{4}-\d{2}$/.test(String(m.mesKey || '')));
+  let lastYear = null;
+  let yearGroup = [];
+  dated.forEach(m => {
+    const year = String(m.mesKey).slice(0, 4);
+    if (lastYear && year !== lastYear && yearGroup.length) {
+      out.push(armMensalExportRowFromTotals(armAggregateMensalTotals(yearGroup), `Total ${lastYear}`));
+      yearGroup = [];
+    }
+    out.push(armMensalExportRowFromMonth(m));
+    yearGroup.push(m);
+    lastYear = year;
+  });
+  if (yearGroup.length && lastYear) {
+    out.push(armMensalExportRowFromTotals(armAggregateMensalTotals(yearGroup), `Total ${lastYear}`));
+  }
+  other.forEach(m => out.push(armMensalExportRowFromMonth(m)));
+  return out;
+}
+
 function renderArmMensal() {
   const empty = $arm('mensalEmpty');
   const content = $arm('mensalContent');
@@ -2299,6 +2543,8 @@ function renderArmMensal() {
       <div class="kpi"><div class="label">Adicionais</div><div class="value">${armFmtMoney(totalAdicionais)}</div></div>`;
   }
 
+  const mensalSort = armSorts.mensal;
+  const groupByYear = !mensalSort || mensalSort.col === 'mesKey' || mensalSort.col === 'mesLabel';
   const rows = armApplySort(months, 'mensal', {
     mesKey: r => r.mesKey,
     mesLabel: r => armMesLabel(r),
@@ -2319,35 +2565,13 @@ function renderArmMensal() {
       return vl > 0 && t >= 0 ? t / vl : -1;
     }
   });
+  const displayRows = buildArmMensalDisplayRows(rows, groupByYear);
 
   const body = $arm('mensalBody');
-  if (body) {
-    body.innerHTML = rows.map(m => {
-      const armFee = armGetNfFee(m);
-      const addVal = armGetAdicionaisSum(m);
-      const imp = armGetMonthImpostos(m);
-      const pago = armGetMensalPagoSemImp(m);
-      const pagoComImp = armGetMonthPagoComImp(m);
-      const vendasLiq = armGetVendasLiq(m);
-      const pctVl = armFmtPctGasto(pago, vendasLiq);
-      const pctVlCom = armFmtPctGasto(pagoComImp, vendasLiq);
-      const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
-      const vlDisplay = vendasLiq ? fmtArmNum(vendasLiq, 2) : '';
-      return `<tr>
-        <td>${armEsc(armMesLabel(m))}${partial}</td>
-        <td class="right"><input type="text" class="fi arm-vendas-liq-input" data-mes="${armEsc(m.mesKey)}" value="${armEsc(vlDisplay)}" placeholder="R$ …" onblur="typeof armSetVendasLiq==='function'&&armSetVendasLiq('${armEsc(m.mesKey)}',this.value)" style="width:110px;text-align:right;font-size:11px;padding:4px 6px;"></td>
-        <td class="right" title="Taxa 5,5% sobre NF expedida">${armFee > 0 ? armFmtMoney(armFee) : '—'}</td>
-        <td class="right">${addVal > 0 ? armFmtMoney(addVal) : '—'}</td>
-        <td class="right">${pago > 0 ? armFmtMoney(pago) : '—'}</td>
-        <td class="right">${imp > 0 ? armFmtMoney(imp) : '—'}</td>
-        <td class="right">${pagoComImp > 0 ? armFmtMoney(pagoComImp) : '—'}</td>
-        <td class="right" title="Pago s/ impostos ÷ Vendas Liq">${pctVl}</td>
-        <td class="right" title="Total pago c/ impostos ÷ Vendas Liq">${pctVlCom}</td>
-      </tr>`;
-    }).join('');
-  }
-
   const thead = $arm('mensalHead');
+  const table = thead?.closest('table') || body?.closest('table');
+  if (table) armEnsureTableCols(table, ARM_MENSAL_COLS);
+
   if (thead) {
     thead.innerHTML = `
       ${sortTh('mensal', 'mesLabel', 'Mês')}
@@ -2360,6 +2584,22 @@ function renderArmMensal() {
       ${sortTh('mensal', 'pctVendasLiq', '% s/ vendas liq', 'right')}
       ${sortTh('mensal', 'pctVendasLiqCom', '% c/ imp. s/ vendas liq', 'right')}`;
   }
+
+  if (body) {
+    body.innerHTML = displayRows.map(row => {
+      if (row.type === 'year') {
+        return `<tr class="month-year-row"><td colspan="${ARM_MENSAL_COLS}"><strong>${armEsc(row.label)}</strong></td></tr>`;
+      }
+      if (row.type === 'subtotal') {
+        return armMensalTotalsRowHtml(row.label, row, 'month-subtotal-row');
+      }
+      if (row.type === 'total') {
+        return armMensalTotalsRowHtml(row.label, row, 'month-total-row');
+      }
+      return armMensalMonthRowHtml(row.month);
+    }).join('');
+  }
+
   if (typeof scheduleTableSort === 'function') scheduleTableSort();
 }
 
@@ -2675,12 +2915,14 @@ function armSetCatalog(sel) {
 function armSetProcessing(active, label) {
   const spin = $arm('procSpin');
   const btn = $arm('procBtn');
+  const loadBtn = $arm('loadBtn');
   const note = $arm('procNote');
   if (spin) {
     spin.hidden = !active;
     spin.style.display = active ? 'inline-flex' : 'none';
   }
   if (btn) btn.disabled = active || !armPendingFiles.length;
+  if (loadBtn) loadBtn.disabled = !!active;
   if (note) {
     if (active && label) {
       note.textContent = label;
@@ -2724,7 +2966,11 @@ async function processOneArmFile(file) {
     record._partialToast = `${monthLbl}: resumo OK, NF detalhe omitido (ficheiro grande).`;
   }
   if (!record.servicos?.length) {
-    throw new Error('Nenhum serviço no bloco Resumo — verifica o ficheiro ou formato.');
+    let hint = armGuessWrongFileError(wb, file.name);
+    if (!hint && record.format === 'v2') {
+      hint = 'Folha Resumo encontrada mas sem linhas válidas — confirma colunas Qtde / Valor Calculado no Excel Unilog.';
+    }
+    throw new Error(hint || 'Nenhum serviço no bloco Resumo — verifica o ficheiro ou formato.');
   }
   armLogParsedMonth(record, file.name);
   return { fileName: file.name, record };
@@ -2797,6 +3043,7 @@ async function processArmFiles() {
 
 async function loadSavedArmazem(silent) {
   if (typeof fetchExcelFiles !== 'function') return false;
+  if (!silent) armSetProcessing(true, 'A carregar da cloud…');
   try {
     const m = await Promise.race([
       fetchExcelFiles([armSlot()]),
@@ -2822,6 +3069,8 @@ async function loadSavedArmazem(silent) {
     }
   } catch (e) {
     console.warn('[armazem] load saved', e);
+  } finally {
+    if (!silent) armSetProcessing(false);
   }
   return false;
 }
@@ -2868,22 +3117,7 @@ function exportArmazemWorkbook() {
   );
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(totalAoa), 'Total');
 
-  const mensal = months.map(m => {
-    const pago = armGetMensalPagoSemImp(m);
-    const vendasLiq = armGetVendasLiq(m);
-    const pagoComImp = armGetMonthPagoComImp(m);
-    return {
-      Mes: armMesLabel(m),
-      VendasLiq: vendasLiq || '',
-      Armazenagem55: armGetNfFee(m),
-      Adicionais: armGetAdicionaisSum(m),
-      PagoSemImpostos: pago,
-      Impostos: armGetMonthImpostos(m),
-      TotalComImpostos: pagoComImp,
-      PctSobreVendasLiq: vendasLiq > 0 ? pago / vendasLiq : '',
-      PctComImpSobreVendasLiq: vendasLiq > 0 ? pagoComImp / vendasLiq : ''
-    };
-  });
+  const mensal = buildArmMensalExportRows(months);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mensal), 'Visão mensal');
 
   const nfs = months.flatMap(m => (m.nfRows || []).map(r => ({
