@@ -1483,6 +1483,10 @@ function normHdrCell(v) {
   return String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+function armResumoNomeHdrRe(h) {
+  return /tipo de servi|codigo servi|cod servi|descricao.*servi|nome.*servi|^servico$|^descricao$/.test(h);
+}
+
 function findResumoHeaderRow(matrix) {
   for (let r = 0; r < matrix.length; r++) {
     const row = matrix[r] || [];
@@ -1490,8 +1494,8 @@ function findResumoHeaderRow(matrix) {
     let hasQtde = false;
     for (let c = 0; c < row.length; c++) {
       const h = normHdrCell(row[c]);
-      if (/tipo de servi|codigo servi|cod servi/.test(h)) hasNome = true;
-      if (/qtde|quantidade/.test(h)) hasQtde = true;
+      if (armResumoNomeHdrRe(h)) hasNome = true;
+      if (/qtde\s*servi|qtde|quantidade|qtd\b/.test(h)) hasQtde = true;
     }
     if (hasNome && hasQtde) return r;
   }
@@ -1499,40 +1503,141 @@ function findResumoHeaderRow(matrix) {
 }
 
 function scanResumoCols(matrix, hdrRow, fallback) {
-  const cols = { ...(fallback || { nome: 1, qtde: 2, unit: 3, valor: 4 }) };
+  const cols = {
+    ...(fallback || { nome: 1, qtde: 2, unit: 3, valor: 4 }),
+    nomeTipo: -1,
+    nomeCodigo: -1,
+    nomeDesc: -1
+  };
   const row = matrix[hdrRow] || [];
-  let nomeTipo = -1;
-  let nomeCodigo = -1;
   for (let c = 0; c < row.length; c++) {
     const h = normHdrCell(row[c]);
     if (!h) continue;
-    if (/qtde\s*servi|qtde|quantidade/.test(h)) cols.qtde = c;
+    if (/qtde\s*servi|qtde|quantidade|qtd\b/.test(h)) cols.qtde = c;
     else if (/valor unit|unitario/.test(h)) cols.unit = c;
-    else if (/valor calc|calculado/.test(h)) cols.valor = c;
-    else if (/tipo de servi/.test(h)) nomeTipo = c;
-    else if (/codigo servi|cod servi/.test(h)) nomeCodigo = c;
+    else if (/valor calc|calculado|valor total|valor servi/.test(h)) cols.valor = c;
+    else if (/tipo de servi/.test(h)) cols.nomeTipo = c;
+    else if (/codigo servi|cod servi/.test(h)) cols.nomeCodigo = c;
+    else if (/descricao.*servi|^descricao$|nome.*servi|^servico$/.test(h)) cols.nomeDesc = c;
   }
-  // v2 Unilog: descriptions live in "Código Serviço"; "Tipo de Serviço" is often blank.
-  if (nomeCodigo >= 0) cols.nome = nomeCodigo;
-  else if (nomeTipo >= 0) cols.nome = nomeTipo;
+  // Default nome col for resumoRowServiceName fallbacks (prefer descriptive columns at row level).
+  if (cols.nomeDesc >= 0) cols.nome = cols.nomeDesc;
+  else if (cols.nomeTipo >= 0) cols.nome = cols.nomeTipo;
+  else if (cols.nomeCodigo >= 0) cols.nome = cols.nomeCodigo;
   return cols;
+}
+
+function resumoServiceNameScore(text) {
+  const s = String(text ?? '').trim();
+  if (!s || s === '-') return 0;
+  const hasAlpha = /[A-Za-zÀ-ú]/.test(s);
+  return s.length + (hasAlpha ? 250 : (/^\d+$/.test(s) ? -50 : 0));
 }
 
 function resumoRowServiceName(matrix, r, cols) {
   const seen = new Set();
-  const tryCols = [];
-  for (const c of [cols.nome, 1, 0, 2, 3, 4, 5]) {
-    if (c >= 0 && !seen.has(c)) { seen.add(c); tryCols.push(c); }
-  }
-  for (const c of tryCols) {
+  const candidates = [];
+  const tryCol = (c) => {
+    if (c == null || c < 0 || seen.has(c)) return;
+    seen.add(c);
     const t = cellText(matrix, r, c);
-    if (t) return t;
+    if (t === '' || t === null || t === undefined) return;
+    candidates.push(String(t).trim());
+  };
+  for (const c of [cols.nomeDesc, cols.nomeTipo, cols.nomeCodigo, cols.nome, 1, 0, 2, 3, 4, 5, 6]) {
+    tryCol(c);
   }
-  return '';
+  if (!candidates.length) return '';
+  candidates.sort((a, b) => resumoServiceNameScore(b) - resumoServiceNameScore(a));
+  return candidates[0];
 }
 
 function armIsResumoFooterRow(nome) {
   return /^Apura|^Total\b|^Impostos/i.test(String(nome || '').trim());
+}
+
+function parseResumoServicosFromMatrix(matrix, opts) {
+  const servicos = [];
+  const hdr = findResumoHeaderRow(matrix);
+  if (hdr < 0) return { servicos, hdr: -1, cols: null };
+  const cols = scanResumoCols(matrix, hdr, opts?.colFallback);
+  for (let r = hdr + 1; r < matrix.length; r++) {
+    const nome = resumoRowServiceName(matrix, r, cols);
+    if (!nome) continue;
+    if (armIsResumoFooterRow(nome)) continue;
+    const isNf = isNfPercentualService(nome);
+    const nums = armFinishServico(
+      nome,
+      armCellNum(matrix, r, cols.qtde),
+      armCellNum(matrix, r, cols.unit),
+      armCellNum(matrix, r, cols.valor),
+      isNf
+    );
+    if (!nums.valor && !nums.qtde) continue;
+    const norm = normalizeServicoName(nome);
+    const cat = resolveCatalogCategory(nome);
+    servicos.push({
+      rawName: nome, normName: norm, codigo: nome,
+      qtde: nums.qtde, valorUnit: nums.valorUnit, valor: nums.valor,
+      catalogId: cat.id, catalogSure: cat.sure, isNf
+    });
+  }
+  return { servicos, hdr, cols };
+}
+
+function parseV1LegacyResumoServicos(matrix) {
+  const servicos = [];
+  let resumoHdr = -1;
+  for (let r = 0; r < matrix.length; r++) {
+    const t0 = cellText(matrix, r, 0);
+    const t1 = cellText(matrix, r, 1);
+    if (/^\s*Resumo\s*$/i.test(t1) || /^\s*Resumo\s*$/i.test(t0)) { resumoHdr = r; break; }
+  }
+  if (resumoHdr < 0) return servicos;
+  const hdrRow = resumoHdr + 1;
+  const cols = scanResumoCols(matrix, hdrRow, { nome: 1, qtde: 17, unit: 25, valor: 28 });
+  for (let r = resumoHdr + 2; r < matrix.length; r++) {
+    const nome = resumoRowServiceName(matrix, r, cols);
+    if (!nome) continue;
+    if (/^Apura/i.test(nome) || /IMPOSTO/i.test(nome)) continue;
+    const isNf = isNfPercentualService(nome);
+    const nums = armFinishServico(
+      nome,
+      armCellNum(matrix, r, cols.qtde),
+      armCellNum(matrix, r, cols.unit),
+      armCellNum(matrix, r, cols.valor),
+      isNf
+    );
+    if (!nome || (!nums.valor && !nums.qtde)) continue;
+    const norm = normalizeServicoName(nome);
+    const cat = resolveCatalogCategory(nome);
+    servicos.push({
+      rawName: nome, normName: norm, codigo: nome,
+      qtde: nums.qtde, valorUnit: nums.valorUnit, valor: nums.valor,
+      catalogId: cat.id, catalogSure: cat.sure, isNf
+    });
+  }
+  return servicos;
+}
+
+function armGuessWrongFileError(wb, fileName) {
+  if (findResumoSheetName(wb)) return null;
+  for (const n of wb.SheetNames || []) {
+    const m = sheetToMatrix(wb.Sheets[n]);
+    if (findResumoHeaderRow(m) >= 0) return null;
+  }
+  const fn = String(fileName || '');
+  if (/zfact|z_fact/i.test(fn)) {
+    return 'Ficheiro ZFACT (SAP NF) — carrega em Fretes → Excel SAP NF. Armazém espera Receita_Custo DELTA (Unilog).';
+  }
+  try {
+    const sapLoad = sapApi()?.loadSapRowsFromWorkbook?.(wb);
+    if (sapLoad?.valid >= 5) {
+      return 'Parece export SAP NF (ZFACT) — carrega em Fretes CT-e, não no Armazém. Aqui usa Receita_Custo DELTA da Unilog.';
+    }
+  } catch (_) { /* ignore */ }
+  const sheets = (wb.SheetNames || []).join(', ') || '(nenhuma)';
+  return `Nenhum serviço no bloco Resumo — folhas: ${sheets}. Esperado folha "Resumo de Serviços" (v2) ou bloco Resumo (v1).`;
 }
 
 function armLogParsedMonth(record, fileName) {
@@ -1569,8 +1674,20 @@ function findSheetName(wb, pattern) {
   return wb.SheetNames.find(n => re.test(normSheetName(n))) || null;
 }
 
+function isArmResumoSheetName(name) {
+  const s = normSheetName(name);
+  return /^resumo(\s+(de\s+)?)?servi/.test(s) || s === 'resumo';
+}
+
 function findResumoSheetName(wb) {
-  return wb.SheetNames.find(n => /^resumo de servi/.test(normSheetName(n))) || null;
+  const names = wb.SheetNames || [];
+  const byPattern = names.find(n => isArmResumoSheetName(n));
+  if (byPattern) return byPattern;
+  for (const n of names) {
+    const m = sheetToMatrix(wb.Sheets[n]);
+    if (findResumoHeaderRow(m) >= 0) return n;
+  }
+  return null;
 }
 
 function isArmBloatSheet(name) {
@@ -1584,7 +1701,7 @@ function pickBillingSheets(sheetNames) {
   const v2Keep = names.filter(n => {
     if (isArmBloatSheet(n)) return false;
     const s = normSheetName(n);
-    return /^resumo de servi/.test(s) || /^informa/.test(s);
+    return isArmResumoSheetName(n) || /^informa/.test(s);
   });
   if (v2Keep.length) return v2Keep;
   const v1Keep = names.filter(n => !isArmBloatSheet(n));
@@ -1632,33 +1749,11 @@ function parseArmazemV2(wb, fileName, opts) {
     meta.mesLabel = armMesNomeLong(meta.mesKey, '');
   }
 
-  const servicos = [];
   const hdr = findResumoHeaderRow(resumo);
   if (hdr < 0) throw new Error('Cabeçalho do resumo não encontrado.');
   const cols = scanResumoCols(resumo, hdr);
-
-  for (let r = hdr + 1; r < resumo.length; r++) {
-    const nome = resumoRowServiceName(resumo, r, cols);
-    const codigo = nome;
-    if (!nome) continue;
-    if (armIsResumoFooterRow(nome)) continue;
-    const isNf = isNfPercentualService(nome);
-    const nums = armFinishServico(
-      nome,
-      armCellNum(resumo, r, cols.qtde),
-      armCellNum(resumo, r, cols.unit),
-      armCellNum(resumo, r, cols.valor),
-      isNf
-    );
-    if (!nums.valor && !nums.qtde) continue;
-    const norm = normalizeServicoName(nome);
-    const cat = resolveCatalogCategory(nome);
-    servicos.push({
-      rawName: nome, normName: norm, codigo,
-      qtde: nums.qtde, valorUnit: nums.valorUnit, valor: nums.valor,
-      catalogId: cat.id, catalogSure: cat.sure, isNf
-    });
-  }
+  const parsedResumo = parseResumoServicosFromMatrix(resumo);
+  const servicos = parsedResumo.servicos;
 
   const totalCalc = servicos.filter(s => !/IMPOSTO/i.test(s.normName)).reduce((a, s) => a + s.valor, 0);
   console.log(`[armazem] parseV2 resumo`, {
@@ -1725,48 +1820,31 @@ function parseArmazemV2(wb, fileName, opts) {
 
 function parseArmazemV1(wb, fileName, opts) {
   const skipNfDetail = !!opts?.skipNfDetail;
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const m = sheetToMatrix(sheet);
   const meta = parseMonthFromFileName(fileName);
 
   let depositante = '';
-  for (let r = 0; r < Math.min(20, m.length); r++) {
-    for (let c = 0; c < 10; c++) {
-      const v = cellText(m, r, c);
-      if (/DELTA FOODS|14830817000100/i.test(v)) depositante = v;
+  let servicos = [];
+  let mainMatrix = sheetToMatrix(wb.Sheets[wb.SheetNames[0]]);
+  for (const sheetName of wb.SheetNames || []) {
+    if (isArmBloatSheet(sheetName)) continue;
+    const m = sheetToMatrix(wb.Sheets[sheetName]);
+    if (!depositante) {
+      for (let r = 0; r < Math.min(20, m.length); r++) {
+        for (let c = 0; c < 10; c++) {
+          const v = cellText(m, r, c);
+          if (/DELTA FOODS|14830817000100/i.test(v)) depositante = v;
+        }
+      }
+    }
+    const fromHeader = parseResumoServicosFromMatrix(m);
+    const fromLegacy = parseV1LegacyResumoServicos(m);
+    const found = fromHeader.servicos.length >= fromLegacy.length ? fromHeader.servicos : fromLegacy;
+    if (found.length > servicos.length) {
+      servicos = found;
+      mainMatrix = m;
     }
   }
-
-  const servicos = [];
-  let resumoHdr = -1;
-  for (let r = 0; r < m.length; r++) {
-    if (/^\s*Resumo\s*$/i.test(cellText(m, r, 1))) { resumoHdr = r; break; }
-  }
-  if (resumoHdr >= 0) {
-    const hdrRow = resumoHdr + 1;
-    const cols = scanResumoCols(m, hdrRow, { nome: 1, qtde: 17, unit: 25, valor: 28 });
-    for (let r = resumoHdr + 2; r < m.length; r++) {
-      const nome = resumoRowServiceName(m, r, cols);
-      if (!nome) continue;
-      if (/^Apura/i.test(nome) || /IMPOSTO/i.test(nome)) continue;
-      const isNf = isNfPercentualService(nome);
-      const nums = armFinishServico(
-        nome,
-        armCellNum(m, r, cols.qtde),
-        armCellNum(m, r, cols.unit),
-        armCellNum(m, r, cols.valor),
-        isNf
-      );
-      if (!nome || (!nums.valor && !nums.qtde)) continue;
-      const norm = normalizeServicoName(nome);
-      const cat = resolveCatalogCategory(nome);
-      servicos.push({
-        rawName: nome, normName: norm, codigo: nome,
-        qtde: nums.qtde, valorUnit: nums.valorUnit, valor: nums.valor,
-        catalogId: cat.id, catalogSure: cat.sure, isNf
-      });
-    }
-  }
+  const m = mainMatrix;
 
   const nfRows = [];
   if (!skipNfDetail) {
@@ -2867,7 +2945,11 @@ async function processOneArmFile(file) {
     record._partialToast = `${monthLbl}: resumo OK, NF detalhe omitido (ficheiro grande).`;
   }
   if (!record.servicos?.length) {
-    throw new Error('Nenhum serviço no bloco Resumo — verifica o ficheiro ou formato.');
+    let hint = armGuessWrongFileError(wb, file.name);
+    if (!hint && record.format === 'v2') {
+      hint = 'Folha Resumo encontrada mas sem linhas válidas — confirma colunas Qtde / Valor Calculado no Excel Unilog.';
+    }
+    throw new Error(hint || 'Nenhum serviço no bloco Resumo — verifica o ficheiro ou formato.');
   }
   armLogParsedMonth(record, file.name);
   return { fileName: file.name, record };
