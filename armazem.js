@@ -2160,6 +2160,21 @@ function sortTh(tableId, col, label, cls) {
   return `<th class="sortable ${cls || ''} ${sorted}" onclick="armDoSort('${tableId}','${col}')">${label}<span class="sort-ind">${ind}</span></th>`;
 }
 
+const ARM_MENSAL_COLS = 9;
+
+function armEnsureTableCols(table, nCols) {
+  if (!table || !nCols) return;
+  table.dataset.managedSort = 'arm';
+  delete table.dataset.domSortBound;
+  let cg = table.querySelector('colgroup');
+  if (!cg) {
+    cg = document.createElement('colgroup');
+    table.insertBefore(cg, table.firstChild);
+  }
+  while (cg.children.length < nCols) cg.appendChild(document.createElement('col'));
+  while (cg.children.length > nCols) cg.removeChild(cg.lastChild);
+}
+
 function switchArmTab(tab) {
   armActiveTab = tab;
   document.querySelectorAll('#page-armazem .arm-tab').forEach(t => {
@@ -2297,6 +2312,23 @@ function renderArmMensal() {
   });
 
   const body = $arm('mensalBody');
+  const thead = $arm('mensalHead');
+  const table = thead?.closest('table') || body?.closest('table');
+  if (table) armEnsureTableCols(table, ARM_MENSAL_COLS);
+
+  if (thead) {
+    thead.innerHTML = `
+      ${sortTh('mensal', 'mesLabel', 'Mês')}
+      ${sortTh('mensal', 'vendasLiq', 'Vendas Liq', 'right')}
+      ${sortTh('mensal', 'armazenagemValor', 'Armazenagem', 'right')}
+      ${sortTh('mensal', 'adicionais', 'Adicionais', 'right')}
+      ${sortTh('mensal', 'totalServicos', 'Pago (s/ imp.)', 'right')}
+      ${sortTh('mensal', 'pctVendasLiq', '% s/ vendas liq', 'right')}
+      ${sortTh('mensal', 'impostos', 'Impostos', 'right')}
+      ${sortTh('mensal', 'pagoComImp', 'Total pago (c/ imp.)', 'right')}
+      ${sortTh('mensal', 'pctVendasLiqCom', '% c/ imp. s/ vendas liq', 'right')}`;
+  }
+
   if (body) {
     body.innerHTML = rows.map(m => {
       const addVal = (m.adicionais || []).reduce((s, a) => s + a.valor, 0);
@@ -2323,19 +2355,6 @@ function renderArmMensal() {
     }).join('');
   }
 
-  const thead = $arm('mensalHead');
-  if (thead) {
-    thead.innerHTML = `
-      ${sortTh('mensal', 'mesLabel', 'Mês')}
-      ${sortTh('mensal', 'vendasLiq', 'Vendas Liq', 'right')}
-      ${sortTh('mensal', 'armazenagemValor', 'Armazenagem', 'right')}
-      ${sortTh('mensal', 'adicionais', 'Adicionais', 'right')}
-      ${sortTh('mensal', 'totalServicos', 'Pago (s/ imp.)', 'right')}
-      ${sortTh('mensal', 'pctVendasLiq', '% s/ vendas liq', 'right')}
-      ${sortTh('mensal', 'impostos', 'Impostos', 'right')}
-      ${sortTh('mensal', 'pagoComImp', 'Total pago (c/ imp.)', 'right')}
-      ${sortTh('mensal', 'pctVendasLiqCom', '% c/ imp. s/ vendas liq', 'right')}`;
-  }
   if (typeof scheduleTableSort === 'function') scheduleTableSort();
 }
 

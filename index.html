@@ -332,7 +332,9 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-armazem .filters input[type=text]{flex:1;min-width:160px;}
 #page-armazem .tbl-wrap{max-height:520px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
 #page-armazem .tbl-wrap table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;}
+#page-armazem table.arm-sort-table{table-layout:fixed;}
 #page-armazem .tbl-wrap th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;position:sticky;top:0;background:#fff;z-index:1;}
+#page-armazem .tbl-wrap th.right,#page-armazem .tbl-wrap th.num{text-align:right;}
 #page-armazem .tbl-wrap td{padding:8px 10px;border-bottom:1px solid var(--bg4);vertical-align:top;}
 #page-armazem .right{text-align:right;}
 #page-armazem th.sortable{cursor:pointer;user-select:none;}
@@ -1845,7 +1847,9 @@ select.cad-inp{cursor:pointer;}
         <div class="kpis" id="arm-mensalKpis"></div>
         <div class="section-title">Resumo por mês</div>
         <div class="tbl-wrap">
-          <table><thead><tr id="arm-mensalHead"></tr></thead><tbody id="arm-mensalBody"></tbody></table>
+          <table id="armMensalTable" class="arm-sort-table" data-managed-sort="arm">
+            <colgroup><col><col><col><col><col><col><col><col><col></colgroup>
+            <thead><tr id="arm-mensalHead"></tr></thead><tbody id="arm-mensalBody"></tbody></table>
         </div>
       </div>
     </div>
@@ -6321,6 +6325,7 @@ function scheduleTableSort(){
       return;
     }
     if(table.dataset.managedSort)return;
+    if(table.querySelector('th[onclick*="armDoSort"]'))return;
     TableSort.enableTableSort(table);
   });
 }
