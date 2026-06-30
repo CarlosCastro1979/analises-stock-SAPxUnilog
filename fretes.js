@@ -1,5 +1,5 @@
-// fretes.js v1.7.15
-const FRETES_JS_VERSION = '1.7.15';
+// fretes.js v1.7.16
+const FRETES_JS_VERSION = '1.7.16';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -1211,10 +1211,23 @@ function finalizeSapNfValor(acc) {
   const vals = acc.lineVals || [];
   const lineSum = acc.lineSum;
   const doc = acc.docVal > 0 ? acc.docVal : 0;
+  const distinctMaterials = acc.materialKeys ? acc.materialKeys.size : 0;
 
-  // User spec: SUM valor bruto per NF; doc total only when no line bruto captured.
+  // User spec: GROUP BY NF, SUM valor bruto — every billable line counts.
   if (vals.length > 0) {
-    if (vals.every(v => sapValoresClose(v, vals[0]))) return vals[0];
+    const allIdentical = vals.every(v => sapValoresClose(v, vals[0]));
+
+    // Multiple distinct material lines: always SUM (even when bruto matches).
+    if (acc.hasMaterialCol && distinctMaterials >= 2) return lineSum;
+
+    if (allIdentical) {
+      // Doc total repeated as line bruto on every row.
+      if (doc > 0 && sapValoresClose(vals[0], doc)) return doc;
+      // Export without material column: same NF total on each positional row.
+      if (!acc.hasMaterialCol) return vals[0];
+      // Single material row repeated in export.
+      if (distinctMaterials <= 1) return vals[0];
+    }
     return lineSum;
   }
 
@@ -1228,7 +1241,7 @@ function finalizeSapNfValor(acc) {
   return 0;
 }
 
-const SAP_NF_DEBUG_KEYS = new Set(['99635', '99636', '99633', '18596', '2223', '18591']);
+const SAP_NF_DEBUG_KEYS = new Set(['99635', '99636', '99641', '99633', '18596', '2223', '18591']);
 
 function buildSapNfMap(rows) {
   const map = {};
@@ -1243,7 +1256,9 @@ function buildSapNfMap(rows) {
         lineCount: 0,
         lineVals: [],
         docVal: 0,
-        fallbackVals: []
+        fallbackVals: [],
+        hasMaterialCol: false,
+        materialKeys: new Set()
       };
     }
     return map[key];
@@ -1277,6 +1292,12 @@ function buildSapNfMap(rows) {
     const dtEmissao = parseSapBrDate(r.dtEmissao);
 
     const acc = ensureAcc(r, key);
+
+    if (r._hasMaterialCol) acc.hasMaterialCol = true;
+    if (r._hasMaterialCol && r.material) {
+      const matKey = String(r.material).trim();
+      if (matKey) acc.materialKeys.add(matKey);
+    }
 
     if (docValor > 0) {
       acc.docVal = Math.max(acc.docVal, docValor);
@@ -1394,6 +1415,11 @@ function _debugBuildSapNfMapAggregation() {
     { nf: '000018591', material: 'Y', valorLine: '8.500,00' },
     { nf: '000018591', material: 'Z', valorLine: '1.200,50' }
   ]);
+  const map99641 = buildSapNfMap([
+    { nf: '000099641-2', _hasMaterialCol: true, material: '', valorLine: '0,00' },
+    { nf: '000099641-2', _hasMaterialCol: true, material: 'SKU-A', valorLine: '331,90' },
+    { nf: '000099641-2', _hasMaterialCol: true, material: 'SKU-B', valorLine: '331,90' }
+  ]);
   const ok97723 = Math.abs((map['97723']?.valorNF || 0) - 3500.5) < 0.01;
   const ok88888 = Math.abs((map['88888']?.valorNF || 0) - 500) < 0.01;
   const ok99999 = map['99999']?.valorNF === 0;
@@ -1409,9 +1435,10 @@ function _debugBuildSapNfMapAggregation() {
   const ok99636lineDoc = Math.abs((map99636lineDoc['99636']?.valorNF || 0) - 58266.08) < 0.01;
   const ok2223 = Math.abs((map2223['2223']?.valorNF || 0) - 12345.67) < 0.01;
   const ok18591 = Math.abs((map18591['18591']?.valorNF || 0) - 9700.5) < 0.01;
+  const ok99641 = Math.abs((map99641['99641']?.valorNF || 0) - 663.8) < 0.01;
   if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat || !ok99635dupPos
       || !ok99635lineDoc || !ok99635inflate || !ok99635brutoZfact || !ok99635feeLines || !ok99636bruto
-      || !ok99636lineDoc || !ok2223 || !ok18591) {
+      || !ok99636lineDoc || !ok2223 || !ok18591 || !ok99641) {
     console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
       ok97723, got97723: map['97723']?.valorNF,
       ok88888, got88888: map['88888']?.valorNF,
@@ -1427,7 +1454,8 @@ function _debugBuildSapNfMapAggregation() {
       ok99636bruto, got99636bruto: map99636bruto['99636']?.valorNF,
       ok99636lineDoc, got99636lineDoc: map99636lineDoc['99636']?.valorNF,
       ok2223, got2223: map2223['2223']?.valorNF,
-      ok18591, got18591: map18591['18591']?.valorNF
+      ok18591, got18591: map18591['18591']?.valorNF,
+      ok99641, got99641: map99641['99641']?.valorNF
     });
   } else {
     console.debug('[SAP NF] buildSapNfMap aggregation OK');
