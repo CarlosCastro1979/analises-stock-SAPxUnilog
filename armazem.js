@@ -2008,8 +2008,7 @@ function applySapToArmNf(row) {
   const sap = api.lookupSapEntry(row.nf);
   out.sapFound = !!sap;
   out.sapMissing = !sap;
-  const parseVal = api.parseSapNum || armNum;
-  out.sapValor = sap ? parseVal(sap.valorNF) : null;
+  out.sapValor = sap ? sap.valorNF : null;
   out.sapCliente = sap?.cliente || '';
   out.valorDiff = sap && api.isRelevantValorDiff(out.valorUnilog, out.sapValor);
   return out;

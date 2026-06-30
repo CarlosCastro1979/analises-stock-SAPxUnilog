@@ -699,30 +699,32 @@ function parseSapNum(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function looksLikeSapValorCell(v) {
+function looksLikeSapValorCell(v, opts = {}) {
   if (v === null || v === undefined || v === '') return false;
-  if (looksLikeSapNfCell(v)) return false;
   const n = parseSapNum(v);
   if (!(n > 0)) return false;
   const s = String(v).trim().replace(/\s/g, '');
   if (/^R\$/i.test(s) || s.includes(',')) return true;
-  if (typeof v === 'number' && v >= 39800 && v <= 55000) return false;
   if (/^\d{1,3}$/.test(s) && n < 1000) return false;
-  return n >= 10 || s.includes('.');
+  if (opts.trustColumn) return true;
+  return n >= 10 || s.includes('.') || (typeof v === 'number' && !Number.isInteger(v));
 }
 
 /** ZFACT often has série/status between NF (D) and valor (F/G) — scan cols after NF. */
 function pickSapValorFromLine(line, colIdx) {
   const idx = colIdx || activeSapColIdx;
   if (!idx || !Array.isArray(line)) return null;
+  const nfKey = normNFKey(line[idx.nf]);
+  const isSameNf = (v) => nfKey && normNFKey(v) === nfKey;
   if (idx.valorNF != null) {
     const primary = line[idx.valorNF];
-    if (looksLikeSapValorCell(primary)) return primary;
+    if (looksLikeSapValorCell(primary, { trustColumn: true })) return primary;
   }
   const start = idx.nf != null ? idx.nf + 1 : 4;
   for (let c = start; c < Math.min(line.length, start + 6); c++) {
     if (c === idx.valorNF) continue;
     const v = line[c];
+    if (isSameNf(v)) continue;
     if (looksLikeSapValorCell(v)) return v;
   }
   return null;
@@ -764,7 +766,7 @@ function applySapColPositionalFallback(row, line, headerRow, standardLayout, col
     row._sapDateSource = 'colC';
   }
   if (valorRaw !== null && valorRaw !== undefined && valorRaw !== '') {
-    if (!row.valorNF || !looksLikeSapValorCell(row.valorNF)) row.valorNF = valorRaw;
+    if (!row.valorNF || !looksLikeSapValorCell(row.valorNF, { trustColumn: true })) row.valorNF = valorRaw;
   }
   row._sapPositionalLayout = true;
   return row;
