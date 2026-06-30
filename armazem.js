@@ -2265,6 +2265,148 @@ function updateArmFileZone() {
   if (btn) btn.disabled = !armPendingFiles.length;
 }
 
+function armAggregateMensalTotals(monthRows) {
+  const t = { vendasLiq: 0, armazenagem: 0, adicionais: 0, pago: 0, impostos: 0, pagoComImp: 0 };
+  monthRows.forEach(m => {
+    const vl = armGetVendasLiq(m);
+    if (vl > 0) t.vendasLiq += vl;
+    t.armazenagem += armGetArmazenagemRubricaValor(m);
+    t.adicionais += (m.adicionais || []).reduce((s, a) => s + a.valor, 0);
+    t.pago += armGetArmazenagemValor(m).pago;
+    t.impostos += armGetMonthImpostos(m);
+    t.pagoComImp += armGetMonthPagoComImp(m);
+  });
+  return t;
+}
+
+function buildArmMensalDisplayRows(sorted, groupByYear) {
+  if (!groupByYear) {
+    const out = sorted.map(m => ({ type: 'month', month: m }));
+    if (sorted.length) {
+      out.push({ type: 'total', label: 'Total geral', ...armAggregateMensalTotals(sorted) });
+    }
+    return out;
+  }
+  const out = [];
+  const dated = sorted.filter(m => /^\d{4}-\d{2}$/.test(String(m.mesKey || '')));
+  const other = sorted.filter(m => !/^\d{4}-\d{2}$/.test(String(m.mesKey || '')));
+  let lastYear = null;
+  let yearGroup = [];
+  dated.forEach(m => {
+    const year = String(m.mesKey).slice(0, 4);
+    if (lastYear && year !== lastYear && yearGroup.length) {
+      out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...armAggregateMensalTotals(yearGroup) });
+      yearGroup = [];
+    }
+    if (year !== lastYear) {
+      out.push({ type: 'year', label: year, year });
+      lastYear = year;
+    }
+    out.push({ type: 'month', month: m });
+    yearGroup.push(m);
+  });
+  if (yearGroup.length && lastYear) {
+    out.push({ type: 'subtotal', label: `Total ${lastYear}`, year: lastYear, ...armAggregateMensalTotals(yearGroup) });
+  }
+  other.forEach(m => out.push({ type: 'month', month: m }));
+  return out;
+}
+
+function armMensalTotalsRowHtml(label, t, trCls) {
+  const pctVl = armFmtPctGasto(t.pago, t.vendasLiq);
+  const pctVlCom = armFmtPctGasto(t.pagoComImp, t.vendasLiq);
+  return `<tr class="${trCls}">
+    <td><strong>${armEsc(label)}</strong></td>
+    <td class="right">${t.vendasLiq > 0 ? armFmtMoney(t.vendasLiq) : '—'}</td>
+    <td class="right">${t.armazenagem > 0 ? armFmtMoney(t.armazenagem) : '—'}</td>
+    <td class="right">${t.adicionais > 0 ? armFmtMoney(t.adicionais) : '—'}</td>
+    <td class="right">${t.pago > 0 ? armFmtMoney(t.pago) : '—'}</td>
+    <td class="right" title="Pago s/ impostos ÷ Vendas Liq">${pctVl}</td>
+    <td class="right">${t.impostos > 0 ? armFmtMoney(t.impostos) : '—'}</td>
+    <td class="right">${t.pagoComImp > 0 ? armFmtMoney(t.pagoComImp) : '—'}</td>
+    <td class="right" title="Total pago c/ impostos ÷ Vendas Liq">${pctVlCom}</td>
+  </tr>`;
+}
+
+function armMensalMonthRowHtml(m) {
+  const addVal = (m.adicionais || []).reduce((s, a) => s + a.valor, 0);
+  const imp = armGetMonthImpostos(m);
+  const pago = armGetArmazenagemValor(m).pago;
+  const pagoComImp = armGetMonthPagoComImp(m);
+  const armRub = armGetArmazenagemRubricaValor(m);
+  const vendasLiq = armGetVendasLiq(m);
+  const pctVl = armFmtPctGasto(pago, vendasLiq);
+  const pctVlCom = armFmtPctGasto(pagoComImp, vendasLiq);
+  const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
+  const vlDisplay = vendasLiq ? fmtArmNum(vendasLiq, 2) : '';
+  return `<tr class="arm-mensal-month-row">
+    <td>${armEsc(armMesLabel(m))}${partial}</td>
+    <td class="right"><input type="text" class="fi arm-vendas-liq-input" data-mes="${armEsc(m.mesKey)}" value="${armEsc(vlDisplay)}" placeholder="R$ …" onblur="typeof armSetVendasLiq==='function'&&armSetVendasLiq('${armEsc(m.mesKey)}',this.value)" style="width:110px;text-align:right;font-size:11px;padding:4px 6px;"></td>
+    <td class="right" title="5,5% sobre NF expedida">${armRub > 0 ? armFmtMoney(armRub) : '—'}</td>
+    <td class="right">${armFmtMoney(addVal)}</td>
+    <td class="right">${pago > 0 ? armFmtMoney(pago) : '—'}</td>
+    <td class="right" title="Pago s/ impostos ÷ Vendas Liq">${pctVl}</td>
+    <td class="right">${imp > 0 ? armFmtMoney(imp) : '—'}</td>
+    <td class="right">${pagoComImp > 0 ? armFmtMoney(pagoComImp) : '—'}</td>
+    <td class="right" title="Total pago c/ impostos ÷ Vendas Liq">${pctVlCom}</td>
+  </tr>`;
+}
+
+function armMensalExportRowFromMonth(m) {
+  const pago = armGetArmazenagemValor(m).pago;
+  const vendasLiq = armGetVendasLiq(m);
+  const pagoComImp = armGetMonthPagoComImp(m);
+  return {
+    Mes: armMesLabel(m),
+    VendasLiq: vendasLiq || '',
+    Armazenagem: armGetArmazenagemRubricaValor(m) || '',
+    Adicionais: (m.adicionais || []).reduce((s, a) => s + a.valor, 0),
+    PagoSemImpostos: pago,
+    PctSobreVendasLiq: vendasLiq > 0 ? pago / vendasLiq : '',
+    Impostos: armGetMonthImpostos(m),
+    TotalComImpostos: pagoComImp,
+    PctComImpSobreVendasLiq: vendasLiq > 0 ? pagoComImp / vendasLiq : ''
+  };
+}
+
+function armMensalExportRowFromTotals(t, label) {
+  return {
+    Mes: label,
+    VendasLiq: t.vendasLiq || '',
+    Armazenagem: t.armazenagem || '',
+    Adicionais: t.adicionais,
+    PagoSemImpostos: t.pago,
+    PctSobreVendasLiq: t.vendasLiq > 0 ? t.pago / t.vendasLiq : '',
+    Impostos: t.impostos,
+    TotalComImpostos: t.pagoComImp,
+    PctComImpSobreVendasLiq: t.vendasLiq > 0 ? t.pagoComImp / t.vendasLiq : ''
+  };
+}
+
+function buildArmMensalExportRows(months) {
+  const sorted = [...months].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
+  const out = [];
+  const dated = sorted.filter(m => /^\d{4}-\d{2}$/.test(String(m.mesKey || '')));
+  const other = sorted.filter(m => !/^\d{4}-\d{2}$/.test(String(m.mesKey || '')));
+  let lastYear = null;
+  let yearGroup = [];
+  dated.forEach(m => {
+    const year = String(m.mesKey).slice(0, 4);
+    if (lastYear && year !== lastYear && yearGroup.length) {
+      out.push(armMensalExportRowFromTotals(armAggregateMensalTotals(yearGroup), `Total ${lastYear}`));
+      yearGroup = [];
+    }
+    out.push(armMensalExportRowFromMonth(m));
+    yearGroup.push(m);
+    lastYear = year;
+  });
+  if (yearGroup.length && lastYear) {
+    out.push(armMensalExportRowFromTotals(armAggregateMensalTotals(yearGroup), `Total ${lastYear}`));
+  }
+  other.forEach(m => out.push(armMensalExportRowFromMonth(m)));
+  return out;
+}
+
 function renderArmMensal() {
   const empty = $arm('mensalEmpty');
   const content = $arm('mensalContent');
@@ -2291,6 +2433,8 @@ function renderArmMensal() {
       <div class="kpi"><div class="label">Armazenagem (5,5%)</div><div class="value">${totalArmRub > 0 ? armFmtMoney(totalArmRub) : '—'}</div><div class="sub">Soma da rubrica NF expedida</div></div>`;
   }
 
+  const mensalSort = armSorts.mensal;
+  const groupByYear = !mensalSort || mensalSort.col === 'mesKey' || mensalSort.col === 'mesLabel';
   const rows = armApplySort(months, 'mensal', {
     mesKey: r => r.mesKey,
     mesLabel: r => armMesLabel(r),
@@ -2311,6 +2455,7 @@ function renderArmMensal() {
       return vl > 0 && t >= 0 ? t / vl : -1;
     }
   });
+  const displayRows = buildArmMensalDisplayRows(rows, groupByYear);
 
   const body = $arm('mensalBody');
   const thead = $arm('mensalHead');
@@ -2331,28 +2476,17 @@ function renderArmMensal() {
   }
 
   if (body) {
-    body.innerHTML = rows.map(m => {
-      const addVal = (m.adicionais || []).reduce((s, a) => s + a.valor, 0);
-      const imp = armGetMonthImpostos(m);
-      const pago = armGetArmazenagemValor(m).pago;
-      const pagoComImp = armGetMonthPagoComImp(m);
-      const armRub = armGetArmazenagemRubricaValor(m);
-      const vendasLiq = armGetVendasLiq(m);
-      const pctVl = armFmtPctGasto(pago, vendasLiq);
-      const pctVlCom = armFmtPctGasto(pagoComImp, vendasLiq);
-      const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
-      const vlDisplay = vendasLiq ? fmtArmNum(vendasLiq, 2) : '';
-      return `<tr>
-        <td>${armEsc(armMesLabel(m))}${partial}</td>
-        <td class="right"><input type="text" class="fi arm-vendas-liq-input" data-mes="${armEsc(m.mesKey)}" value="${armEsc(vlDisplay)}" placeholder="R$ …" onblur="typeof armSetVendasLiq==='function'&&armSetVendasLiq('${armEsc(m.mesKey)}',this.value)" style="width:110px;text-align:right;font-size:11px;padding:4px 6px;"></td>
-        <td class="right" title="5,5% sobre NF expedida">${armRub > 0 ? armFmtMoney(armRub) : '—'}</td>
-        <td class="right">${armFmtMoney(addVal)}</td>
-        <td class="right">${pago > 0 ? armFmtMoney(pago) : '—'}</td>
-        <td class="right" title="Pago s/ impostos ÷ Vendas Liq">${pctVl}</td>
-        <td class="right">${imp > 0 ? armFmtMoney(imp) : '—'}</td>
-        <td class="right">${pagoComImp > 0 ? armFmtMoney(pagoComImp) : '—'}</td>
-        <td class="right" title="Total pago c/ impostos ÷ Vendas Liq">${pctVlCom}</td>
-      </tr>`;
+    body.innerHTML = displayRows.map(row => {
+      if (row.type === 'year') {
+        return `<tr class="month-year-row"><td colspan="${ARM_MENSAL_COLS}"><strong>${armEsc(row.label)}</strong></td></tr>`;
+      }
+      if (row.type === 'subtotal') {
+        return armMensalTotalsRowHtml(row.label, row, 'month-subtotal-row');
+      }
+      if (row.type === 'total') {
+        return armMensalTotalsRowHtml(row.label, row, 'month-total-row');
+      }
+      return armMensalMonthRowHtml(row.month);
     }).join('');
   }
 
@@ -2864,22 +2998,7 @@ function exportArmazemWorkbook() {
   );
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(totalAoa), 'Total');
 
-  const mensal = months.map(m => {
-    const pago = armGetArmazenagemValor(m).pago;
-    const vendasLiq = armGetVendasLiq(m);
-    const pagoComImp = armGetMonthPagoComImp(m);
-    return {
-      Mes: armMesLabel(m),
-      VendasLiq: vendasLiq || '',
-      Armazenagem: armGetArmazenagemRubricaValor(m) || '',
-      Adicionais: (m.adicionais || []).reduce((s, a) => s + a.valor, 0),
-      PagoSemImpostos: pago,
-      PctSobreVendasLiq: vendasLiq > 0 ? pago / vendasLiq : '',
-      Impostos: armGetMonthImpostos(m),
-      TotalComImpostos: pagoComImp,
-      PctComImpSobreVendasLiq: vendasLiq > 0 ? pagoComImp / vendasLiq : ''
-    };
-  });
+  const mensal = buildArmMensalExportRows(months);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mensal), 'Visão mensal');
 
   const nfs = months.flatMap(m => (m.nfRows || []).map(r => ({
