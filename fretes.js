@@ -379,7 +379,7 @@ const SAP_ALIASES = {
   nf: ['nota fiscal', 'nf', 'n nota fiscal', 'num nota fiscal', 'num. nota fiscal', 'notafiscal', 'nº nf', 'numero nf', 'docnum'],
   dtEmissao: ['dt emissao', 'data emissao', 'dt emissão', 'data emissão', 'data doc', 'dt nf', 'data nf', 'data nota fiscal'],
   cliente: ['cliente', 'nome cliente', 'razao social', 'razão social', 'destinatario', 'destinatário', 'cardname', 'nome do cliente'],
-  valorNF: ['doc total', 'doctotal', 'valor documento', 'valor total', 'total nf', 'total documento', 'montante', 'vl total', 'val faturamento', 'valor faturamento', 'valor mercadoria', 'valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf', 'valor']
+  valorNF: ['valor bruto', 'vl bruto', 'val bruto', 'doc total', 'doctotal', 'valor documento', 'valor total', 'total nf', 'total documento', 'montante', 'vl total', 'val faturamento', 'valor faturamento', 'valor mercadoria', 'valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf', 'valor']
 };
 
 /** SAP NF export layout: col B=cliente, C=data emissão, D=NF (0-based indices). */
@@ -1039,23 +1039,66 @@ function loadSapRowsFromWorkbook(wb) {
   return best;
 }
 
+/** Line-level valor from ZFACT row — validated before aggregation (avoids doc-entry billion bug). */
+function sapRowLineValor(r) {
+  if (!looksLikeSapValorCell(r.valorNF, { trustColumn: true })) return 0;
+  return parseSapNum(r.valorNF);
+}
+
 function buildSapNfMap(rows) {
   const map = {};
+  let multiLine = 0;
   rows.forEach(r => {
     const nf = r.nf;
     if (nf === null || nf === undefined || String(nf).trim() === '') return;
     const key = normNFKey(nf);
     if (!key) return;
-    const entry = {
-      nf,
-      cliente: r.cliente ? String(r.cliente).trim() : '',
-      dtEmissao: parseSapBrDate(r.dtEmissao),
-      valorNF: looksLikeSapValorCell(r.valorNF, { trustColumn: true }) ? parseSapNum(r.valorNF) : 0
-    };
-    map[key] = entry;
+    const lineValor = sapRowLineValor(r);
+    const cliente = r.cliente ? String(r.cliente).trim() : '';
+    const dtEmissao = parseSapBrDate(r.dtEmissao);
+    const existing = map[key];
+    if (existing) {
+      existing.valorNF += lineValor;
+      if (!existing.cliente && cliente) existing.cliente = cliente;
+      if (!existing.dtEmissao && dtEmissao) existing.dtEmissao = dtEmissao;
+      existing._lines = (existing._lines || 1) + 1;
+    } else {
+      map[key] = { nf, cliente, dtEmissao, valorNF: lineValor, _lines: 1 };
+    }
   });
+  multiLine = Object.values(map).filter(e => e._lines > 1).length;
+  if (multiLine) {
+    console.debug('[SAP NF] ZFACT agregação: %d NFs com várias linhas (valor bruto somado) de %d NFs únicas',
+      multiLine, Object.keys(map).length);
+  }
+  Object.values(map).forEach(e => { delete e._lines; });
   return map;
 }
+
+/** Console self-check — ZFACT multi-line NF totals must sum valor bruto per normNFKey. */
+function _debugBuildSapNfMapAggregation() {
+  const rows = [
+    { nf: '97723', cliente: 'A', dtEmissao: '01/01/2025', valorNF: '1.000,00' },
+    { nf: '97723-1', cliente: 'A', dtEmissao: '01/01/2025', valorNF: '2.500,50' },
+    { nf: '88888', cliente: 'B', dtEmissao: '02/01/2025', valorNF: 9540067078 },
+    { nf: '88888', cliente: 'B', dtEmissao: '02/01/2025', valorNF: '500,00' },
+    { nf: '99999', cliente: 'C', dtEmissao: '03/01/2025', valorNF: '' }
+  ];
+  const map = buildSapNfMap(rows);
+  const ok97723 = Math.abs((map['97723']?.valorNF || 0) - 3500.5) < 0.01;
+  const ok88888 = Math.abs((map['88888']?.valorNF || 0) - 500) < 0.01;
+  const ok99999 = map['99999']?.valorNF === 0;
+  if (!ok97723 || !ok88888 || !ok99999) {
+    console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
+      ok97723, got97723: map['97723']?.valorNF,
+      ok88888, got88888: map['88888']?.valorNF,
+      ok99999, got99999: map['99999']?.valorNF
+    });
+  } else {
+    console.debug('[SAP NF] buildSapNfMap aggregation OK');
+  }
+}
+_debugBuildSapNfMapAggregation();
 
 /** Relevant SAP vs Unilog NF value gap: abs diff > R$1 AND > 0.5% of the larger value. */
 const SAP_VALOR_DIFF_MIN_ABS = 1.0;
@@ -1182,7 +1225,7 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
     const nMapped = Object.keys(sapNfMap).length;
     const nWithValor = Object.values(sapNfMap).filter(e => parseSapNum(e.valorNF) > 0).length;
     if (!opts.silent) {
-      console.log('[SAP] Map size:', nMapped, 'keys (canonical NF), with valor:', nWithValor);
+      console.log('[SAP] Map size:', nMapped, 'NFs únicas (', rows.length, 'linhas ZFACT), with valor:', nWithValor);
     }
 
     reEnrichAfterSapLoad();
