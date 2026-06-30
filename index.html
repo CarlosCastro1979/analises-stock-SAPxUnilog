@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Performance Logística — Delta Foods Brasil</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8102e'/><text x='16' y='22' font-family='Arial' font-weight='700' font-size='13' fill='white' text-anchor='middle'>DF</text></svg>">
 <!-- SheetJS 0.18.5 CE: não suporta xlsx encriptados (ECMA-376 / password). Ver fretes.js formatXlsxReadError. -->
@@ -7656,15 +7659,35 @@ function scheduleColResize(){
 function applyResizable(){scheduleColResize();}
 
 </script>
-<script src="fretes.js?v=1.7.13"></script>
-<script src="armazem.js?v=1.0.32" onerror="(function(){var e=document.getElementById('arm-initErr');if(e)e.style.display='block';})()"></script>
 <script>
-if(typeof initArmazem!=='function'){
-  const e=document.getElementById('arm-initErr');
-  if(e)e.style.display='block';
-}
-init();
-initMultiselects();
+(function () {
+  var isLocal = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  function src(file, prodQuery) {
+    return file + (isLocal ? '?_=' + Date.now() : '?' + prodQuery);
+  }
+  function load(file, prodQuery, onload, onerror) {
+    var s = document.createElement('script');
+    s.src = src(file, prodQuery);
+    if (onload) s.onload = onload;
+    if (onerror) s.onerror = onerror;
+    document.head.appendChild(s);
+  }
+  load('fretes.js', 'v=1.7.13', function () {
+    load('armazem.js', 'v=1.0.32', bootApp, function () {
+      var e = document.getElementById('arm-initErr');
+      if (e) e.style.display = 'block';
+      bootApp();
+    });
+  });
+  function bootApp() {
+    if (typeof initArmazem !== 'function') {
+      var e = document.getElementById('arm-initErr');
+      if (e) e.style.display = 'block';
+    }
+    init();
+    initMultiselects();
+  }
+})();
 </script>
 </body>
 </html>
