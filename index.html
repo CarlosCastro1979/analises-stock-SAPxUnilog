@@ -378,6 +378,11 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-armazem .arm-nf-upload{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);}
 #page-armazem .arm-adicionais-year{margin-bottom:32px;padding-bottom:8px;border-bottom:1px solid var(--border);}
 #page-armazem .arm-adicionais-matrix th:first-child,#page-armazem .arm-adicionais-matrix td:first-child{text-align:left;min-width:200px;max-width:320px;}
+#page-armazem .arm-adicionais-matrix col.arm-ad-col-servico{width:220px;}
+#page-armazem .arm-adicionais-matrix col.arm-ad-col-val{width:92px;}
+#page-armazem .arm-adicionais-matrix col.arm-ad-col-pct{width:58px;}
+#page-armazem .arm-adicionais-matrix col.arm-ad-col-total{width:100px;}
+#page-armazem .arm-adicionais-matrix .arm-ad-pct-col{min-width:52px;max-width:72px;font-size:11px;color:var(--muted);}
 #page-armazem .arm-adicionais-matrix .arm-ad-vl-row td{color:var(--muted);font-style:italic;}
 #page-armazem .arm-adicionais-matrix .arm-ad-total-row td{background:#f8fafc;font-weight:700;border-top:2px solid var(--border);}
 #page-armazem .arm-adicionais-matrix .arm-ad-subtotal-col{border-left:1px solid var(--border);font-weight:600;}
@@ -7729,7 +7734,7 @@ function applyResizable(){scheduleColResize();}
     document.head.appendChild(s);
   }
   load('fretes.js', 'v=1.7.17', function () {
-    load('armazem.js', 'v=1.0.34', bootApp, function () {
+    load('armazem.js', 'v=1.0.35', bootApp, function () {
       var e = document.getElementById('arm-initErr');
       if (e) e.style.display = 'block';
       bootApp();

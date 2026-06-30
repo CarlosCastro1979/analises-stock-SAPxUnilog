@@ -1,5 +1,5 @@
-// armazem.js v1.0.34
-const ARMAZEM_JS_VERSION = '1.0.34';
+// armazem.js v1.0.35
+const ARMAZEM_JS_VERSION = '1.0.35';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -2770,49 +2770,65 @@ function armAdicionaisPivotServices(months) {
 }
 
 function renderArmAdicionaisMatrixHtml(year, mesKeys, monthsByKey, services) {
+  const vlByMes = new Map(mesKeys.map(mk => [mk, armGetVendasLiq(monthsByKey.get(mk)) || 0]));
+  const vlYearTotal = mesKeys.reduce((s, mk) => s + (vlByMes.get(mk) || 0), 0);
+
   const monthCells = mesKeys.map(mk => {
     const m = monthsByKey.get(mk);
     const title = armEsc(armMesNomeLong(mk, m ? armMesLabel(m) : ''));
-    return `<th class="right" title="${title}">${armEsc(armMesShortLabel(mk))}</th>`;
+    return `<th class="right" title="${title}">${armEsc(armMesShortLabel(mk))}</th>
+      <th class="right arm-ad-pct-col" title="${title} — % s/ Vendas Liq">%</th>`;
   }).join('');
+
+  const colgroup = `<colgroup>
+    <col class="arm-ad-col-servico">
+    ${mesKeys.map(() => '<col class="arm-ad-col-val"><col class="arm-ad-col-pct">').join('')}
+    <col class="arm-ad-col-total"><col class="arm-ad-col-pct">
+  </colgroup>`;
 
   const serviceRows = services.map(svc => {
     let rowTotal = 0;
     const cells = mesKeys.map(mk => {
       const v = svc.byMes[mk] || 0;
+      const vl = vlByMes.get(mk) || 0;
       if (v > 0) rowTotal += v;
-      return `<td class="right">${v > 0 ? armFmtMoney(v) : '—'}</td>`;
+      return `<td class="right">${v > 0 ? armFmtMoney(v) : '—'}</td>
+        <td class="right arm-ad-pct-col" title="Valor ÷ Vendas Liq">${v > 0 ? armFmtPctGasto(v, vl) : '—'}</td>`;
     }).join('');
     return `<tr>
       <td>${armEsc(svc.displayLabel)}</td>
       ${cells}
       <td class="right arm-ad-subtotal-col">${rowTotal > 0 ? armFmtMoney(rowTotal) : '—'}</td>
+      <td class="right arm-ad-subtotal-col arm-ad-pct-col" title="Total ÷ Vendas Liq (ano)">${rowTotal > 0 ? armFmtPctGasto(rowTotal, vlYearTotal) : '—'}</td>
     </tr>`;
   }).join('');
 
-  let vlYearTotal = 0;
   const vlCells = mesKeys.map(mk => {
-    const vl = armGetVendasLiq(monthsByKey.get(mk));
-    if (vl) vlYearTotal += vl;
-    return `<td class="right">${vl ? armFmtMoney(vl) : '—'}</td>`;
+    const vl = vlByMes.get(mk) || 0;
+    return `<td class="right">${vl ? armFmtMoney(vl) : '—'}</td>
+      <td class="right arm-ad-pct-col">${vl ? armFmtPctGasto(vl, vl) : '—'}</td>`;
   }).join('');
 
   let grandTotal = 0;
   const totalCells = mesKeys.map(mk => {
     let colTotal = 0;
     services.forEach(svc => { colTotal += svc.byMes[mk] || 0; });
+    const vl = vlByMes.get(mk) || 0;
     grandTotal += colTotal;
-    return `<td class="right">${colTotal > 0 ? armFmtMoney(colTotal) : '—'}</td>`;
+    return `<td class="right">${colTotal > 0 ? armFmtMoney(colTotal) : '—'}</td>
+      <td class="right arm-ad-pct-col" title="Total adicionais ÷ Vendas Liq">${colTotal > 0 ? armFmtPctGasto(colTotal, vl) : '—'}</td>`;
   }).join('');
 
   return `<div class="arm-adicionais-year arm-resumo-year">
     <div class="section-title arm-resumo-year-title">${armEsc(year)}</div>
     <div class="tbl-wrap">
       <table class="arm-adicionais-matrix" data-managed-sort="1">
+        ${colgroup}
         <thead><tr>
           <th>Serviço</th>
           ${monthCells}
           <th class="right arm-ad-subtotal-col">Total</th>
+          <th class="right arm-ad-subtotal-col arm-ad-pct-col" title="% s/ Vendas Liq (ano)">%</th>
         </tr></thead>
         <tbody>
           ${serviceRows}
@@ -2820,11 +2836,13 @@ function renderArmAdicionaisMatrixHtml(year, mesKeys, monthsByKey, services) {
             <td>Vendas Liq</td>
             ${vlCells}
             <td class="right arm-ad-subtotal-col">${vlYearTotal > 0 ? armFmtMoney(vlYearTotal) : '—'}</td>
+            <td class="right arm-ad-subtotal-col arm-ad-pct-col">${vlYearTotal > 0 ? armFmtPctGasto(vlYearTotal, vlYearTotal) : '—'}</td>
           </tr>
           <tr class="arm-ad-total-row">
             <td>Total adicionais</td>
             ${totalCells}
             <td class="right arm-ad-subtotal-col">${grandTotal > 0 ? armFmtMoney(grandTotal) : '—'}</td>
+            <td class="right arm-ad-subtotal-col arm-ad-pct-col" title="Total adicionais ÷ Vendas Liq (ano)">${grandTotal > 0 ? armFmtPctGasto(grandTotal, vlYearTotal) : '—'}</td>
           </tr>
         </tbody>
       </table>
