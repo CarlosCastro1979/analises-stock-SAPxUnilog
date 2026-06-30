@@ -2161,7 +2161,7 @@ function sortTh(tableId, col, label, cls) {
   return `<th class="sortable ${cls || ''} ${sorted}" onclick="armDoSort('${tableId}','${col}')">${label}<span class="sort-ind">${ind}</span></th>`;
 }
 
-const ARM_MENSAL_COLS = 9;
+const ARM_MENSAL_COLS = 10;
 
 function armEnsureTableCols(table, nCols) {
   if (!table || !nCols) return;
@@ -2313,12 +2313,14 @@ function buildArmMensalDisplayRows(sorted, groupByYear) {
 }
 
 function armMensalTotalsRowHtml(label, t, trCls) {
+  const pctArmVl = armFmtPctGasto(t.armazenagem, t.vendasLiq);
   const pctVl = armFmtPctGasto(t.pago, t.vendasLiq);
   const pctVlCom = armFmtPctGasto(t.pagoComImp, t.vendasLiq);
   return `<tr class="${trCls}">
     <td><strong>${armEsc(label)}</strong></td>
     <td class="right">${t.vendasLiq > 0 ? armFmtMoney(t.vendasLiq) : '—'}</td>
     <td class="right">${t.armazenagem > 0 ? armFmtMoney(t.armazenagem) : '—'}</td>
+    <td class="right" title="Armazenagem (5,5% NF) ÷ Vendas Liq">${pctArmVl}</td>
     <td class="right">${t.adicionais > 0 ? armFmtMoney(t.adicionais) : '—'}</td>
     <td class="right">${t.pago > 0 ? armFmtMoney(t.pago) : '—'}</td>
     <td class="right" title="Pago s/ impostos ÷ Vendas Liq">${pctVl}</td>
@@ -2335,6 +2337,7 @@ function armMensalMonthRowHtml(m) {
   const pagoComImp = armGetMonthPagoComImp(m);
   const armRub = armGetArmazenagemRubricaValor(m);
   const vendasLiq = armGetVendasLiq(m);
+  const pctArmVl = armFmtPctGasto(armRub, vendasLiq);
   const pctVl = armFmtPctGasto(pago, vendasLiq);
   const pctVlCom = armFmtPctGasto(pagoComImp, vendasLiq);
   const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
@@ -2343,6 +2346,7 @@ function armMensalMonthRowHtml(m) {
     <td>${armEsc(armMesLabel(m))}${partial}</td>
     <td class="right"><input type="text" class="fi arm-vendas-liq-input" data-mes="${armEsc(m.mesKey)}" value="${armEsc(vlDisplay)}" placeholder="R$ …" onblur="typeof armSetVendasLiq==='function'&&armSetVendasLiq('${armEsc(m.mesKey)}',this.value)" style="width:110px;text-align:right;font-size:11px;padding:4px 6px;"></td>
     <td class="right" title="5,5% sobre NF expedida">${armRub > 0 ? armFmtMoney(armRub) : '—'}</td>
+    <td class="right" title="Armazenagem (5,5% NF) ÷ Vendas Liq">${pctArmVl}</td>
     <td class="right">${armFmtMoney(addVal)}</td>
     <td class="right">${pago > 0 ? armFmtMoney(pago) : '—'}</td>
     <td class="right" title="Pago s/ impostos ÷ Vendas Liq">${pctVl}</td>
@@ -2356,10 +2360,12 @@ function armMensalExportRowFromMonth(m) {
   const pago = armGetArmazenagemValor(m).pago;
   const vendasLiq = armGetVendasLiq(m);
   const pagoComImp = armGetMonthPagoComImp(m);
+  const armRub = armGetArmazenagemRubricaValor(m);
   return {
     Mes: armMesLabel(m),
     VendasLiq: vendasLiq || '',
-    Armazenagem: armGetArmazenagemRubricaValor(m) || '',
+    Armazenagem: armRub || '',
+    PctArmSobreVendasLiq: vendasLiq > 0 ? armRub / vendasLiq : '',
     Adicionais: (m.adicionais || []).reduce((s, a) => s + a.valor, 0),
     PagoSemImpostos: pago,
     PctSobreVendasLiq: vendasLiq > 0 ? pago / vendasLiq : '',
@@ -2374,6 +2380,7 @@ function armMensalExportRowFromTotals(t, label) {
     Mes: label,
     VendasLiq: t.vendasLiq || '',
     Armazenagem: t.armazenagem || '',
+    PctArmSobreVendasLiq: t.vendasLiq > 0 ? t.armazenagem / t.vendasLiq : '',
     Adicionais: t.adicionais,
     PagoSemImpostos: t.pago,
     PctSobreVendasLiq: t.vendasLiq > 0 ? t.pago / t.vendasLiq : '',
@@ -2440,6 +2447,11 @@ function renderArmMensal() {
     mesLabel: r => armMesLabel(r),
     vendasLiq: r => armGetVendasLiq(r) ?? -1,
     armazenagemValor: r => armGetArmazenagemRubricaValor(r),
+    pctArmVendasLiq: r => {
+      const vl = armGetVendasLiq(r);
+      const arm = armGetArmazenagemRubricaValor(r);
+      return vl > 0 && arm >= 0 ? arm / vl : -1;
+    },
     adicionais: r => (r.adicionais || []).reduce((s, a) => s + a.valor, 0),
     totalServicos: r => armGetArmazenagemValor(r).pago,
     pctVendasLiq: r => {
@@ -2467,6 +2479,7 @@ function renderArmMensal() {
       ${sortTh('mensal', 'mesLabel', 'Mês')}
       ${sortTh('mensal', 'vendasLiq', 'Vendas Liq', 'right')}
       ${sortTh('mensal', 'armazenagemValor', 'Armazenagem', 'right')}
+      ${sortTh('mensal', 'pctArmVendasLiq', '% arm. s/ vendas liq', 'right')}
       ${sortTh('mensal', 'adicionais', 'Adicionais', 'right')}
       ${sortTh('mensal', 'totalServicos', 'Pago (s/ imp.)', 'right')}
       ${sortTh('mensal', 'pctVendasLiq', '% s/ vendas liq', 'right')}
