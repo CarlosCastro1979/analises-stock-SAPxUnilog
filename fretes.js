@@ -665,6 +665,26 @@ function looksLikeSapNfCell(v) {
   return key.length >= 4 && key.length <= 12;
 }
 
+/** Max plausible NF billing amount in ZFACT warehouse exports (R$). */
+const SAP_VALOR_MAX = 5_000_000;
+
+function hasSapValorFormatting(v) {
+  const s = String(v).trim().replace(/\s/g, '');
+  return /^R\$/i.test(s) || s.includes(',');
+}
+
+/** Reject SAP doc entry / NF identifiers mistaken for monetary valor (no R$/comma). */
+function looksLikeSapDocOrNfNumber(v) {
+  if (v === null || v === undefined || v === '') return false;
+  if (hasSapValorFormatting(v)) return false;
+  const key = normNFKey(v);
+  if (key.length >= 8) return true;
+  const s = String(v).trim().replace(/\s/g, '').replace(/^R\$/i, '');
+  if (/^\d{7,}$/.test(s)) return true;
+  if (typeof v === 'number' && Number.isInteger(v) && Math.abs(v) >= 1_000_000) return true;
+  return false;
+}
+
 /** Parse NF monetary values from SAP/ZFACT exports (BR format, R$, thousands). */
 function parseSapNum(v) {
   if (v === null || v === undefined || v === '') return 0;
@@ -702,13 +722,48 @@ function parseSapNum(v) {
 function looksLikeSapValorCell(v, opts = {}) {
   if (v === null || v === undefined || v === '') return false;
   const n = parseSapNum(v);
-  if (!(n > 0)) return false;
+  if (!(n > 0) || n > SAP_VALOR_MAX) return false;
+  if (looksLikeSapDocOrNfNumber(v)) return false;
   const s = String(v).trim().replace(/\s/g, '');
   if (/^R\$/i.test(s) || s.includes(',')) return true;
   if (/^\d{1,3}$/.test(s) && n < 1000) return false;
-  if (opts.trustColumn) return true;
+  if (opts.trustColumn) {
+    if (typeof v === 'number' && Number.isInteger(v) && v >= 1e9) return false;
+    return true;
+  }
   return n >= 10 || s.includes('.') || (typeof v === 'number' && !Number.isInteger(v));
 }
+
+/** Console self-check for SAP valor heuristics — run once at module load. */
+function _debugSapValorSamples() {
+  const accept = [
+    [43200, true],
+    ['43.200,00', true],
+    ['43200', true],
+    [1234.56, true],
+    ['1.234,56', true],
+    [999999, true]
+  ];
+  const reject = [
+    [9540067078, false],
+    ['9540067078', false],
+    ['9.540.067.078,00', false],
+    [9540067312, false],
+    [9540067546, false],
+    [0, false],
+    ['', false]
+  ];
+  const all = [...accept, ...reject];
+  const mismatches = all.filter(([v, exp]) => looksLikeSapValorCell(v, { trustColumn: true }) !== exp);
+  if (mismatches.length) {
+    console.warn('[SAP valor] sample mismatches:', mismatches.map(([v, exp]) => ({
+      v, expected: exp, got: looksLikeSapValorCell(v, { trustColumn: true })
+    })));
+  } else {
+    console.debug('[SAP valor] samples OK:', accept.length + reject.length, 'cases');
+  }
+}
+_debugSapValorSamples();
 
 /** ZFACT often has série/status between NF (D) and valor (F/G) — scan cols after NF. */
 function pickSapValorFromLine(line, colIdx) {
@@ -718,7 +773,7 @@ function pickSapValorFromLine(line, colIdx) {
   const isSameNf = (v) => nfKey && normNFKey(v) === nfKey;
   if (idx.valorNF != null) {
     const primary = line[idx.valorNF];
-    if (looksLikeSapValorCell(primary, { trustColumn: true })) return primary;
+    if (!isSameNf(primary) && looksLikeSapValorCell(primary, { trustColumn: true })) return primary;
   }
   const start = idx.nf != null ? idx.nf + 1 : 4;
   for (let c = start; c < Math.min(line.length, start + 6); c++) {
@@ -995,7 +1050,7 @@ function buildSapNfMap(rows) {
       nf,
       cliente: r.cliente ? String(r.cliente).trim() : '',
       dtEmissao: parseSapBrDate(r.dtEmissao),
-      valorNF: parseSapNum(r.valorNF)
+      valorNF: looksLikeSapValorCell(r.valorNF, { trustColumn: true }) ? parseSapNum(r.valorNF) : 0
     };
     map[key] = entry;
   });
