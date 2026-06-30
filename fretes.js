@@ -700,13 +700,21 @@ function parseSapNum(v) {
 }
 
 function looksLikeSapValorCell(v) {
-  return parseSapNum(v) > 0;
+  if (v === null || v === undefined || v === '') return false;
+  if (looksLikeSapNfCell(v)) return false;
+  const n = parseSapNum(v);
+  if (!(n > 0)) return false;
+  const s = String(v).trim().replace(/\s/g, '');
+  if (/^R\$/i.test(s) || s.includes(',')) return true;
+  if (typeof v === 'number' && v >= 39800 && v <= 55000) return false;
+  if (/^\d{1,3}$/.test(s) && n < 1000) return false;
+  return n >= 10 || s.includes('.');
 }
 
 /** ZFACT often has série/status between NF (D) and valor (F/G) — scan cols after NF. */
 function pickSapValorFromLine(line, colIdx) {
   const idx = colIdx || activeSapColIdx;
-  if (!Array.isArray(line)) return null;
+  if (!idx || !Array.isArray(line)) return null;
   if (idx.valorNF != null) {
     const primary = line[idx.valorNF];
     if (looksLikeSapValorCell(primary)) return primary;
@@ -783,7 +791,7 @@ function scoreSapLayout(dataLines, colIdx) {
     const v = pickSapValorFromLine(line, colIdx);
     if (looksLikeSapValorCell(v)) valorHits++;
   }
-  return hits * 10 + valorHits;
+  return { hits, valorHits, score: hits * 10 + valorHits };
 }
 
 function resolveSapColIdx(headerRow, dataLines) {
@@ -805,16 +813,17 @@ function resolveSapColIdx(headerRow, dataLines) {
     }
   }
   let best = layouts[0];
-  let bestScore = 0;
+  let bestResult = { hits: 0, valorHits: 0, score: 0 };
   for (const layout of layouts) {
-    const s = scoreSapLayout(dataLines, layout);
-    if (s > bestScore) {
-      bestScore = s;
+    const r = scoreSapLayout(dataLines, layout);
+    if (r.score > bestResult.score || (r.score === bestResult.score && r.hits > bestResult.hits)) {
+      bestResult = r;
       best = layout;
     }
   }
-  if (bestScore >= 2) {
-    console.debug('[SAP NF] Layout detectado por dados:', best.label, `(${bestScore} linhas)`);
+  if (bestResult.hits >= 2 || (bestResult.hits >= 1 && bestResult.valorHits >= 1)) {
+    console.debug('[SAP NF] Layout detectado por dados:', best.label,
+      `(${bestResult.hits} linhas, ${bestResult.valorHits} valores)`);
     return best;
   }
   console.debug('[SAP NF] Layout padrão B/C/D (fallback)');
@@ -1121,7 +1130,11 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
 
     reEnrichAfterSapLoad();
     if (typeof window.refreshArmazemSapValidation === 'function') {
-      window.refreshArmazemSapValidation();
+      try {
+        window.refreshArmazemSapValidation();
+      } catch (armErr) {
+        console.warn('[SAP] refreshArmazemSapValidation', armErr);
+      }
     }
 
     const nMatched = currentSummary?.nSapMatched ?? countSapMatches(currentNFs);
