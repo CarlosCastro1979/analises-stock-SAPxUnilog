@@ -2895,12 +2895,14 @@ function armSetCatalog(sel) {
 function armSetProcessing(active, label) {
   const spin = $arm('procSpin');
   const btn = $arm('procBtn');
+  const loadBtn = $arm('loadBtn');
   const note = $arm('procNote');
   if (spin) {
     spin.hidden = !active;
     spin.style.display = active ? 'inline-flex' : 'none';
   }
   if (btn) btn.disabled = active || !armPendingFiles.length;
+  if (loadBtn) loadBtn.disabled = !!active;
   if (note) {
     if (active && label) {
       note.textContent = label;
@@ -3021,6 +3023,7 @@ async function processArmFiles() {
 
 async function loadSavedArmazem(silent) {
   if (typeof fetchExcelFiles !== 'function') return false;
+  if (!silent) armSetProcessing(true, 'A carregar da cloud…');
   try {
     const m = await Promise.race([
       fetchExcelFiles([armSlot()]),
@@ -3046,6 +3049,8 @@ async function loadSavedArmazem(silent) {
     }
   } catch (e) {
     console.warn('[armazem] load saved', e);
+  } finally {
+    if (!silent) armSetProcessing(false);
   }
   return false;
 }

@@ -443,6 +443,10 @@ select.cad-inp{cursor:pointer;}
 .empty{text-align:center;padding:56px 20px;color:var(--muted);}
 .empty-i{font-size:36px;margin-bottom:10px;opacity:.5;}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--border2);border-top-color:var(--red);border-radius:50%;animation:rot .6s linear infinite;}
+.proc-note{font-size:11px;color:var(--yellow);font-weight:600;}
+#page-upload #procSpin,#page-upload #procNote,#page-fretes #fte-procSpin,#page-fretes #fte-procNote{display:none !important;}
+#page-upload #procSpin:not([hidden]),#page-upload #procNote:not([hidden]),#page-fretes #fte-procSpin:not([hidden]),#page-fretes #fte-procNote:not([hidden]){display:inline-flex !important;}
+#page-upload #procNote:not([hidden]),#page-fretes #fte-procNote:not([hidden]){display:inline !important;}
 @keyframes rot{to{transform:rotate(360deg)}}
 #toast{position:fixed;bottom:20px;right:20px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 18px;font-size:12px;max-width:300px;z-index:9999;display:none;box-shadow:0 4px 20px rgba(0,0,0,0.12);}
 #toast.show{display:block;animation:fup .2s ease;}
@@ -514,8 +518,9 @@ select.cad-inp{cursor:pointer;}
     </div>
     <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
       <button class="btn bp" id="procBtn" onclick="processAll()" disabled>⚡ Processar e Guardar</button>
-      <button class="btn bg" onclick="loadLastSaved()">☁️ Carregar último guardado</button>
-      <span id="procSpin" style="display:none"><span class="spin"></span></span>
+      <button class="btn bg" id="stockLoadLastBtn" onclick="loadLastSaved()">☁️ Carregar último guardado</button>
+      <span id="procSpin" hidden style="display:none"><span class="spin"></span></span>
+      <span id="procNote" hidden class="proc-note"></span>
     </div>
     <div id="stockFileStatus" style="display:none;font-size:11px;color:var(--muted);margin-top:10px"></div>
   </div>
@@ -1287,8 +1292,9 @@ select.cad-inp{cursor:pointer;}
         <div class="card" style="background:var(--bg3)">
           <div style="font-size:12px;font-weight:600;margin-bottom:10px">📂 Carregar ficheiro de vendas</div>
           <input type="file" id="transVendasFileInput" accept=".xlsx,.xls" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;width:100%;font-size:12px;color:var(--text);box-sizing:border-box">
-          <button class="btn bp" style="margin-top:10px;width:100%" onclick="uploadVendas()">⬆ Processar e Guardar no Supabase</button>
-          <button class="btn bg" style="margin-top:6px;width:100%;color:var(--red);border-color:var(--red)" onclick="limparVendas()">🗑 Limpar todos os dados de vendas</button>
+          <button class="btn bp" id="transVendasBtn" style="margin-top:10px;width:100%" onclick="uploadVendas()">⬆ Processar e Guardar no Supabase</button>
+          <button class="btn bg" id="transVendasClearBtn" style="margin-top:6px;width:100%;color:var(--red);border-color:var(--red)" onclick="limparVendas()">🗑 Limpar todos os dados de vendas</button>
+          <div id="transVendasProc" style="display:none;align-items:center;gap:8px;margin-top:8px;font-size:11px;color:var(--yellow);font-weight:600"><span class="spin"></span><span id="transVendasProcLbl">A processar…</span></div>
           <div id="transVendasStatus" style="font-size:11px;margin-top:8px;color:var(--muted)"></div>
         </div>
         <div class="card" style="background:var(--bg3)" id="transVendasHistCard">
@@ -1492,7 +1498,8 @@ select.cad-inp{cursor:pointer;}
       <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
         <button class="btn bp" id="fte-procBtn" type="button" disabled>⚡ Processar e Guardar</button>
         <button class="btn bg" id="fte-loadLastBtn" type="button">☁️ Carregar último guardado</button>
-        <span id="fte-procSpin" style="display:none"><span class="spin"></span></span>
+        <span id="fte-procSpin" hidden style="display:none"><span class="spin"></span></span>
+        <span id="fte-procNote" hidden class="proc-note"></span>
       </div>
       <div id="fte-fileStatus" style="display:none;font-size:11px;color:var(--muted);margin-top:10px"></div>
       <div id="fte-loadbar" class="loadbar" style="display:none;"></div>
@@ -2117,15 +2124,18 @@ async function autoLoadLastExcelFiles(){
 }
 async function loadLastSaved(silent=false){
   syncCompanyDepotMap();
+  if(!silent)setStockProcessing(true,'A carregar da cloud…');
+  try{
   const hadDb=await loadFromDB(true);
   if(hadDb){
+    if(!silent)setStockProcessing(true,'A carregar Excels…');
     await loadSavedStockExcelFiles(true,false);
     if(!silent)toast('Carregado: '+company,'success');
     return true;
   }
   const hadExcel=await loadSavedStockExcelFiles(silent,true);
   if(hadExcel&&sapData&&uniData){
-    await processAll();
+    await processAll({manageUi:!silent,label:'A processar ficheiros guardados…'});
     if(!silent)toast('Excel carregado e processado.','success');
     return true;
   }
@@ -2135,6 +2145,23 @@ async function loadLastSaved(silent=false){
   }
   if(!silent)toast('Sem dados guardados para '+company,'error');
   return false;
+  }finally{
+    if(!silent)setStockProcessing(false);
+  }
+}
+
+function setStockProcessing(active,label){
+  const spin=document.getElementById('procSpin');
+  const note=document.getElementById('procNote');
+  const btn=document.getElementById('procBtn');
+  const loadBtn=document.getElementById('stockLoadLastBtn');
+  if(spin){spin.hidden=!active;spin.style.display=active?'inline-flex':'none';}
+  if(note){
+    if(active&&label){note.textContent=label;note.hidden=false;note.style.display='inline';}
+    else{note.textContent='';note.hidden=true;note.style.display='none';}
+  }
+  if(btn)btn.disabled=active||!(sapData&&uniData);
+  if(loadBtn)loadBtn.disabled=!!active;
 }
 
 // Depot maps per company
@@ -2206,8 +2233,8 @@ async function init(){
 function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok':'');document.getElementById('dbLbl').textContent=ok?'Supabase OK':'offline';}
 
 // ── FILES ──
-function loadSap(inp){const f=inp.files[0];if(!f)return;stockSapFileName=f.name;const r=new FileReader();r.onload=e=>{try{stockSapBuffer=e.target.result;const rows=xlsxRowsFromArrayBuffer(stockSapBuffer);syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');}catch(err){toast(xlsxReadErrorMsg(err),'error');}};r.onerror=()=>toast('Erro ao ler ficheiro SAP.','error');r.readAsArrayBuffer(f);}
-function loadUni(inp){const f=inp.files[0];if(!f)return;stockUniFileName=f.name;const r=new FileReader();r.onload=e=>{try{stockUniBuffer=e.target.result;const rows=xlsxRowsFromArrayBuffer(stockUniBuffer);syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');}catch(err){toast(xlsxReadErrorMsg(err),'error');}};r.onerror=()=>toast('Erro ao ler ficheiro Unilog.','error');r.readAsArrayBuffer(f);}
+function loadSap(inp){const f=inp.files[0];if(!f)return;stockSapFileName=f.name;const fnEl=document.getElementById('sapFn');if(fnEl)fnEl.textContent='⏳ A ler '+f.name+'…';const r=new FileReader();r.onload=e=>{try{stockSapBuffer=e.target.result;const rows=xlsxRowsFromArrayBuffer(stockSapBuffer);syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');}catch(err){if(fnEl)fnEl.textContent='';toast(xlsxReadErrorMsg(err),'error');}};r.onerror=()=>{if(fnEl)fnEl.textContent='';toast('Erro ao ler ficheiro SAP.','error');};r.readAsArrayBuffer(f);}
+function loadUni(inp){const f=inp.files[0];if(!f)return;stockUniFileName=f.name;const fnEl=document.getElementById('uniFn');if(fnEl)fnEl.textContent='⏳ A ler '+f.name+'…';const r=new FileReader();r.onload=e=>{try{stockUniBuffer=e.target.result;const rows=xlsxRowsFromArrayBuffer(stockUniBuffer);syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');}catch(err){if(fnEl)fnEl.textContent='';toast(xlsxReadErrorMsg(err),'error');}};r.onerror=()=>{if(fnEl)fnEl.textContent='';toast('Erro ao ler ficheiro Unilog.','error');};r.readAsArrayBuffer(f);}
 function xlsxReadErrorMsg(err){const m=String(err?.message||err||'');if(/encryptioninfo|encrypted file|password|agile encryption|office crypto|file is password-protected/i.test(m))return 'Ficheiro Excel protegido por password — exporta sem proteção ou guarda como .xlsx não encriptado (Excel → Guardar como). SheetJS CE não suporta ficheiros encriptados.';return 'Erro: '+m;}
 function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast(xlsxReadErrorMsg(err),'error');}};r.readAsArrayBuffer(file);}
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
@@ -4264,11 +4291,13 @@ function exportValConflXlsx(){
 function simRatio(a,b){const la=a.length,lb=b.length;if(!la||!lb)return 0;const dp=Array.from({length:la+1},(_,i)=>Array.from({length:lb+1},(_,j)=>i===0?j:j===0?i:0));for(let i=1;i<=la;i++)for(let j=1;j<=lb;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return 1-dp[la][lb]/Math.max(la,lb);}
 
 // ── PROCESS ──
-async function processAll(){
+async function processAll(opts={}){
   if(!sapData||!uniData)return;
+  const manageUi=opts.manageUi!==false;
   syncCompanyDepotMap();
   if(window._rawSapRows?.length)refreshSapFromRaw();
-  document.getElementById('procSpin').style.display='';document.getElementById('procBtn').disabled=true;
+  if(manageUi)setStockProcessing(true,opts.label||'A processar e guardar…');
+  try{
   await loadOccParams();await loadSuspValidados();
   logUniClasseCounts('processAll (antes build)');
   buildRecon();buildSusp();buildSoUnilog();buildPosClasse();buildVencidoForaDep();checkDuplicadosAlert();await autoSeedOcc();await processPecas();renderUpKpis();updateChip();
@@ -4290,7 +4319,9 @@ async function processAll(){
     }catch(e){console.warn('[stock] excel persist',e);toast('Aviso: não foi possível guardar ficheiros Excel na cloud.','error');}
   }catch(e){toast('Offline — dados em memória','error');}
   updateLoadBanner(procAt);
-  document.getElementById('procSpin').style.display='none';document.getElementById('procBtn').disabled=false;
+  }finally{
+    if(manageUi)setStockProcessing(false);
+  }
 }
 
 function buildSummary(){const s={};for(const dk of DKS){const rows=reconData[dk]||[];s[dk]={total:rows.length,diffs:rows.filter(r=>r.diff!==0).length};}return s;}
@@ -6966,19 +6997,34 @@ async function limparVendas(){
   }catch(e){status.textContent='Erro: '+e.message;status.style.color='var(--red)';}
 }
 
+function setVendasProcessing(active,label){
+  const proc=document.getElementById('transVendasProc');
+  const lbl=document.getElementById('transVendasProcLbl');
+  const btn=document.getElementById('transVendasBtn');
+  const clr=document.getElementById('transVendasClearBtn');
+  const inp=document.getElementById('transVendasFileInput');
+  if(proc)proc.style.display=active?'flex':'none';
+  if(lbl&&label)lbl.textContent=label;
+  if(btn)btn.disabled=!!active;
+  if(clr)clr.disabled=!!active;
+  if(inp)inp.disabled=!!active;
+}
+
 async function uploadVendas(){
   const input=document.getElementById('transVendasFileInput');
   const status=document.getElementById('transVendasStatus');
   if(!input.files.length){status.textContent='Selecciona um ficheiro primeiro';status.style.color='var(--red)';return;}
-  status.textContent='A ler ficheiro…';status.style.color='var(--muted)';
+  setVendasProcessing(true,'A ler ficheiro…');
+  status.textContent='';status.style.color='var(--muted)';
   const file=input.files[0];
   const reader=new FileReader();
   reader.onload=async e=>{
     try{
+      setVendasProcessing(true,'A processar linhas…');
       const wb=XLSX.read(e.target.result,{type:'binary',cellDates:true});
       const ws=wb.Sheets[wb.SheetNames[0]];
       const rows=XLSX.utils.sheet_to_json(ws,{raw:false});
-      status.textContent=`${rows.length} linhas lidas. A mapear EANs…`;
+      setVendasProcessing(true,`${rows.length} linhas — a mapear EANs…`);
       // Build mat→EAN map
       const matEan={...TRANS_MAT_EAN};
       if(sapData)sapData.forEach(r=>{const m=String(r.material||'').trim();if(m&&r.EAN_norm&&!matEan[m])matEan[m]=r.EAN_norm;});
@@ -7008,15 +7054,15 @@ async function uploadVendas(){
         byKey[k].qt+=qt;
       });
       const upsertRows=Object.values(byKey);
-      status.textContent=`${upsertRows.length} registos a guardar…`;
+      setVendasProcessing(true,`A guardar ${upsertRows.length} registos…`);
       // Upsert in chunks of 100
       let saved=0;
       for(let i=0;i<upsertRows.length;i+=100){
         const chunk=upsertRows.slice(i,i+100);
         const{error}=await db.from('logistica_vendas').upsert(chunk,{onConflict:'mes,empresa,ean'});
-        if(error){status.textContent='Erro: '+error.message;status.style.color='var(--red)';return;}
+        if(error){status.textContent='Erro: '+error.message;status.style.color='var(--red)';setVendasProcessing(false);return;}
         saved+=chunk.length;
-        status.textContent=`Guardado ${saved}/${upsertRows.length}…`;
+        setVendasProcessing(true,`A guardar ${saved}/${upsertRows.length}…`);
       }
       const meses=[...new Set(upsertRows.map(r=>r.mes))].sort();
       status.textContent=`✓ ${saved} registos guardados (${meses.join(', ')})`;
@@ -7024,7 +7070,9 @@ async function uploadVendas(){
       if(typeof armInvalidateVendasCache==='function')armInvalidateVendasCache();
       loadVendasHist();
     }catch(e){status.textContent='Erro: '+e.message;status.style.color='var(--red)';}
+    finally{setVendasProcessing(false);}
   };
+  reader.onerror=()=>{status.textContent='Erro ao ler ficheiro.';status.style.color='var(--red)';setVendasProcessing(false);};
   reader.readAsBinaryString(file);
 }
 

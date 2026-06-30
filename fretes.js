@@ -65,6 +65,30 @@ function setSapZoneLoaded(name) {
   zone?.classList.toggle('loaded', !!name);
 }
 
+function fteSetProcessing(active, label) {
+  const spin = $('procSpin');
+  const btn = $('procBtn');
+  const loadBtn = $('loadLastBtn');
+  const note = $('procNote');
+  if (spin) {
+    spin.hidden = !active;
+    spin.style.display = active ? 'inline-flex' : 'none';
+  }
+  if (note) {
+    if (active && label) {
+      note.textContent = label;
+      note.hidden = false;
+      note.style.display = 'inline';
+    } else {
+      note.textContent = '';
+      note.hidden = true;
+      note.style.display = 'none';
+    }
+  }
+  if (btn) btn.disabled = active || !(fteCteBuffer || fteQzPendingFiles.length || quinzenalPack?.files?.length);
+  if (loadBtn) loadBtn.disabled = !!active;
+}
+
 function checkFteBtn() {
   const btn = $('procBtn');
   if (btn) btn.disabled = !(fteCteBuffer || fteQzPendingFiles.length || quinzenalPack?.files?.length);
@@ -1504,26 +1528,36 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
 function selectCteFile(file) {
   if (!file) return;
   fteCteFileName = file.name;
+  const fn = $('cteFn');
+  if (fn) fn.textContent = '⏳ A ler ' + file.name + '…';
   const reader = new FileReader();
   reader.onload = (e) => {
     fteCteBuffer = e.target.result;
     setCteZoneLoaded(file.name);
     fteToast('CT-e seleccionado — clica Processar e Guardar');
   };
-  reader.onerror = () => fteToastError('Erro ao ler ficheiro CT-e.');
+  reader.onerror = () => {
+    if (fn) fn.textContent = '';
+    fteToastError('Erro ao ler ficheiro CT-e.');
+  };
   reader.readAsArrayBuffer(file);
 }
 
 function selectSapFile(file) {
   if (!file) return;
   fteSapFileName = file.name;
+  const fn = $('sapFn');
+  if (fn) fn.textContent = '⏳ A ler ' + file.name + '…';
   const reader = new FileReader();
   reader.onload = (e) => {
     fteSapBuffer = e.target.result;
     setSapZoneLoaded(file.name);
     fteToast('SAP NF seleccionado');
   };
-  reader.onerror = () => fteToastError('Erro ao ler ficheiro SAP.');
+  reader.onerror = () => {
+    if (fn) fn.textContent = '';
+    fteToastError('Erro ao ler ficheiro SAP.');
+  };
   reader.readAsArrayBuffer(file);
 }
 
@@ -1562,10 +1596,7 @@ async function processAndSaveFretes() {
     fteToastError('Selecciona pelo menos um ficheiro (CT-e/NF ou quinzenais).');
     return;
   }
-  const spin = $('procSpin');
-  const procBtn = $('procBtn');
-  if (spin) spin.style.display = '';
-  if (procBtn) procBtn.disabled = true;
+  fteSetProcessing(true, 'A processar…');
 
   const errors = [];
   let cteProcessed = false;
@@ -1574,12 +1605,14 @@ async function processAndSaveFretes() {
   try {
     // Process quinzenais in memory first (not blocked by CT-e cloud save)
     if (hasQzPending) {
+      fteSetProcessing(true, 'A processar quinzenais…');
       const ok = await processQuinzenalPending();
       if (!ok) return;
       qzProcessed = true;
     }
 
     if (hasCte) {
+      fteSetProcessing(true, 'A processar CT-e / SAP…');
       sapNfMap = {};
       const ok = processArrayBufferCte(fteCteBuffer, fteCteFileName);
       if (!ok) return;
@@ -1588,6 +1621,8 @@ async function processAndSaveFretes() {
       }
       cteProcessed = true;
     }
+
+    fteSetProcessing(true, 'A guardar na cloud…');
 
     // Persist independently — quinzenais must not be skipped when CT-e save fails
     let qzSaved = true;
@@ -1632,8 +1667,7 @@ async function processAndSaveFretes() {
     console.error('[fretes] processAndSave', err);
     fteToastError('Erro: ' + (err.message || err));
   } finally {
-    if (spin) spin.style.display = 'none';
-    checkFteBtn();
+    fteSetProcessing(false);
   }
 }
 
@@ -3066,7 +3100,11 @@ async function ensureCteLoadedForQz(silent = true) {
 
 async function loadSavedFretesFiles(silent = false) {
   if (_fteLoadSavedPromise) return _fteLoadSavedPromise;
-  _fteLoadSavedPromise = _loadSavedFretesFilesImpl(silent).finally(() => { _fteLoadSavedPromise = null; });
+  if (!silent) fteSetProcessing(true, 'A carregar da cloud…');
+  _fteLoadSavedPromise = _loadSavedFretesFilesImpl(silent).finally(() => {
+    if (!silent) fteSetProcessing(false);
+    _fteLoadSavedPromise = null;
+  });
   return _fteLoadSavedPromise;
 }
 
