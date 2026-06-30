@@ -381,8 +381,9 @@ const SAP_LINE_VALOR_ALIASES = [
   'val faturamento', 'valor faturamento', 'valor mercadoria'
 ];
 const SAP_DOC_VALOR_ALIASES = [
-  'doc total', 'doctotal', 'valor documento', 'valor total', 'total nf', 'total documento',
-  'valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf'
+  'doc total', 'doc. total', 'doctotal', 'valor documento', 'valor total', 'total nf', 'total documento',
+  'total do documento', 'total geral', 'valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf',
+  'vl documento', 'vlr total', 'vlr documento', 'montante documento', 'montante doc'
 ];
 const SAP_VALOR_FALLBACK_ALIASES = ['montante', 'vl total', 'valor'];
 
@@ -586,20 +587,27 @@ function sapHeaderMatchesField(hdr, aliases) {
   return aliases.some(alias => h === alias || h.includes(alias) || alias.includes(h));
 }
 
-function findSapFieldByAliases(row, aliases) {
+function findSapFieldKeyByAliases(row, aliases) {
   const entries = Object.entries(row);
   for (const alias of aliases) {
     const hit = entries.find(([k]) => normCol(k) === alias);
-    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[1];
+    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[0];
   }
   for (const alias of aliases) {
     const hit = entries.find(([k]) => {
       const nk = normCol(k);
       return nk.includes(alias) || alias.includes(nk);
     });
-    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[1];
+    if (hit && hit[1] !== null && hit[1] !== undefined && hit[1] !== '') return hit[0];
   }
   return null;
+}
+
+function findSapFieldByAliases(row, aliases) {
+  const key = findSapFieldKeyByAliases(row, aliases);
+  if (!key) return null;
+  const v = row[key];
+  return v !== null && v !== undefined && v !== '' ? v : null;
 }
 
 function findSapField(row, field) {
@@ -607,8 +615,11 @@ function findSapField(row, field) {
 }
 
 function findSapValorFields(row) {
-  const line = findSapFieldByAliases(row, SAP_LINE_VALOR_ALIASES);
-  const doc = findSapFieldByAliases(row, SAP_DOC_VALOR_ALIASES);
+  const docKey = findSapFieldKeyByAliases(row, SAP_DOC_VALOR_ALIASES);
+  const doc = docKey ? row[docKey] : null;
+  let lineKey = findSapFieldKeyByAliases(row, SAP_LINE_VALOR_ALIASES);
+  if (lineKey && docKey && lineKey === docKey) lineKey = null;
+  const line = lineKey ? row[lineKey] : null;
   const fallback = !line && !doc ? findSapFieldByAliases(row, SAP_VALOR_FALLBACK_ALIASES) : null;
   return { line, doc, fallback, primary: line || doc || fallback };
 }
@@ -617,9 +628,13 @@ function resolveSapValorColFromHeader(headerRow) {
   let lineCol = null;
   let docCol = null;
   (headerRow || []).forEach((hdr, j) => {
+    if (sapHeaderMatchesField(hdr, SAP_DOC_VALOR_ALIASES)) {
+      docCol = j;
+      return;
+    }
     if (sapHeaderMatchesField(hdr, SAP_LINE_VALOR_ALIASES)) lineCol = j;
-    if (sapHeaderMatchesField(hdr, SAP_DOC_VALOR_ALIASES)) docCol = j;
   });
+  if (lineCol != null && lineCol === docCol) lineCol = null;
   return { lineCol, docCol };
 }
 
@@ -823,6 +838,9 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
   }
   if (out.line || out.doc) return out;
 
+  // Doc-total column identified but no line bruto header — do not scan other cols as line.
+  if (headerValor.docCol != null && headerValor.lineCol == null) return out;
+
   if (idx.valorNF != null) {
     const primary = line[idx.valorNF];
     if (!isSameNf(primary) && looksLikeSapValorCell(primary, { trustColumn: true })) {
@@ -832,7 +850,7 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
   }
   const start = idx.nf != null ? idx.nf + 1 : 4;
   for (let c = start; c < Math.min(line.length, start + 6); c++) {
-    if (c === idx.valorNF || c === headerValor.docCol) continue;
+    if (c === idx.valorNF || c === headerValor.docCol || c === headerValor.lineCol) continue;
     const v = line[c];
     if (isSameNf(v)) continue;
     if (looksLikeSapValorCell(v)) {
@@ -879,7 +897,11 @@ function applySapColPositionalFallback(row, line, headerRow, standardLayout, col
     row._sapDateSource = 'colC';
   }
   if (picked.line != null && picked.line !== '') {
-    if (!row.valorLine || !looksLikeSapValorCell(row.valorLine, { trustColumn: true })) row.valorLine = picked.line;
+    const dupDoc = row.valorDoc != null && row.valorDoc !== ''
+      && sapValoresClose(sapParsedValor(picked.line), sapParsedValor(row.valorDoc));
+    if (!dupDoc && (!row.valorLine || !looksLikeSapValorCell(row.valorLine, { trustColumn: true }))) {
+      row.valorLine = picked.line;
+    }
   }
   if (picked.doc != null && picked.doc !== '') {
     if (!row.valorDoc || !looksLikeSapValorCell(row.valorDoc, { trustColumn: true })) row.valorDoc = picked.doc;
@@ -1009,6 +1031,7 @@ function parseSapSheetRows(sheet) {
     let row = normalizeSapRow(obj);
     row._hasMaterialCol = hasMaterialCol;
     row = applySapColPositionalFallback(row, line, headerRow, standardLayout, activeSapColIdx);
+    row = sanitizeSapRowValors(row);
     if (i < 3) logSapRowDebug(line, row, i, activeSapColIdx);
     rows.push(row);
   }
@@ -1131,24 +1154,57 @@ function sapRowDocValor(r) {
   return sapParsedValor(r.valorDoc);
 }
 
+function sapValoresClose(a, b, eps = 0.01) {
+  return Math.abs(a - b) < eps;
+}
+
+/** Drop valorLine when it duplicates valorDoc (doc total mistaken for line bruto). */
+function sanitizeSapRowValors(r) {
+  const doc = sapParsedValor(r.valorDoc);
+  const line = sapParsedValor(r.valorLine);
+  if (doc > 0 && line > 0 && sapValoresClose(line, doc)) r.valorLine = null;
+  return r;
+}
+
 function finalizeSapNfValor(acc) {
-  if (acc.lineCount > 0 && acc.lineSum > 0) {
-    const vals = acc.lineVals || [];
-    if (vals.length > 1 && vals.every(v => Math.abs(v - vals[0]) < 0.01)) return vals[0];
-    return acc.lineSum;
+  const vals = acc.lineVals || [];
+  const lineSum = acc.lineSum;
+  const doc = acc.docVal > 0 ? acc.docVal : 0;
+
+  if (vals.length > 0 && vals.every(v => sapValoresClose(v, vals[0]))) {
+    const single = vals[0];
+    if (doc > 0 && sapValoresClose(single, doc)) return doc;
+    return single;
   }
-  if (acc.docVal > 0) return acc.docVal;
+
+  if (lineSum > 0 && doc > 0) {
+    if (sapValoresClose(lineSum, doc)) return doc;
+    if (lineSum > doc * 1.01) {
+      const ratio = lineSum / doc;
+      if (Math.abs(ratio - Math.round(ratio)) < 0.02 && vals.length && vals.every(v => sapValoresClose(v, doc))) {
+        return doc;
+      }
+      const nonDocSum = vals.filter(v => !sapValoresClose(v, doc)).reduce((a, b) => a + b, 0);
+      if (nonDocSum > 0 && sapValoresClose(nonDocSum, doc)) return doc;
+    }
+  }
+
+  if (lineSum > 0) return lineSum;
+  if (doc > 0) return doc;
   if (acc.fallbackVals.length) {
-    const vals = acc.fallbackVals;
-    const allSame = vals.every(v => Math.abs(v - vals[0]) < 0.01);
-    return allSame ? vals[0] : vals.reduce((a, b) => a + b, 0);
+    const fb = acc.fallbackVals;
+    if (fb.every(v => sapValoresClose(v, fb[0]))) return fb[0];
+    return fb.reduce((a, b) => a + b, 0);
   }
   return 0;
 }
 
+const SAP_NF_DEBUG_KEYS = new Set(['99635', '99633', '18596']);
+
 function buildSapNfMap(rows) {
   const map = {};
   rows.forEach(r => {
+    r = sanitizeSapRowValors(r);
     const nf = r.nf;
     if (nf === null || nf === undefined || String(nf).trim() === '') return;
     if (!sapRowIsBillableLine(r)) return;
@@ -1180,7 +1236,7 @@ function buildSapNfMap(rows) {
       acc.lineCount++;
       acc.lineVals.push(lineValor);
     } else if (docValor > 0) {
-      acc.docVal = docValor;
+      acc.docVal = Math.max(acc.docVal, docValor);
     } else if (!r.valorLine && !r.valorDoc && r.valorNF) {
       const fb = sapParsedValor(r.valorNF);
       if (fb > 0) acc.fallbackVals.push(fb);
@@ -1198,11 +1254,23 @@ function buildSapNfMap(rows) {
 
   Object.keys(map).forEach(key => {
     const acc = map[key];
+    const valorNF = finalizeSapNfValor(acc);
+    if (SAP_NF_DEBUG_KEYS.has(key)) {
+      console.debug('[SAP NF] buildSapNfMap debug', key, {
+        nf: acc.nf,
+        lineCount: acc.lineCount,
+        lineVals: acc.lineVals,
+        lineSum: acc.lineSum,
+        docVal: acc.docVal,
+        fallbackVals: acc.fallbackVals,
+        valorNF
+      });
+    }
     map[key] = {
       nf: acc.nf,
       cliente: acc.cliente,
       dtEmissao: acc.dtEmissao,
-      valorNF: finalizeSapNfValor(acc)
+      valorNF
     };
   });
   return map;
@@ -1235,20 +1303,28 @@ function _debugBuildSapNfMapAggregation() {
     { nf: '99635', valorLine: '49.937,37' },
     { nf: '99635', valorLine: '49.937,37' }
   ]);
+  const mapDupPositional = buildSapNfMap([
+    { nf: '99635', valorLine: '49.937,37', valorDoc: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37', valorDoc: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37', valorDoc: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37', valorDoc: '49.937,37' }
+  ]);
   const ok97723 = Math.abs((map['97723']?.valorNF || 0) - 3500.5) < 0.01;
   const ok88888 = Math.abs((map['88888']?.valorNF || 0) - 500) < 0.01;
   const ok99999 = map['99999']?.valorNF === 0;
   const ok99635lines = Math.abs((map['99635']?.valorNF || 0) - 49937.37) < 0.01;
   const ok99635doc = Math.abs((mapDocOnly['99635']?.valorNF || 0) - 49937.37) < 0.01;
   const ok99635repeat = Math.abs((mapBrutoRepeat['99635']?.valorNF || 0) - 49937.37) < 0.01;
-  if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat) {
+  const ok99635dupPos = Math.abs((mapDupPositional['99635']?.valorNF || 0) - 49937.37) < 0.01;
+  if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat || !ok99635dupPos) {
     console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
       ok97723, got97723: map['97723']?.valorNF,
       ok88888, got88888: map['88888']?.valorNF,
       ok99999, got99999: map['99999']?.valorNF,
       ok99635lines, got99635lines: map['99635']?.valorNF,
       ok99635doc, got99635doc: mapDocOnly['99635']?.valorNF,
-      ok99635repeat, got99635repeat: mapBrutoRepeat['99635']?.valorNF
+      ok99635repeat, got99635repeat: mapBrutoRepeat['99635']?.valorNF,
+      ok99635dupPos, got99635dupPos: mapDupPositional['99635']?.valorNF
     });
   } else {
     console.debug('[SAP NF] buildSapNfMap aggregation OK');
