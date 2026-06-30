@@ -379,7 +379,7 @@ const SAP_ALIASES = {
   nf: ['nota fiscal', 'nf', 'n nota fiscal', 'num nota fiscal', 'num. nota fiscal', 'notafiscal', 'nº nf', 'numero nf', 'docnum'],
   dtEmissao: ['dt emissao', 'data emissao', 'dt emissão', 'data emissão', 'data doc', 'dt nf', 'data nf', 'data nota fiscal'],
   cliente: ['cliente', 'nome cliente', 'razao social', 'razão social', 'destinatario', 'destinatário', 'cardname', 'nome do cliente'],
-  valorNF: ['valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf', 'valor total', 'total nf', 'valor documento', 'montante', 'valor']
+  valorNF: ['doc total', 'doctotal', 'valor documento', 'valor total', 'total nf', 'total documento', 'montante', 'vl total', 'val faturamento', 'valor faturamento', 'valor mercadoria', 'valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf', 'valor']
 };
 
 /** SAP NF export layout: col B=cliente, C=data emissão, D=NF (0-based indices). */
@@ -665,6 +665,61 @@ function looksLikeSapNfCell(v) {
   return key.length >= 4 && key.length <= 12;
 }
 
+/** Parse NF monetary values from SAP/ZFACT exports (BR format, R$, thousands). */
+function parseSapNum(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  let s = String(v).trim().replace(/\s/g, '');
+  if (!s || s === '-') return 0;
+  s = s.replace(/^R\$\s?/i, '');
+  if (s.includes(',')) {
+    const n = parseFloat(s.replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (s.includes('.')) {
+    const parts = s.split('.');
+    if (parts.length > 2) {
+      const n = parseFloat(s.replace(/\./g, ''));
+      return Number.isFinite(n) ? n : 0;
+    }
+    const intPart = parts[0];
+    const fracPart = parts[1] || '';
+    if (!fracPart || /^0+$/.test(fracPart)) {
+      const n = parseFloat(intPart);
+      return Number.isFinite(n) ? n : 0;
+    }
+    if (intPart !== '0' && fracPart.length === 3 && intPart.length >= 1 && intPart.length <= 3) {
+      const n = parseFloat(intPart + fracPart);
+      if (Number.isFinite(n)) return n;
+    }
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function looksLikeSapValorCell(v) {
+  return parseSapNum(v) > 0;
+}
+
+/** ZFACT often has série/status between NF (D) and valor (F/G) — scan cols after NF. */
+function pickSapValorFromLine(line, colIdx) {
+  const idx = colIdx || activeSapColIdx;
+  if (!Array.isArray(line)) return null;
+  if (idx.valorNF != null) {
+    const primary = line[idx.valorNF];
+    if (looksLikeSapValorCell(primary)) return primary;
+  }
+  const start = idx.nf != null ? idx.nf + 1 : 4;
+  for (let c = start; c < Math.min(line.length, start + 6); c++) {
+    if (c === idx.valorNF) continue;
+    const v = line[c];
+    if (looksLikeSapValorCell(v)) return v;
+  }
+  return null;
+}
+
 function looksLikeSapDataRow(line, colIdx) {
   const idx = colIdx || activeSapColIdx;
   if (!Array.isArray(line) || line.length <= idx.nf) return false;
@@ -689,7 +744,7 @@ function applySapColPositionalFallback(row, line, headerRow, standardLayout, col
   const nf = line[idx.nf];
   const cliente = line[idx.cliente];
   const dtRaw = line[idx.dtEmissao];
-  const valorRaw = idx.valorNF != null ? line[idx.valorNF] : null;
+  const valorRaw = pickSapValorFromLine(line, idx);
 
   if (nf !== null && nf !== undefined && String(nf).trim() !== '') row.nf = nf;
   if (cliente !== null && cliente !== undefined && String(cliente).trim() !== '') {
@@ -700,8 +755,8 @@ function applySapColPositionalFallback(row, line, headerRow, standardLayout, col
     row.dtEmissao = parsed;
     row._sapDateSource = 'colC';
   }
-  if (valorRaw !== null && valorRaw !== undefined && valorRaw !== '' && !row.valorNF) {
-    row.valorNF = valorRaw;
+  if (valorRaw !== null && valorRaw !== undefined && valorRaw !== '') {
+    if (!row.valorNF || !looksLikeSapValorCell(row.valorNF)) row.valorNF = valorRaw;
   }
   row._sapPositionalLayout = true;
   return row;
@@ -722,17 +777,23 @@ function isStandardSapNfLayout(headerRow, sampleRows, colIdx) {
 
 function scoreSapLayout(dataLines, colIdx) {
   let hits = 0;
+  let valorHits = 0;
   for (const line of (dataLines || []).slice(0, 15)) {
     if (looksLikeSapDataRow(line, colIdx)) hits++;
+    const v = pickSapValorFromLine(line, colIdx);
+    if (looksLikeSapValorCell(v)) valorHits++;
   }
-  return hits;
+  return hits * 10 + valorHits;
 }
 
 function resolveSapColIdx(headerRow, dataLines) {
   const layouts = [
     { cliente: 1, dtEmissao: 2, nf: 3, valorNF: 4, label: 'B/C/D/E' },
+    { cliente: 1, dtEmissao: 2, nf: 3, valorNF: 5, label: 'B/C/D/F' },
+    { cliente: 1, dtEmissao: 2, nf: 3, valorNF: 6, label: 'B/C/D/G' },
     { cliente: 0, dtEmissao: 1, nf: 2, valorNF: 3, label: 'A/B/C/D' },
-    { cliente: 2, dtEmissao: 3, nf: 4, valorNF: 5, label: 'C/D/E/F' }
+    { cliente: 2, dtEmissao: 3, nf: 4, valorNF: 5, label: 'C/D/E/F' },
+    { cliente: 2, dtEmissao: 3, nf: 4, valorNF: 6, label: 'C/D/E/G' }
   ];
   for (const layout of layouts) {
     if (headerRow &&
@@ -923,7 +984,7 @@ function buildSapNfMap(rows) {
       nf,
       cliente: r.cliente ? String(r.cliente).trim() : '',
       dtEmissao: parseSapBrDate(r.dtEmissao),
-      valorNF: num(r.valorNF)
+      valorNF: parseSapNum(r.valorNF)
     };
     map[key] = entry;
   });
@@ -1053,8 +1114,9 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
     }
     sapNfMap = buildSapNfMap(rows);
     const nMapped = Object.keys(sapNfMap).length;
+    const nWithValor = Object.values(sapNfMap).filter(e => parseSapNum(e.valorNF) > 0).length;
     if (!opts.silent) {
-      console.log('[SAP] Map size:', nMapped, 'keys (canonical NF)');
+      console.log('[SAP] Map size:', nMapped, 'keys (canonical NF), with valor:', nWithValor);
     }
 
     reEnrichAfterSapLoad();
@@ -4521,6 +4583,7 @@ function initFretes() {
 window.FretesSAP = {
   getMap: () => sapNfMap,
   normNFKey,
+  parseSapNum,
   buildSapNfMap,
   lookupSapEntry,
   isRelevantValorDiff,
