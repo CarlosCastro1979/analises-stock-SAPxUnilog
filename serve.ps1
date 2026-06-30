@@ -16,11 +16,13 @@ $mime = @{
 
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$port/")
+$listener.Prefixes.Add("http://127.0.0.1:$port/")
 $listener.Start()
 
 Write-Host ""
 Write-Host "  Performance Logistica - servidor local" -ForegroundColor Green
 Write-Host "  http://localhost:$port/" -ForegroundColor Cyan
+Write-Host "  http://127.0.0.1:$port/" -ForegroundColor Cyan
 Write-Host "  Pasta: $root" -ForegroundColor DarkGray
 Write-Host "  Ctrl+C para parar" -ForegroundColor DarkGray
 Write-Host ""

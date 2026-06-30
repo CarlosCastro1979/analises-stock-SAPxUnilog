@@ -1,5 +1,5 @@
-// fretes.js v1.7.13
-const FRETES_JS_VERSION = '1.7.13';
+// fretes.js v1.7.14
+const FRETES_JS_VERSION = '1.7.14';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -1182,6 +1182,17 @@ function sapValoresClose(a, b, eps = 0.01) {
   return Math.abs(a - b) < eps;
 }
 
+/** Group close-equal line valores with occurrence counts (for repeated doc-total detection). */
+function sapValorGroups(vals) {
+  const groups = [];
+  for (const v of vals) {
+    const g = groups.find(x => sapValoresClose(x.value, v));
+    if (g) g.count++;
+    else groups.push({ value: v, count: 1 });
+  }
+  return groups.sort((a, b) => b.count - a.count);
+}
+
 /** Drop valorLine when it duplicates valorDoc (doc total mistaken for line bruto). */
 function sanitizeSapRowValors(r) {
   const doc = sapParsedValor(r.valorDoc);
@@ -1195,29 +1206,30 @@ function finalizeSapNfValor(acc) {
   const lineSum = acc.lineSum;
   const doc = acc.docVal > 0 ? acc.docVal : 0;
 
-  if (vals.length > 0 && vals.every(v => sapValoresClose(v, vals[0]))) {
-    const single = vals[0];
-    if (doc > 0 && sapValoresClose(single, doc)) return doc;
-    return single;
-  }
-
-  if (lineSum > 0 && doc > 0) {
-    if (sapValoresClose(lineSum, doc)) return doc;
-    if (lineSum > doc * 1.01) {
-      const ratio = lineSum / doc;
-      if (Math.abs(ratio - Math.round(ratio)) < 0.02 && vals.length && vals.every(v => sapValoresClose(v, doc))) {
-        return doc;
-      }
-      const nonDocSum = vals.filter(v => !sapValoresClose(v, doc)).reduce((a, b) => a + b, 0);
-      if (nonDocSum > 0 && sapValoresClose(nonDocSum, doc)) return doc;
-    }
-  }
-
-  if (lineSum > 0) return lineSum;
+  // Doc total column — authoritative NF total; never sum repeated doc per row.
   if (doc > 0) return doc;
+
+  if (vals.length > 0 && vals.every(v => sapValoresClose(v, vals[0]))) {
+    return vals[0];
+  }
+
+  if (vals.length > 0) {
+    const groups = sapValorGroups(vals);
+    if (groups.length === vals.length) return lineSum;
+    const top = groups[0];
+    if (top.count >= 2) {
+      if (lineSum >= top.value * top.count * 0.95) return top.value;
+      if (groups.length === 1) return top.value;
+      return groups.reduce((s, g) => s + g.value, 0);
+    }
+    if (lineSum > 0) return lineSum;
+  }
+
   if (acc.fallbackVals.length) {
     const fb = acc.fallbackVals;
     if (fb.every(v => sapValoresClose(v, fb[0]))) return fb[0];
+    const fbGroups = sapValorGroups(fb);
+    if (fbGroups[0].count >= 2) return fbGroups[0].value;
     return fb.reduce((a, b) => a + b, 0);
   }
   return 0;
@@ -1255,12 +1267,13 @@ function buildSapNfMap(rows) {
       map[key] = acc;
     }
 
+    if (docValor > 0) {
+      acc.docVal = Math.max(acc.docVal, docValor);
+    }
     if (lineValor > 0) {
       acc.lineSum += lineValor;
       acc.lineCount++;
       acc.lineVals.push(lineValor);
-    } else if (docValor > 0) {
-      acc.docVal = Math.max(acc.docVal, docValor);
     } else if (!r.valorLine && !r.valorDoc && r.valorNF) {
       const fb = sapParsedValor(r.valorNF);
       if (fb > 0) acc.fallbackVals.push(fb);
@@ -1333,6 +1346,17 @@ function _debugBuildSapNfMapAggregation() {
     { nf: '99635', valorLine: '49.937,37', valorDoc: '49.937,37' },
     { nf: '99635', valorLine: '49.937,37', valorDoc: '49.937,37' }
   ]);
+  const mapLineDocSameRow = buildSapNfMap([
+    { nf: '99635', valorLine: '10.000,00', valorDoc: '49.937,37' },
+    { nf: '99635', valorLine: '20.000,00', valorDoc: '49.937,37' },
+    { nf: '99635', valorLine: '19.937,37', valorDoc: '49.937,37' }
+  ]);
+  const mapInflatedRepeat = buildSapNfMap([
+    { nf: '99635', valorLine: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37' },
+    { nf: '99635', valorLine: '49.937,37' },
+    { nf: '99635', valorLine: '25.000,00' }
+  ]);
   const ok97723 = Math.abs((map['97723']?.valorNF || 0) - 3500.5) < 0.01;
   const ok88888 = Math.abs((map['88888']?.valorNF || 0) - 500) < 0.01;
   const ok99999 = map['99999']?.valorNF === 0;
@@ -1340,7 +1364,10 @@ function _debugBuildSapNfMapAggregation() {
   const ok99635doc = Math.abs((mapDocOnly['99635']?.valorNF || 0) - 49937.37) < 0.01;
   const ok99635repeat = Math.abs((mapBrutoRepeat['99635']?.valorNF || 0) - 49937.37) < 0.01;
   const ok99635dupPos = Math.abs((mapDupPositional['99635']?.valorNF || 0) - 49937.37) < 0.01;
-  if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat || !ok99635dupPos) {
+  const ok99635lineDoc = Math.abs((mapLineDocSameRow['99635']?.valorNF || 0) - 49937.37) < 0.01;
+  const ok99635inflate = Math.abs((mapInflatedRepeat['99635']?.valorNF || 0) - 49937.37) < 0.01;
+  if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat || !ok99635dupPos
+      || !ok99635lineDoc || !ok99635inflate) {
     console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
       ok97723, got97723: map['97723']?.valorNF,
       ok88888, got88888: map['88888']?.valorNF,
@@ -1348,7 +1375,9 @@ function _debugBuildSapNfMapAggregation() {
       ok99635lines, got99635lines: map['99635']?.valorNF,
       ok99635doc, got99635doc: mapDocOnly['99635']?.valorNF,
       ok99635repeat, got99635repeat: mapBrutoRepeat['99635']?.valorNF,
-      ok99635dupPos, got99635dupPos: mapDupPositional['99635']?.valorNF
+      ok99635dupPos, got99635dupPos: mapDupPositional['99635']?.valorNF,
+      ok99635lineDoc, got99635lineDoc: mapLineDocSameRow['99635']?.valorNF,
+      ok99635inflate, got99635inflate: mapInflatedRepeat['99635']?.valorNF
     });
   } else {
     console.debug('[SAP NF] buildSapNfMap aggregation OK');
@@ -3050,6 +3079,13 @@ async function restoreCteFromRec(cteRec, sapRec, silent = false) {
   if (!cteRec?.file_data) return false;
   const co = fteCompany();
   if (_fteLoadedCompany === co && currentNFs.length && lastCtePack?.fileName === cteRec.file_name) {
+    if (sapRec?.file_data) {
+      processArrayBufferSap(
+        base64ToArrayBuffer(sapRec.file_data),
+        sapRec.file_name || 'sap.xlsx',
+        { silent: true }
+      );
+    }
     return true;
   }
   _fteSkipAutosave = true;
