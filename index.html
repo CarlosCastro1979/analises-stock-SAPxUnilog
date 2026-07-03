@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260626180000 -->
+<!DOCTYPE html><!-- v20260703103000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -469,7 +469,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.9 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.10 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -964,7 +964,7 @@ select.cad-inp{cursor:pointer;}
       <div class="ch"><div class="ct">Stock vs Ocupação de Posições</div><button class="btn bg bs" onclick="exportOccXlsx()">⬇ Excel</button></div>
       <div class="tb">
         <div class="tw" onclick="toggleShowAllOcc()">
-          <div class="tg" id="showAllOccTg"><div class="tk"></div></div>
+          <div class="tg on" id="showAllOccTg"><div class="tk"></div></div>
           <span id="tgOccLbl">Só otimizável</span>
         </div>
         <input class="inp is" id="ovSrch" placeholder="EAN, código SAP ou descrição…" oninput="renderOccView()">
@@ -2128,6 +2128,7 @@ async function autoLoadLastExcelFiles(){
   }
   const hadExcel=await loadSavedStockExcelFiles(true,true);
   if(hadExcel&&sapData&&uniData)await processAll();
+  refreshOccIfVisible();
 }
 async function loadLastSaved(silent=false){
   syncCompanyDepotMap();
@@ -2179,7 +2180,7 @@ let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','Total',''];
 
 let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,valConflData=[],valConflStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={},suspValidados=new Set(),suspValidadosOcultos=0;
-let showAll=false,showAllOcc=false,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
+let showAll=false,showAllOcc=true,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
 
 // ── INIT ──
 async function init(){
@@ -4326,6 +4327,7 @@ async function processAll(opts={}){
     }catch(e){console.warn('[stock] excel persist',e);toast('Aviso: não foi possível guardar ficheiros Excel na cloud.','error');}
   }catch(e){toast('Offline — dados em memória','error');}
   updateLoadBanner(procAt);
+  refreshOccIfVisible();
   }finally{
     if(manageUi)setStockProcessing(false);
   }
@@ -4497,7 +4499,8 @@ function switchCompany(){
   // Try to load saved data for the new company
   if(typeof reloadFretesForCompany==='function')reloadFretesForCompany();
   if(typeof reloadArmazemForCompany==='function')reloadArmazemForCompany();
-  autoLoadLastExcelFiles();
+  refreshOccIfVisible();
+  autoLoadLastExcelFiles().then(()=>refreshOccIfVisible());
   toast('Empresa: '+company,'info');
 }
 
@@ -5609,13 +5612,34 @@ function occRecomendacaoText(r){
 
 // ── RENDER OCC VIEW ──
 let _renderOccViewBusy=false;
-function toggleShowAllOcc(){showAllOcc=!showAllOcc;document.getElementById('showAllOccTg').classList.toggle('on',showAllOcc);document.getElementById('tgOccLbl').textContent=showAllOcc?'Mostrar tudo':'Só otimizável';renderOccView();}
+function refreshOccIfVisible(){
+  const ap=document.querySelector('.page.active');
+  if(ap?.id==='page-occupation')renderOccView();
+}
+function initOccToggle(){
+  const tg=document.getElementById('showAllOccTg');
+  const lbl=document.getElementById('tgOccLbl');
+  if(tg)tg.classList.toggle('on',showAllOcc);
+  if(lbl)lbl.textContent=showAllOcc?'Só otimizável':'Mostrar tudo';
+}
+function msGetValOrSelect(id){
+  const vals=[...msGetVals(id)];
+  if(vals.length)return vals[0];
+  const sel=document.getElementById(id);
+  if(sel&&sel.style.display!=='none')return sel.value||'';
+  return '';
+}
+function toggleShowAllOcc(){showAllOcc=!showAllOcc;initOccToggle();renderOccView();}
 function renderOccView(){if(_renderOccViewBusy)return;_renderOccViewBusy=true;try{_renderOccView();}finally{_renderOccViewBusy=false;}}
 function _renderOccView(){
-  if(!uniData){document.getElementById('ovBody').innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros para ver a ocupação</td></tr>';return;}
+  if(!uniData){
+    document.getElementById('ovBody').innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros para ver a ocupação</td></tr>';
+    const kpis=document.getElementById('ovKpis');if(kpis)kpis.innerHTML='';
+    return;
+  }
   const srch=document.getElementById('ovSrch').value.toLowerCase();
-  const depF=[...msGetVals("ovDep")][0]||"";
-  const alertF=[...msGetVals("ovAlerta")][0]||"";
+  const depF=msGetValOrSelect('ovDep');
+  const alertF=msGetValOrSelect('ovAlerta');
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
   msUpdate('ovCat',allCats,'Categorias','renderOccView');
   const selCats=msGet('ovCat');
@@ -5627,25 +5651,28 @@ function _renderOccView(){
   const filteredClasses=depF?(depClassMap[depF]||[]):null;
   const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
   const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
-  let rows=buildOccRows(uniFiltered,descMap);
-  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.ean,r.desc));
-  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
-  if(selSubs.size)rows=rows.filter(r=>selSubs.has(r.subcat));
-  if(!showAllOcc)rows=rows.filter(r=>r.underutil);
-  if(alertF==='sem')rows=rows.filter(r=>!r.param);
+  let kpiRows=buildOccRows(uniFiltered,descMap);
+  if(srch)kpiRows=kpiRows.filter(r=>matchProdSrch(srch,r.ean,r.desc));
+  if(selCats.size)kpiRows=kpiRows.filter(r=>selCats.has(r.cat));
+  if(selSubs.size)kpiRows=kpiRows.filter(r=>selSubs.has(r.subcat));
+  if(alertF==='sem')kpiRows=kpiRows.filter(r=>!r.param);
+  let rows=showAllOcc?kpiRows:kpiRows.filter(r=>r.underutil);
   if(sorts['occ'])applySort('occ',rows);
   else rows.sort((a,b)=>{const cc=String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'));if(cc!==0)return cc;const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;return String(a.desc||'').localeCompare(String(b.desc||''));});
   updateSortHeaders('occ');
-  const filteredEANs=new Set(rows.map(r=>r.ean));
-  const filteredEnderecos=new Set(uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!==''&&!isOccDCEnd(r.endereco)&&filteredEANs.has(r.EAN_norm)).map(r=>r.endereco));
-  const tP=filteredEnderecos.size;const tPoup=rows.reduce((s,r)=>s+(r.poupanca||0),0);const tOpt=tP-tPoup;
-  const wP=rows.filter(r=>r.param).length;
+  const kpiEANs=new Set(kpiRows.map(r=>r.ean));
+  const kpiEnderecos=new Set(uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!==''&&!isOccDCEnd(r.endereco)&&kpiEANs.has(r.EAN_norm)).map(r=>r.endereco));
+  const tP=kpiEnderecos.size;
+  const tPoup=kpiRows.reduce((s,r)=>s+(r.poupanca||0),0);
+  const tOpt=tP-tPoup;
+  const wP=kpiRows.filter(r=>r.param).length;
+  const nOpt=kpiRows.filter(r=>r.underutil).length;
   document.getElementById('ovKpis').innerHTML=`
-    <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmtKvNum(rows.length)}</div></div>
-    <div class="kpi"><div class="kl">Com parâmetro</div><div class="kv g">${fmtKvNum(wP)}</div><div class="ks">${rows.length?Math.round(wP/rows.length*100):0}%</div></div>
+    <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmtKvNum(kpiRows.length)}</div>${!showAllOcc?`<div class="ks">${fmtKvNum(rows.length)} otimizáveis</div>`:''}</div>
+    <div class="kpi"><div class="kl">Com parâmetro</div><div class="kv g">${fmtKvNum(wP)}</div><div class="ks">${kpiRows.length?Math.round(wP/kpiRows.length*100):0}%</div></div>
     <div class="kpi"><div class="kl">Posições Reais</div><div class="kv b">${fmtKvNum(tP)}</div><div class="ks">${depF?("Dep "+depF.padStart(4,"0")):"Todos os depósitos"} · endereços únicos</div></div>
     <div class="kpi"><div class="kl">Após Optimização</div><div class="kv">${fmtKvNum(tOpt)}</div></div>
-    <div class="kpi"><div class="kl">Posições a Libertar</div><div class="kv ${tPoup>0?'r':''}">${fmtKvNum(tPoup)}</div><div class="ks">${tP>0?Math.round(tPoup/tP*100):0}% do total</div></div>
+    <div class="kpi"><div class="kl">Posições a Libertar</div><div class="kv ${tPoup>0?'r':''}">${fmtKvNum(tPoup)}</div><div class="ks">${tP>0?Math.round(tPoup/tP*100):0}% do total${!showAllOcc&&nOpt?` · ${fmtKvNum(nOpt)} EANs na tabela`:''}</div></div>
   `;
   const body=document.getElementById('ovBody');body.innerHTML='';
   for(const r of rows){
@@ -5722,8 +5749,8 @@ function exportOccXlsx(){
   const srch=document.getElementById('ovSrch').value.toLowerCase();
   const selCats=msGet('ovCat');
   const selSubs=msGet('ovSub');
-  const depF=[...msGetVals("ovDep")][0]||"";
-  const alertF=[...msGetVals("ovAlerta")][0]||"";
+  const depF=msGetValOrSelect('ovDep');
+  const alertF=msGetValOrSelect('ovAlerta');
   const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI','SI']};
   const filteredClasses=depF?(depClassMap[depF]||[]):null;
   const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
@@ -7749,6 +7776,7 @@ function applyResizable(){scheduleColResize();}
     }
     init();
     initMultiselects();
+    initOccToggle();
   }
 })();
 </script>
