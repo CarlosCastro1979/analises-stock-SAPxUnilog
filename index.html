@@ -10,6 +10,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8102e'/><text x='16' y='22' font-family='Arial' font-weight='700' font-size='13' fill='white' text-anchor='middle'>DF</text></svg>">
 <!-- SheetJS 0.18.5 CE: não suporta xlsx encriptados (ECMA-376 / password). Ver fretes.js formatXlsxReadError. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fflate/0.8.2/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
@@ -7897,7 +7898,7 @@ function applyResizable(){scheduleColResize();}
   }
   // inventario-acerto.js is optional — never block app boot on it
   function loadInventarioAcerto() {
-    load('inventario-acerto.js', 'v=1.0.2');
+    load('inventario-acerto.js', 'v=1.0.3');
   }
   load('fretes.js', 'v=1.7.19', function () {
     loadInventarioAcerto();
