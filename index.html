@@ -658,7 +658,7 @@ select.cad-inp{cursor:pointer;}
     <div class="card">
       <div class="ch">
         <div class="ct">Gerar doc. de acerto de inventário</div>
-        <button class="btn bp bs" onclick="exportInventarioAcertoXlsx()">⬇ Exportar Excel PT</button>
+        <button class="btn bp bs" onclick="typeof exportInventarioAcertoXlsx==='function'?exportInventarioAcertoXlsx():toast('Módulo Acerto Inventário a carregar — aguarde ou recarregue','error')">⬇ Exportar Excel PT</button>
       </div>
       <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55">
         Exporta ficheiro no formato <strong>Inventario_DFB_Maio_trabalhado_enviar a PT.xlsx</strong>: uma folha por depósito (0008, 0009, 0011, 0022, 0044), apenas linhas com diferença WMS≠SAP.
@@ -7872,6 +7872,7 @@ function applyResizable(){scheduleColResize();}
 <script>
 (function () {
   var isLocal = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  var booted = false;
   function src(file, prodQuery) {
     return file + (isLocal ? '?_=' + Date.now() : '?' + prodQuery);
   }
@@ -7882,20 +7883,9 @@ function applyResizable(){scheduleColResize();}
     if (onerror) s.onerror = onerror;
     document.head.appendChild(s);
   }
-  load('fretes.js', 'v=1.7.19', function () {
-    load('armazem.js', 'v=1.0.35', function () {
-      load('inventario-acerto.js', 'v=1.0.0', bootApp, function () {
-        bootApp();
-      });
-    }, function () {
-      load('inventario-acerto.js', 'v=1.0.0', bootApp, function () {
-        var e = document.getElementById('arm-initErr');
-        if (e) e.style.display = 'block';
-        bootApp();
-      });
-    });
-  });
   function bootApp() {
+    if (booted) return;
+    booted = true;
     if (typeof initArmazem !== 'function') {
       var e = document.getElementById('arm-initErr');
       if (e) e.style.display = 'block';
@@ -7905,6 +7895,23 @@ function applyResizable(){scheduleColResize();}
     initOccToggle();
     if (typeof syncInventarioAcertoNav === 'function') syncInventarioAcertoNav();
   }
+  // inventario-acerto.js is optional — never block app boot on it
+  function loadInventarioAcerto() {
+    load('inventario-acerto.js', 'v=1.0.1');
+  }
+  load('fretes.js', 'v=1.7.19', function () {
+    loadInventarioAcerto();
+    load('armazem.js', 'v=1.0.35', bootApp, function () {
+      var e = document.getElementById('arm-initErr');
+      if (e) e.style.display = 'block';
+      bootApp();
+    });
+  }, function () {
+    loadInventarioAcerto();
+    bootApp();
+  });
+  // Fallback if external scripts hang (e.g. network/CDN)
+  setTimeout(bootApp, 8000);
 })();
 </script>
 </body>
