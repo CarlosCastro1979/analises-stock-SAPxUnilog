@@ -469,7 +469,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.11 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.12 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -770,7 +770,7 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bg bs" onclick="exportVencForaDepXlsx()">⬇ Excel</button>
     </div>
     <p id="vencDescWms" style="font-size:12px;color:var(--text2);margin-bottom:6px;">
-      <strong>Unilog (WMS):</strong> produtos com EAN, lote, quantidade e posição, <strong>validade expirada</strong>, fora da classe 104 (dep. vencidos). Excluídos: equip. profissional, caixas de papelão, máquinas domésticas, vinhos e validade 00.0000.
+      <strong>Unilog (WMS):</strong> produtos com EAN, lote, quantidade e posição, <strong>validade expirada</strong>, fora da classe 104 (dep. vencidos). Excluídos: equip. profissional, caixas de papelão, máquinas domésticas, vinhos, validade 00.0000 e posições classe <strong>FI</strong> (falta de inventário).
     </p>
     <p id="vencDescSap" style="font-size:12px;color:var(--text2);margin-bottom:6px;display:none">
       <strong>SAP:</strong> produtos com validade expirada fora do dep. vencidos (<span id="vencSapDepLbl">0009</span>). Excluídos: equip. profissional, caixas de papelão, máquinas domésticas, vinhos e validade 00.0000.
@@ -3709,7 +3709,7 @@ function buildVencidoForaDepWms(){
   if(!uniData)return;
   const vencidosDk=getVencidosDepotKey();
   const today=new Date();today.setHours(0,0,0,0);
-  const stats={analizadas:uniData.length,comValidade:0,vencidas:0,validadeNaoParseada:0,foraDepVencidos:0,jaNoDepVencidos:0,equipProf:0,maquinaDom:0,vinho:0,validadeIgnorada:0,semLote:0,semEndereco:0,dc:0,classeDesconhecida:0};
+  const stats={analizadas:uniData.length,comValidade:0,vencidas:0,validadeNaoParseada:0,foraDepVencidos:0,jaNoDepVencidos:0,equipProf:0,maquinaDom:0,vinho:0,validadeIgnorada:0,semLote:0,semEndereco:0,dc:0,classeDesconhecida:0,faltaInventario:0};
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
   uniData.forEach(r=>{
@@ -3736,6 +3736,7 @@ function buildVencidoForaDepWms(){
     const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
     if(!dk){stats.classeDesconhecida++;return;}
     if(dk===vencidosDk){stats.jaNoDepVencidos++;return;}
+    if(isClasseFI(r.classe)){stats.faltaInventario++;return;}
     if(isExcluidoDifStock(r.EAN_norm,dk,desc)){stats.equipProf++;return;}
     stats.foraDepVencidos++;
     const depLabel=DEPOT_MAP[dk]?.label.split('—')[1]?.trim()||dk;
@@ -3853,6 +3854,7 @@ function _renderVencidoForaDepWms(){
     if(s.maquinaDom)extra+=` · ${fmt(s.maquinaDom)} máquinas domésticas`;
     if(s.vinho)extra+=` · ${fmt(s.vinho)} vinhos (sem validade)`;
     if(s.validadeIgnorada)extra+=` · ${fmt(s.validadeIgnorada)} validade 00.0000 ignorada`;
+    if(s.faltaInventario)extra+=` · ${fmt(s.faltaInventario)} classe FI (falta inventário)`;
     if(s.validadeNaoParseada)extra+=` · ${fmt(s.validadeNaoParseada)} validade não parseada`;
     statsEl.textContent=`Analisadas ${fmt(s.analizadas)} linhas Unilog · ${fmt(s.comValidade)} com validade parseada · ${fmt(s.vencidas)} vencidas · ${fmt(s.foraDepVencidos)} fora do dep. vencidos${extra}`;
     statsEl.style.display='block';
