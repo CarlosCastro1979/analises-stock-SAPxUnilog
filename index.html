@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260703103000 -->
+<!DOCTYPE html><!-- v20260703125100 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -469,7 +469,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.12 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.13 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -483,6 +483,7 @@ select.cad-inp{cursor:pointer;}
 <div class="nav">
   <div class="nt active" data-page="upload">📁 Dados</div>
   <div class="nt" data-page="recon">⚖️ Conciliação</div>
+  <div class="nt" id="nt-inventario-acerto" data-page="inventario-acerto">📑 Acerto Inventário</div>
   <div class="nt" data-page="alertas">🚨 Alertas Ação urgente<span id="alertBadge" class="bc" style="display:none"></span></div>
   <div class="nt" data-page="cadastro">🗂️ Cadastro</div>
   <div class="nt" data-page="occupation">📦 Ocupação</div>
@@ -648,6 +649,41 @@ select.cad-inp{cursor:pointer;}
     <div id="eanEmpty" class="empty" style="display:none"><div class="empty-i">⚖️</div><div id="eanEmptyMsg">Carrega os ficheiros para ver</div></div>
   </div>
   </div><!-- /recon-ean -->
+</div>
+
+<!-- ══ ACERTO INVENTÁRIO (DFB) ══ -->
+<div class="page" id="page-inventario-acerto">
+  <div id="iaQbNote" class="banner" style="display:none">Doc. de acerto de inventário disponível apenas para <strong>DFB</strong> (layout PT: depósitos 0008, 0009, 0011, 0022, 0044).</div>
+  <div id="iaMain">
+    <div class="card">
+      <div class="ch">
+        <div class="ct">Gerar doc. de acerto de inventário</div>
+        <button class="btn bp bs" onclick="exportInventarioAcertoXlsx()">⬇ Exportar Excel PT</button>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55">
+        Exporta ficheiro no formato <strong>Inventario_DFB_Maio_trabalhado_enviar a PT.xlsx</strong>: uma folha por depósito (0008, 0009, 0011, 0022, 0044), apenas linhas com diferença WMS≠SAP.
+        Col. <strong>H</strong> = existência física (Unilog), <strong>I</strong> = inventário contabilístico (SAP). Só WMS → I=0; só SAP → H=0.
+      </p>
+      <p id="iaDepotCounts" style="font-size:11px;color:var(--muted);margin-bottom:14px;font-family:var(--mono)"></p>
+      <div class="kr" id="iaKpis"></div>
+      <div class="tw2" id="iaTableWrap" style="display:none">
+        <table id="iaTable">
+          <thead><tr>
+            <th onclick="doSort('ia','depotSheet')">Depósito</th>
+            <th onclick="doSort('ia','material')">Material</th>
+            <th onclick="doSort('ia','desc')">Descrição</th>
+            <th onclick="doSort('ia','lote')">Lote</th>
+            <th class="num" onclick="doSort('ia','qt_wms')">Físico (H)</th>
+            <th class="num" onclick="doSort('ia','qt_sap')">SAP (I)</th>
+            <th class="num" onclick="doSort('ia','diff')">Diferença</th>
+            <th onclick="doSort('ia','_estado')">Estado</th>
+          </tr></thead>
+          <tbody id="iaBody"></tbody>
+        </table>
+      </div>
+      <div id="iaEmpty" class="empty"><div class="empty-i">📑</div><div>Carrega SAP e Unilog e processa — ou sem diferenças nos 5 depósitos</div></div>
+    </div>
+  </div>
 </div>
 
 <!-- ══ ALERTAS AÇÃO URGENTE ══ -->
@@ -2200,6 +2236,7 @@ async function init(){
       t.classList.add('active');
       document.getElementById('page-'+t.dataset.page).classList.add('active');
       if(t.dataset.page==='recon')renderReconPage();
+      if(t.dataset.page==='inventario-acerto'&&typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
       if(t.dataset.page==='alertas')renderAlertPage();
       if(t.dataset.page==='cadastro')renderCadastro();
       if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
@@ -4550,6 +4587,8 @@ function switchCompany(){
   if(typeof reloadArmazemForCompany==='function')reloadArmazemForCompany();
   refreshOccIfVisible();
   autoLoadLastExcelFiles().then(()=>refreshOccIfVisible());
+  if(typeof syncInventarioAcertoNav==='function')syncInventarioAcertoNav();
+  if(typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
   toast('Empresa: '+company,'info');
 }
 
@@ -4574,6 +4613,7 @@ async function loadFromDB(silent=false){
     if(activePage){
       if(activePage.id==='page-occupation')renderOccView();
       if(activePage.id==='page-recon')renderReconPage();
+      if(activePage.id==='page-inventario-acerto'&&typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
       if(activePage.id==='page-alertas')renderAlertPage();
       if(activePage.id==='page-cadastro')renderCadastro();
       if(activePage.id==='page-pecas')renderPecas();
@@ -6400,6 +6440,7 @@ function doSort(table,col){
   else if(table==='hist')renderHistory();
   else if(table==='ean')renderEanView();
   else if(table==='pecas')renderPecas();
+  else if(table==='ia'&&typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
 }
 function applySort(table,rows){
   const s=sorts[table];if(!s)return;
@@ -6412,7 +6453,7 @@ function applySort(table,rows){
 }
 function updateSortHeaders(table){
   const s=sorts[table];
-  const tableEl=document.getElementById({recon:'reconTable',ean:'eanTable',susp:'suspTable',su:'suTable',poscl:'posTable',semval:'semValTable',valconfl:'valConflTable',occ:'ovTable',transEc:'transEcTable',transQb:'transQbTable',audit:'auditTable',rec:'recTable',hist:'histTable',pecas:'pecasTable',vencforadep:'vencTable',vencforadepSap:'vencTable'}[table]);
+  const tableEl=document.getElementById({recon:'reconTable',ean:'eanTable',susp:'suspTable',su:'suTable',poscl:'posTable',semval:'semValTable',valconfl:'valConflTable',occ:'ovTable',transEc:'transEcTable',transQb:'transQbTable',audit:'auditTable',rec:'recTable',hist:'histTable',pecas:'pecasTable',vencforadep:'vencTable',vencforadepSap:'vencTable',ia:'iaTable'}[table]);
   document.querySelectorAll('th[onclick]').forEach(th=>{
     const oc=th.getAttribute('onclick')||'';
     let t=table,col;
@@ -7812,10 +7853,16 @@ function applyResizable(){scheduleColResize();}
     document.head.appendChild(s);
   }
   load('fretes.js', 'v=1.7.19', function () {
-    load('armazem.js', 'v=1.0.35', bootApp, function () {
-      var e = document.getElementById('arm-initErr');
-      if (e) e.style.display = 'block';
-      bootApp();
+    load('armazem.js', 'v=1.0.35', function () {
+      load('inventario-acerto.js', 'v=1.0.0', bootApp, function () {
+        bootApp();
+      });
+    }, function () {
+      load('inventario-acerto.js', 'v=1.0.0', bootApp, function () {
+        var e = document.getElementById('arm-initErr');
+        if (e) e.style.display = 'block';
+        bootApp();
+      });
     });
   });
   function bootApp() {
@@ -7826,6 +7873,7 @@ function applyResizable(){scheduleColResize();}
     init();
     initMultiselects();
     initOccToggle();
+    if (typeof syncInventarioAcertoNav === 'function') syncInventarioAcertoNav();
   }
 })();
 </script>
