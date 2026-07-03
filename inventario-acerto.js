@@ -2,9 +2,11 @@
 (function (global) {
   'use strict';
 
+  const INVENTARIO_ACERTO_JS_VERSION = '1.0.2';
   const INVENTARIO_ACERTO_DEPOTS = ['8', '9', '11', '22', '44'];
   const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
   const DATA_START_ROW = 9;
+  const HEADER_LAST_ROW = 7;
   const TEMPLATE_URL = 'assets/inventario_acerto_template.xlsx';
 
   let inventarioAcertoRows = [];
@@ -15,12 +17,27 @@
     return m[dk]?.label || dk;
   }
 
-  function getSapMaterial(ean) {
+  function resolveSapMaterial(reconRow, depotKey) {
+    const ean = reconRow?.EAN_norm;
     if (!ean) return '';
+
+    if (reconRow.material) return String(reconRow.material).trim();
+
     if (typeof buildEanSapCodeMap === 'function' && typeof sapData !== 'undefined' && sapData) buildEanSapCodeMap();
+
+    const sap = typeof sapData !== 'undefined' ? sapData : [];
+    const depotHit = sap.find((x) => x.deposito === depotKey && x.EAN_norm === ean && x.material);
+    if (depotHit) return String(depotHit.material).trim();
+
     if (typeof _eanSapCodeMap !== 'undefined' && _eanSapCodeMap?.[ean]) return [..._eanSapCodeMap[ean]][0];
-    const row = (typeof sapData !== 'undefined' ? sapData : []).find((x) => x.EAN_norm === ean && x.material);
-    return row?.material || '';
+
+    const anyEan = sap.find((x) => x.EAN_norm === ean && x.material);
+    if (anyEan) return String(anyEan.material).trim();
+
+    const asMaterial = sap.find((x) => x.material === ean);
+    if (asMaterial) return String(asMaterial.material).trim();
+
+    return '';
   }
 
   function getSapUmb(ean) {
@@ -37,16 +54,18 @@
 
   function buildAcertoRowsForDepot(dk) {
     const rows = (typeof reconData !== 'undefined' ? reconData[dk] : null) || [];
-    return rows
+    const precoMap = typeof buildSapPrecoMap === 'function' ? buildSapPrecoMap() : {};
+    let skippedNoMaterial = 0;
+    const out = rows
       .filter((r) => r.diff !== 0)
       .map((r) => {
         const hi = iaAcertoHI(r);
-        const precoMap = typeof buildSapPrecoMap === 'function' ? buildSapPrecoMap() : {};
+        const material = resolveSapMaterial(r, dk);
         return {
           depot: dk,
           depotSheet: INVENTARIO_ACERTO_SHEETS[dk] || dk.padStart(4, '0'),
           depotLabel: iaDepotLabel(dk),
-          material: getSapMaterial(r.EAN_norm),
+          material,
           EAN_norm: r.EAN_norm,
           desc: r.desc || '',
           lote: r.Lote_norm || '',
@@ -58,11 +77,18 @@
           _estado: hi.h > 0 && hi.i === 0 ? 'Só WMS' : hi.i > 0 && hi.h === 0 ? 'Só SAP' : 'Diverg.',
         };
       })
+      .filter((r) => {
+        if (r.material) return true;
+        skippedNoMaterial++;
+        return false;
+      })
       .sort((a, b) => {
         const ma = a.material.localeCompare(b.material);
         if (ma) return ma;
         return (a.lote || '').localeCompare(b.lote || '');
       });
+    out._skippedNoMaterial = skippedNoMaterial;
+    return out;
   }
 
   function buildInventarioAcertoRows() {
@@ -74,16 +100,25 @@
   }
 
   function iaClearSheetDataFromRow(ws, startRow) {
-    if (!ws || !ws['!ref']) return;
-    const range = XLSX.utils.decode_range(ws['!ref']);
-    const maxCol = Math.max(range.e.c, 12);
-    for (let R = startRow - 1; R <= range.e.r; R++) {
-      for (let C = 0; C <= maxCol; C++) {
-        delete ws[XLSX.utils.encode_cell({ r: R, c: C })];
+    if (!ws) return;
+    const startR = startRow - 1;
+    for (const addr of Object.keys(ws)) {
+      if (addr.charAt(0) === '!') continue;
+      try {
+        const cell = XLSX.utils.decode_cell(addr);
+        if (cell.r >= startR) delete ws[addr];
+      } catch (_) {
+        /* ignore malformed keys */
       }
     }
-    range.e.r = Math.max(range.s.r, startRow - 2);
-    ws['!ref'] = XLSX.utils.encode_range(range);
+    if (ws['!rows'] && ws['!rows'].length > startR) ws['!rows'] = ws['!rows'].slice(0, startR);
+    const headerEndR = startRow - 2;
+    const base = ws['!ref']
+      ? XLSX.utils.decode_range(ws['!ref'])
+      : { s: { r: 0, c: 0 }, e: { r: headerEndR, c: 12 } };
+    base.e.r = Math.max(base.s.r, headerEndR);
+    base.e.c = Math.max(base.e.c, 12);
+    ws['!ref'] = XLSX.utils.encode_range(base);
   }
 
   function iaSetCell(ws, addr, value, kind) {
@@ -99,7 +134,7 @@
     ws[addr] = { t: 's', v: String(value ?? '') };
   }
 
-  function iaWriteDataRow(ws, rowNum, row, sheetDepot) {
+  function iaWriteDataRow(ws, rowNum, row) {
     const r = rowNum;
     iaSetCell(ws, 'A' + r, row.material);
     iaSetCell(ws, 'B' + r, row.desc);
@@ -116,10 +151,16 @@
   }
 
   function iaUpdateSheetRef(ws, lastRow) {
-    const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 12 } };
+    const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s: { r: 0, c: 0 }, e: { r: HEADER_LAST_ROW - 1, c: 12 } };
     range.e.r = Math.max(range.e.r, lastRow - 1);
     range.e.c = Math.max(range.e.c, 12);
     ws['!ref'] = XLSX.utils.encode_range(range);
+  }
+
+  function iaExcelSerialDate(d) {
+    const dt = d || new Date();
+    const utc = Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    return (utc - Date.UTC(1899, 11, 30)) / 86400000;
   }
 
   async function loadInventarioAcertoTemplate() {
@@ -147,28 +188,33 @@
     buildInventarioAcertoRows();
     const totalLines = inventarioAcertoRows.length;
     if (!totalLines) {
-      toast('Sem linhas com diferença nos depósitos 0008–0044', 'info');
+      toast('Sem linhas com diferença nos depósitos 0008–0044 (ou sem código SAP)', 'info');
       return;
     }
     try {
       const buf = await loadInventarioAcertoTemplate();
       const wb = XLSX.read(buf, { type: 'array', cellFormula: true, cellStyles: true });
+      let skippedNoMaterial = 0;
       for (const dk of INVENTARIO_ACERTO_DEPOTS) {
         const sheetName = INVENTARIO_ACERTO_SHEETS[dk];
         const ws = wb.Sheets[sheetName];
         if (!ws) continue;
         iaClearSheetDataFromRow(ws, DATA_START_ROW);
         ws['M3'] = { t: 's', v: sheetName };
+        ws['L5'] = { t: 'n', v: iaExcelSerialDate(new Date()) };
         const rows = buildAcertoRowsForDepot(dk);
+        skippedNoMaterial += rows._skippedNoMaterial || 0;
         let rn = DATA_START_ROW;
         for (const row of rows) {
-          iaWriteDataRow(ws, rn, row, sheetName);
+          iaWriteDataRow(ws, rn, row);
           rn++;
         }
-        iaUpdateSheetRef(ws, Math.max(DATA_START_ROW, rn - 1));
+        iaUpdateSheetRef(ws, rows.length ? rn - 1 : HEADER_LAST_ROW);
       }
       XLSX.writeFile(wb, inventarioAcertoExportFilename());
-      toast('Exportado: ' + totalLines + ' linhas de acerto', 'success');
+      let msg = 'Exportado: ' + totalLines + ' linhas de acerto';
+      if (skippedNoMaterial) msg += ' · ' + skippedNoMaterial + ' omitidas (sem código SAP)';
+      toast(msg, 'success');
     } catch (e) {
       toast('Erro ao exportar: ' + (e.message || e), 'error');
     }
@@ -231,7 +277,7 @@
           r.depotSheet +
           '</span></td>' +
           '<td style="font-family:var(--mono);font-size:11px">' +
-          (r.material || '—') +
+          r.material +
           '</td>' +
           '<td class="col-desc">' +
           (r.desc || '—') +
@@ -292,6 +338,7 @@
     if (typeof doSort === 'function') doSort('ia', col);
   }
 
+  global.INVENTARIO_ACERTO_JS_VERSION = INVENTARIO_ACERTO_JS_VERSION;
   global.INVENTARIO_ACERTO_DEPOTS = INVENTARIO_ACERTO_DEPOTS;
   global.buildInventarioAcertoRows = buildInventarioAcertoRows;
   global.renderInventarioAcertoPage = renderInventarioAcertoPage;

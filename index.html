@@ -469,7 +469,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.14 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.15 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -3244,7 +3244,7 @@ function buildRecon(){
     }
 
     const sA={};
-    for(const r of sapDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!sA[k])sA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,desc:r.desc,validade:r.validade};sA[k].qt+=r.qt;}
+    for(const r of sapDep){const k=r.EAN_norm+'|'+r.Lote_norm;if(!sA[k])sA[k]={EAN_norm:r.EAN_norm,Lote_norm:r.Lote_norm,qt:0,desc:r.desc,validade:r.validade,material:r.material||''};else if(!sA[k].material&&r.material)sA[k].material=r.material;sA[k].qt+=r.qt;}
     const uA={};
     for(const r of uniDep){
       const k=r.EAN_norm+'|'+r.Lote_norm;
@@ -3256,7 +3256,7 @@ function buildRecon(){
     }
     const keys=new Set([...Object.keys(sA),...Object.keys(uA)]);
     reconData[dk]=[];
-    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,qt_uni_by_class:u?{...u.qtByClass}:{},diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[],cat:param?.cat||'',subcat:param?.subcat||''});}
+    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,qt_uni_by_class:u?{...u.qtByClass}:{},diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',material:s?.material||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[],cat:param?.cat||'',subcat:param?.subcat||''});}
   }
 }
 
@@ -7897,7 +7897,7 @@ function applyResizable(){scheduleColResize();}
   }
   // inventario-acerto.js is optional — never block app boot on it
   function loadInventarioAcerto() {
-    load('inventario-acerto.js', 'v=1.0.1');
+    load('inventario-acerto.js', 'v=1.0.2');
   }
   load('fretes.js', 'v=1.7.19', function () {
     loadInventarioAcerto();
