@@ -469,7 +469,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.10 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.11 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -2101,7 +2101,9 @@ async function loadSavedStockExcelFiles(silent=false,parseIntoMemory=true){
       document.getElementById('uniFn').textContent='✓ '+stockUniFileName;
       document.getElementById('uniZone').classList.add('loaded');
       if(parseIntoMemory){
-        uniData=filterUniForCompany(normUni(xlsxRowsFromArrayBuffer(stockUniBuffer)));
+        const rows=xlsxRowsFromArrayBuffer(stockUniBuffer);
+        window._rawUniRows=rows;
+        uniData=filterUniForCompany(normUni(rows));
         invalidateReconExclEANs();
       }
       loaded=true;
@@ -2124,6 +2126,10 @@ async function autoLoadLastExcelFiles(){
   const hadDb=await loadFromDB(true);
   if(hadDb){
     await loadSavedStockExcelFiles(true,false);
+    if(stockUniBuffer&&refreshUniFromRaw()){
+      buildRecon();buildSoUnilog();buildPosClasse();buildVencidoForaDep();
+    }
+    refreshOccIfVisible();
     return;
   }
   const hadExcel=await loadSavedStockExcelFiles(true,true);
@@ -2138,6 +2144,9 @@ async function loadLastSaved(silent=false){
   if(hadDb){
     if(!silent)setStockProcessing(true,'A carregar Excels…');
     await loadSavedStockExcelFiles(true,false);
+    if(stockUniBuffer&&refreshUniFromRaw()){
+      buildRecon();buildSoUnilog();buildPosClasse();buildVencidoForaDep();
+    }
     if(!silent)toast('Carregado: '+company,'success');
     return true;
   }
@@ -2242,7 +2251,7 @@ function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok'
 
 // ── FILES ──
 function loadSap(inp){const f=inp.files[0];if(!f)return;stockSapFileName=f.name;const fnEl=document.getElementById('sapFn');if(fnEl)fnEl.textContent='⏳ A ler '+f.name+'…';const r=new FileReader();r.onload=e=>{try{stockSapBuffer=e.target.result;const rows=xlsxRowsFromArrayBuffer(stockSapBuffer);syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');}catch(err){if(fnEl)fnEl.textContent='';toast(xlsxReadErrorMsg(err),'error');}};r.onerror=()=>{if(fnEl)fnEl.textContent='';toast('Erro ao ler ficheiro SAP.','error');};r.readAsArrayBuffer(f);}
-function loadUni(inp){const f=inp.files[0];if(!f)return;stockUniFileName=f.name;const fnEl=document.getElementById('uniFn');if(fnEl)fnEl.textContent='⏳ A ler '+f.name+'…';const r=new FileReader();r.onload=e=>{try{stockUniBuffer=e.target.result;const rows=xlsxRowsFromArrayBuffer(stockUniBuffer);syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');}catch(err){if(fnEl)fnEl.textContent='';toast(xlsxReadErrorMsg(err),'error');}};r.onerror=()=>{if(fnEl)fnEl.textContent='';toast('Erro ao ler ficheiro Unilog.','error');};r.readAsArrayBuffer(f);}
+function loadUni(inp){const f=inp.files[0];if(!f)return;stockUniFileName=f.name;const fnEl=document.getElementById('uniFn');if(fnEl)fnEl.textContent='⏳ A ler '+f.name+'…';const r=new FileReader();r.onload=e=>{try{stockUniBuffer=e.target.result;const rows=xlsxRowsFromArrayBuffer(stockUniBuffer);window._rawUniRows=rows;syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');}catch(err){if(fnEl)fnEl.textContent='';toast(xlsxReadErrorMsg(err),'error');}};r.onerror=()=>{if(fnEl)fnEl.textContent='';toast('Erro ao ler ficheiro Unilog.','error');};r.readAsArrayBuffer(f);}
 function xlsxReadErrorMsg(err){const m=String(err?.message||err||'');if(/encryptioninfo|encrypted file|password|agile encryption|office crypto|file is password-protected/i.test(m))return 'Ficheiro Excel protegido por password — exporta sem proteção ou guarda como .xlsx não encriptado (Excel → Guardar como). SheetJS CE não suporta ficheiros encriptados.';return 'Erro: '+m;}
 function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast(xlsxReadErrorMsg(err),'error');}};r.readAsArrayBuffer(file);}
 function checkBtn(){document.getElementById('procBtn').disabled=!(sapData&&uniData);}
@@ -2315,6 +2324,14 @@ function refreshSapFromRaw(){
   invalidateReconExclEANs();
   return true;
 }
+function refreshUniFromRaw(){
+  if(!window._rawUniRows?.length&&!stockUniBuffer)return false;
+  if(!window._rawUniRows?.length)window._rawUniRows=xlsxRowsFromArrayBuffer(stockUniBuffer);
+  syncCompanyDepotMap();
+  uniData=filterUniForCompany(normUni(window._rawUniRows));
+  invalidateReconExclEANs();
+  return true;
+}
 // Only process deposits defined in DEPOT_MAP — all others ignored automatically
 function normSapPecas(rows){
   return rows
@@ -2348,6 +2365,26 @@ function normSap(rows){
   return out;
 }
 const UNI_CLASSE_COLS=['Classe','Class','CLASSE','Classe ','Class '];
+const UNI_ENDERECO_COLS=['Endereço','Endereco','Endereço ','Endereco ','Endere','Enderec'];
+const UNI_AREA_COLS=['Área','Area','Área ','Area '];
+function pickUniFieldByPrefix(r,cols){
+  for(const c of cols){
+    const v=r[c];
+    if(v===null||v===undefined)continue;
+    const s=String(v).trim();
+    if(s&&s!=='—')return s;
+  }
+  const want=new Set(cols.map(c=>c.normalize('NFC').trim().toLowerCase()));
+  for(const k of Object.keys(r)){
+    const kn=k.normalize('NFC').trim().toLowerCase();
+    if(!want.has(kn)&&![...want].some(p=>kn.startsWith(p.slice(0,5))))continue;
+    const s=String(r[k]).trim();
+    if(s&&s!=='—')return s;
+  }
+  return'';
+}
+function pickUniEnderecoField(r){return pickUniFieldByPrefix(r,UNI_ENDERECO_COLS);}
+function pickUniAreaField(r){return pickUniFieldByPrefix(r,UNI_AREA_COLS);}
 const UNI_CLASSE_ALIASES={
   'FALTA DE INVENTARIO':'FI','FALTA DE INVENTÁRIO':'FI','FALTA INVENTARIO':'FI','FALTA INVENTÁRIO':'FI',
   'SOBRA DE INVENTARIO':'SI','SOBRA DE INVENTÁRIO':'SI','SOBRA INVENTARIO':'SI','SOBRA INVENTÁRIO':'SI'
@@ -2437,7 +2474,7 @@ function normUni(rows){
     if(!classe)continue;
     const validadeLote=pickUniValidadeLoteField(r);
     const validadeHeader=pickUniValidadeHeaderField(r);
-    out.push({classe,EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:pickUniValidadeField(r),validadeLote,validadeHeader,vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:String(r['Endereço']||r['Endereco']||'').trim()});
+    out.push({classe,EAN_norm:nEAN(r['Produto Codigo']||r['Produto C']),produto:String(r['Produto']||'').trim(),Lote_norm:nLote(r['Lote']),qt:nQty(r['Qtd Un']),validade:pickUniValidadeField(r),validadeLote,validadeHeader,vlr:nQty(r['Vlr Méd U']||r['Vlr Méd Un']||r['Vlr Med Un']||r['Vlr Méd. Un']||0),vlrTotal:nQty(r['Valor Total']||r['Valor Tota']||0),endereco:pickUniEnderecoField(r),area:pickUniAreaField(r)});
     counts[classe]=(counts[classe]||0)+1;
   }
   console.log('[normUni] linhas por classe:',counts,'total:',out.length,'FI:',counts.FI||0,'SI:',counts.SI||0);
@@ -3469,14 +3506,23 @@ function updateAlertBadge(){
 }
 
 // ── POSIÇÕES + 1 DEPÓSITO ──
-function isDC(e){return e&&e.includes('DC');}
+function isUniDocaEnd(end,area){
+  const a=String(area??'').trim().toUpperCase();
+  if(a==='DC')return true;
+  if(a)return false;
+  const e=String(end??'').trim().toUpperCase();
+  if(!e)return false;
+  if(e==='DOCA')return true;
+  return /^\d{3}DC\d/.test(e);
+}
+function isDC(end,area){return isUniDocaEnd(end,area);}
 function buildPosClasse(){
   posClasseData=[];
   if(!uniData)return;
   const groups={};
   uniData.forEach(r=>{
     const end=(r.endereco||'').trim();
-    if(!end||isDC(end))return;
+    if(!end||isDC(end,r.area))return;
     const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
     if(!dk)return;
     const key=dk+'|'+end;
@@ -3684,7 +3730,7 @@ function buildVencidoForaDepWms(){
     if(!r.Lote_norm){stats.semLote++;return;}
     const end=(r.endereco||'').trim();
     if(!end){stats.semEndereco++;return;}
-    if(isDC(end)){stats.dc++;return;}
+    if(isDC(end,r.area)){stats.dc++;return;}
     if(!validadeDate||validadeDate>=today)return;
     if(r.classe==='104'){stats.jaNoDepVencidos++;return;}
     const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
@@ -4304,6 +4350,7 @@ async function processAll(opts={}){
   const manageUi=opts.manageUi!==false;
   syncCompanyDepotMap();
   if(window._rawSapRows?.length)refreshSapFromRaw();
+  if(window._rawUniRows?.length||stockUniBuffer)refreshUniFromRaw();
   if(manageUi)setStockProcessing(true,opts.label||'A processar e guardar…');
   try{
   await loadOccParams();await loadSuspValidados();
@@ -5456,7 +5503,7 @@ function updateOccFilters(){
 
 // ── OCC VIEW HELPERS ──
 function isOccPKEnd(end){return end&&String(end).includes('PK');}
-function isOccDCEnd(end){return end&&String(end).includes('DC');}
+function isOccDCEnd(end,area){return isUniDocaEnd(end,area);}
 function occEndChip(end,role){const cls=role==='para'?'occ-end-chip occ-end-chip--para':'occ-end-chip occ-end-chip--de';return`<span class="${cls}" title="${end}">${end}</span>`;}
 function occRecoStep(n,body,meta){
   return`<div class="occ-reco-step"><span class="occ-reco-num">${n}</span><div class="occ-reco-body">${body}${meta?`<div class="occ-reco-meta">${meta}</div>`:''}</div></div>`;
@@ -5512,7 +5559,7 @@ function buildOccAgg(uniFiltered,descMap){
     const k=r.EAN_norm+'|'+r.Lote_norm;
     if(!byEanLote[k])byEanLote[k]={ean:r.EAN_norm,lote:r.Lote_norm,desc:descMap[r.EAN_norm]||r.produto||'',qt:0,enderecos:[],endSet:new Set(),qtDC:0};
     byEanLote[k].qt+=r.qt;
-    if(r.endereco&&isOccDCEnd(r.endereco)){byEanLote[k].qtDC+=r.qt;return;}
+    if(r.endereco&&isOccDCEnd(r.endereco,r.area)){byEanLote[k].qtDC+=r.qt;return;}
     if(r.endereco&&!byEanLote[k].endSet.has(r.endereco)){byEanLote[k].endSet.add(r.endereco);byEanLote[k].enderecos.push({end:r.endereco,qt:0});}
     if(r.endereco){const e=byEanLote[k].enderecos.find(x=>x.end===r.endereco);if(e)e.qt+=r.qt;}
   });
@@ -5661,7 +5708,7 @@ function _renderOccView(){
   else rows.sort((a,b)=>{const cc=String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'));if(cc!==0)return cc;const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;return String(a.desc||'').localeCompare(String(b.desc||''));});
   updateSortHeaders('occ');
   const kpiEANs=new Set(kpiRows.map(r=>r.ean));
-  const kpiEnderecos=new Set(uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!==''&&!isOccDCEnd(r.endereco)&&kpiEANs.has(r.EAN_norm)).map(r=>r.endereco));
+  const kpiEnderecos=new Set(uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!==''&&!isOccDCEnd(r.endereco,r.area)&&kpiEANs.has(r.EAN_norm)).map(r=>r.endereco));
   const tP=kpiEnderecos.size;
   const tPoup=kpiRows.reduce((s,r)=>s+(r.poupanca||0),0);
   const tOpt=tP-tPoup;
