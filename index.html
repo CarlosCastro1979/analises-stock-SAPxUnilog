@@ -34,6 +34,8 @@ header{background:var(--navy);border-bottom:none;padding:0 24px;display:flex;ali
 .logo-mark{width:28px;height:28px;background:var(--red);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;}
 .logo-name{font-size:15px;font-weight:600;color:#fff;}
 .logo-name span{color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px;}
+.hdr-local{color:#64748b;font-size:11px;font-weight:400;text-decoration:none;margin-left:6px;opacity:.9;}
+.hdr-local:hover{color:#cbd5e1;text-decoration:underline;}
 .hdr-r{display:flex;align-items:center;gap:12px;}
 .co-chip{padding:3px 10px;border-radius:4px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);font-size:11px;font-weight:700;color:#fff;font-family:var(--mono);}
 .db-st{display:flex;align-items:center;gap:5px;font-size:11px;color:#94a3b8;}
@@ -467,7 +469,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.9</span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.9 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">

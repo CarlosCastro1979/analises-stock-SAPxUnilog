@@ -1,5 +1,5 @@
 # Servidor local para Performance Logística (SAP x Unilog)
-$port = if ($env:PORT) { [int]$env:PORT } else { 5501 }
+$port = if ($env:PORT) { [int]$env:PORT } else { 8080 }
 $root = $PSScriptRoot
 
 $mime = @{
