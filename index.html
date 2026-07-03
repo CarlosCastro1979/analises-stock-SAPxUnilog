@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260703125100 -->
+<!DOCTYPE html><!-- v20260703143000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -469,7 +469,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.13 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.14 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1450,7 +1450,9 @@ select.cad-inp{cursor:pointer;}
       </div>
     </div>
     <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
-      Stock actual do dep. <strong>0033</strong>. Peças com stock zero mantêm-se visíveis. Consumo médio calculado a partir do histórico de uploads.
+      Stock actual do dep. <strong>0033</strong>. Peças com stock zero mantêm-se visíveis.
+      <strong>Consumo médio mensal</strong> = total consumido ÷ meses na base
+      (<span id="pecasMesesLbl">3 meses — carga inicial Abr–Jun</span>; actualizado automaticamente com cada snapshot mensal).
     </div>
     <div class="tb">
       <input class="inp is" id="pecasSrch" placeholder="Código SAP ou descrição…" oninput="renderPecas()">
@@ -1476,7 +1478,7 @@ select.cad-inp{cursor:pointer;}
         <th class="num" onclick="doSort('pecas','qt')">Stock Actual</th>
         <th class="num" onclick="doSort('pecas','preco')">Preço Un.</th>
         <th class="num" onclick="doSort('pecas','valorTotal')">Valor Total</th>
-        <th class="num" onclick="doSort('pecas','consumoMedio')">Consumo Méd./Mês</th>
+        <th class="num" onclick="doSort('pecas','consumoMedio')" title="Média mensal = consumo total no período ÷ meses na base">Consumo Méd./Mês</th>
         <th class="num" onclick="doSort('pecas','cobertura')">Cobertura (meses)</th>
         <th class="num" onclick="doSort('pecas','pedido12m')" title="Pedido de 12 meses quando cobertura &lt; 6 meses">Pedido 12M ⚡</th>
         <th onclick="doSort('pecas','semRotacaoMeses')">Sem Rotação</th>
@@ -2225,7 +2227,7 @@ let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','Total',''];
 
 let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,valConflData=[],valConflStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={},suspValidados=new Set(),suspValidadosOcultos=0;
-let showAll=false,showAllOcc=true,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[];
+let showAll=false,showAllOcc=true,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[],pecasMesesBase=3;
 
 // ── INIT ──
 async function init(){
@@ -6062,6 +6064,33 @@ document.addEventListener('click',e=>{
 // PEÇAS AT
 // ══════════════════════════════════════════
 
+// Carga inicial Abr–Jun: consumo agregado de 3 meses → média mensal = total ÷ 3
+const PECAS_MESES_CARGA_INICIAL=3;
+
+function pecasMesesParaMedia(snaps){
+  if(!snaps?.length)return PECAS_MESES_CARGA_INICIAL;
+  const distinctMonths=new Set(snaps.map(s=>{
+    const d=new Date(s.snapshot_at);
+    return d.getFullYear()*12+d.getMonth();
+  })).size;
+  const first=new Date(snaps[0].snapshot_at);
+  const last=new Date(snaps[snaps.length-1].snapshot_at);
+  const spanMonths=(last-first)/(1000*60*60*24*30.44);
+  let meses=Math.max(distinctMonths,Math.round(spanMonths*10)/10,1);
+  // Poucos snapshots ou intervalo curto → baseline da carga inicial (Abr–Jun)
+  if(snaps.length<=2||spanMonths<PECAS_MESES_CARGA_INICIAL-0.5){
+    meses=Math.max(meses,PECAS_MESES_CARGA_INICIAL);
+  }
+  return meses;
+}
+
+function pecasMesesLblText(meses){
+  if(meses<=PECAS_MESES_CARGA_INICIAL&&meses===PECAS_MESES_CARGA_INICIAL){
+    return meses+' meses — carga inicial Abr–Jun';
+  }
+  return meses+' meses — '+meses+' snapshot'+(meses>1?'s':'')+' mensais';
+}
+
 function rotacaoBadge(meses){
   if(meses===null||meses===undefined)return'<span style="color:var(--muted);font-size:10px">—</span>';
   if(meses===0)return'<span class="badge bok">Movimento recente</span>';
@@ -6103,20 +6132,17 @@ async function loadPecasData(){
       });
     });
 
-    // Calculate monthly consumption per material
+    // Monthly average = total consumption in period ÷ months in base (auto-detect or Abr–Jun baseline)
+    pecasMesesBase=pecasMesesParaMedia(snaps||[]);
     const consumo={};
     Object.entries(history).forEach(([mat,pts])=>{
       if(pts.length<2){consumo[mat]=0;return;}
-      // Sum of all decreases (consumptions)
       let totalConsumo=0;
       for(let i=1;i<pts.length;i++){
         const diff=pts[i-1].qt-pts[i].qt;
-        if(diff>0)totalConsumo+=diff; // only count decreases
+        if(diff>0)totalConsumo+=diff;
       }
-      // Time span in months
-      const spanMs=pts[pts.length-1].at-pts[0].at;
-      const spanMonths=Math.max(spanMs/(1000*60*60*24*30),0.1);
-      consumo[mat]=totalConsumo/spanMonths;
+      consumo[mat]=totalConsumo/pecasMesesBase;
     });
 
     // Latest stock from most recent snapshot
@@ -6147,7 +6173,7 @@ async function loadPecasData(){
         Math.floor((new Date()-ultimoMovimento)/(1000*60*60*24*30)):
         (hist.length>1?Math.floor((new Date()-hist[0].at)/(1000*60*60*24*30)):null);
 
-      return{material:mat,desc,qt,preco,valorTotal:qt*preco,consumoMedio:Math.round(cm*10)/10,cobertura:Math.round(cobertura*10)/10,pedido12m,ultimoSnap:hist.length>0?hist[hist.length-1].at.toLocaleDateString('pt-BR'):'—',nSnapshots:hist.length,semRotacaoMeses};
+      return{material:mat,desc,qt,preco,valorTotal:qt*preco,consumoMedio:Math.round(cm*10)/10,cobertura:Math.round(cobertura*10)/10,pedido12m,ultimoSnap:hist.length>0?hist[hist.length-1].at.toLocaleDateString('pt-BR'):'—',nSnapshots:hist.length,semRotacaoMeses,mesesBase:pecasMesesBase};
     });
 
     // Upsert catalogue with latest values
@@ -6194,12 +6220,15 @@ function renderPecas(){
   const totalValor=rows.reduce((s,r)=>s+r.valorTotal,0);
   const comStock=rows.filter(r=>r.qt>0).length;
   const aRepor=rows.filter(r=>r.pedido12m>0).length;
+  const mesesLbl=document.getElementById('pecasMesesLbl');
+  if(mesesLbl)mesesLbl.textContent=pecasMesesLblText(pecasMesesBase);
   document.getElementById('pecasKpis').innerHTML=`
     <div class="kpi"><div class="kl">Total peças</div><div class="kv">${fmtKvNum(rows.length)}</div></div>
     <div class="kpi"><div class="kl">Com stock</div><div class="kv g">${fmtKvNum(comStock)}</div></div>
     <div class="kpi"><div class="kl">Stock zero</div><div class="kv ${rows.length-comStock>0?'r':''}">${fmtKvNum(rows.length-comStock)}</div></div>
     <div class="kpi"><div class="kl">A repor</div><div class="kv y">${fmtKvNum(aRepor)}</div></div>
     <div class="kpi"><div class="kl">Valor stock</div><div class="kv b">${fmtKvBrl(totalValor)}</div></div>
+    <div class="kpi" title="Divisor da média mensal de consumo"><div class="kl">Base consumo</div><div class="kv" style="font-size:14px">${pecasMesesBase}m</div></div>
   `;
 
   body.innerHTML='';
@@ -6231,7 +6260,7 @@ function exportPecasXlsx(){
   const data=pecasData.map(r=>({
     Codigo_SAP:r.material,Descricao:r.desc,Stock_Actual:r.qt,
     Preco_Un:r.preco,Valor_Total:r.valorTotal,
-    Consumo_Medio_Mes:r.consumoMedio,Cobertura_Meses:r.cobertura>=999?'Sem consumo':r.cobertura,
+    Consumo_Medio_Mes:r.consumoMedio,Meses_Base:r.mesesBase,Cobertura_Meses:r.cobertura>=999?'Sem consumo':r.cobertura,
     Pedido_12M:r.pedido12m,Ultimo_Snapshot:r.ultimoSnap
   }));
   const ws=XLSX.utils.json_to_sheet(data);
@@ -6247,12 +6276,13 @@ function gerarPedidoPecas(){
   const data=rows.map(r=>({
     Codigo_SAP:r.material,Descricao:r.desc,Stock_Actual:r.qt,
     Consumo_Medio_Mes:r.consumoMedio,
+    Meses_Base:r.mesesBase,
     Cobertura_Actual_Meses:r.cobertura>=999?'Sem consumo':r.cobertura,
     Cobertura_Trigger:'< 6 meses',
     Qtd_Pedido_12M:r.pedido12m,
     Preco_Un:r.preco,
     Valor_Pedido:r.pedido12m*r.preco,
-    Nota:'Pedido = 12M consumo (stock físico actual não deduzido — lead time longo)'
+    Nota:'Pedido = 12M × consumo médio mensal (stock físico actual não deduzido — lead time longo)'
   }));
   const totalValor=data.reduce((s,r)=>s+r.Valor_Pedido,0);
   data.push({Codigo_SAP:'TOTAL',Descricao:'',Stock_Actual:'',Consumo_Medio_Mes:'',Cobertura_Actual_Meses:'',Qtd_Pedido_12M:'',Preco_Un:'',Valor_Pedido:totalValor});
