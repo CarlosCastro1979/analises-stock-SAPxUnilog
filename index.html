@@ -470,7 +470,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.17 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.18 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -4478,6 +4478,8 @@ function buildValidCurta(){
   const stats={analizadas:uniData.length,disponivel:0,comValidade:0,curta:0,validadeNaoParseada:0,vencida:0,validadeLonga:0,equipProf:0,maquinaDom:0,vinho:0,validadeIgnorada:0,semLote:0,semEan:0,qtZero:0,classeDesconhecida:0,faltaInventario:0,foraDisponivel:0,soUnilog:0,comDiff:0};
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
+  const depLabel=DEPOT_MAP[dispDk]?.label.split('—')[1]?.trim()||dispDk;
+  const byKey={};
   uniData.forEach(r=>{
     if(!isDisponivelUniRow(r)){stats.foraDisponivel++;return;}
     stats.disponivel++;
@@ -4503,32 +4505,43 @@ function buildValidCurta(){
     if(validadeDate>=limit){stats.validadeLonga++;return;}
     if(isExcluidoDifStock(r.EAN_norm,dispDk,desc)){stats.equipProf++;return;}
     stats.curta++;
-    const depLabel=DEPOT_MAP[dispDk]?.label.split('—')[1]?.trim()||dispDk;
+    const key=r.EAN_norm+'|'+r.Lote_norm;
     const qt_uni=r.qt;
-    const qt_sap=reconSapMap[r.EAN_norm+'|'+r.Lote_norm]||0;
-    const diff=qt_sap-qt_uni;
-    const _estado=validCurtaRowEstado(qt_sap,qt_uni);
-    if(qt_sap===0&&qt_uni>0)stats.soUnilog++;
-    if(diff!==0)stats.comDiff++;
-    validCurtaData.push({
-      EAN_norm:r.EAN_norm,
-      produto:desc,
-      Lote_norm:r.Lote_norm,
-      qt_uni,
-      qt_sap,
-      diff,
-      _estado,
-      validade:validadeStr||'',
-      validadeDate,
-      diasRestantes:Math.floor((validadeDate-today)/(1000*86400)),
-      dk:dispDk,
-      depLabel,
-      classe:r.classe,
-      depClasseActual:`${depLabel} / Cl.${r.classe}`,
-      cat,
-      sapCode:getSapCode(r.EAN_norm)
-    });
+    const diasRestantes=Math.floor((validadeDate-today)/(1000*86400));
+    if(!byKey[key]){
+      byKey[key]={
+        EAN_norm:r.EAN_norm,
+        produto:desc,
+        Lote_norm:r.Lote_norm,
+        qt_uni,
+        validade:validadeStr||'',
+        validadeDate,
+        diasRestantes,
+        dk:dispDk,
+        depLabel,
+        classe:r.classe,
+        depClasseActual:`${depLabel} / Cl.${r.classe}`,
+        cat,
+        sapCode:getSapCode(r.EAN_norm)
+      };
+    }else{
+      const g=byKey[key];
+      g.qt_uni+=qt_uni;
+      if(validadeDate<g.validadeDate){
+        g.validade=validadeStr||'';
+        g.validadeDate=validadeDate;
+        g.diasRestantes=diasRestantes;
+      }
+    }
   });
+  for(const g of Object.values(byKey)){
+    const qt_sap=reconSapMap[g.EAN_norm+'|'+g.Lote_norm]||0;
+    const diff=qt_sap-g.qt_uni;
+    const _estado=validCurtaRowEstado(qt_sap,g.qt_uni);
+    if(qt_sap===0&&g.qt_uni>0)stats.soUnilog++;
+    if(diff!==0)stats.comDiff++;
+    validCurtaData.push({...g,qt_sap,diff,_estado});
+  }
   validCurtaStats=stats;
   validCurtaData.sort((a,b)=>a.diasRestantes-b.diasRestantes||a.EAN_norm.localeCompare(b.EAN_norm));
   console.log('[buildValidCurta]',stats,'alertas:',validCurtaData.length);
