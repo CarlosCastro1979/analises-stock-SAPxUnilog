@@ -470,7 +470,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.15 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.16 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -696,6 +696,7 @@ select.cad-inp{cursor:pointer;}
     <div class="it" data-tab="vencforadep" onclick="alertTab('vencforadep',this)">Vencidos fora dep.<span id="vencForaDepBadge" class="bc" style="display:none"></span></div>
     <div class="it" data-tab="semvalidade" onclick="alertTab('semvalidade',this)">Produtos sem validade<span id="semValidadeBadge" class="bc" style="display:none"></span></div>
     <div class="it" data-tab="valconfl" onclick="alertTab('valconfl',this)">Validades conflituosas<span id="valConflBadge" class="bc" style="display:none"></span></div>
+    <div class="it" data-tab="validcurta" onclick="alertTab('validcurta',this)">Produtos validade curta para escoar<span id="validCurtaBadge" class="bc" style="display:none"></span></div>
   </div>
 
   <div id="alert-suspeitos">
@@ -909,6 +910,38 @@ select.cad-inp{cursor:pointer;}
     <div id="valConflOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum lote com validades conflituosas</div></div>
   </div>
   </div><!-- /alert-valconfl -->
+
+  <div id="alert-validcurta" style="display:none">
+  <div class="card">
+    <div class="ch">
+      <div class="ct">Produtos validade curta para escoar</div>
+      <button class="btn bg bs" onclick="exportValidCurtaXlsx()">⬇ Excel</button>
+    </div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">
+      Stock Unilog no dep. <strong>0011 — Disponível</strong> (classe <strong>00</strong>) com validade <strong>entre hoje e 4 meses</strong>. Excluídos: equip. profissional, MUIM, caixas de papelão, validade 00.0000 / 00.00.0000, vinhos, máquinas domésticas e posições classe <strong>FI</strong> (falta de inventário).
+    </p>
+    <div class="tb">
+      <input class="inp is" id="validCurtaSrch" placeholder="EAN, código SAP, lote ou descrição…" oninput="renderValidCurta()">
+      <div class="ms-wrap" id="ms-validCurtaCat" data-placeholder="Categorias" data-onchange="renderValidCurta"><div class="ms-btn" onclick="msTogOpen('validCurtaCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('validCurtaCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('validCurtaCat')">Todas</button><button onclick="msClrAll('validCurtaCat')">Limpar</button></div><div class="ms-list"></div></div></div>
+    </div>
+    <div class="kr" id="validCurtaKpis"></div>
+    <div class="tw2"><table id="validCurtaTable">
+      <thead><tr>
+        <th onclick="doSort('validcurta','sapCode')">Cód. SAP</th>
+        <th onclick="doSort('validcurta','EAN_norm')">EAN</th>
+        <th onclick="doSort('validcurta','produto')">Descrição</th>
+        <th onclick="doSort('validcurta','Lote_norm')">Lote</th>
+        <th onclick="doSort('validcurta','qt')" class="num">Qtd</th>
+        <th onclick="doSort('validcurta','validade')">Validade</th>
+        <th onclick="doSort('validcurta','diasRestantes')" class="num">Dias restantes</th>
+        <th onclick="doSort('validcurta','depClasseActual')">Depósito / Classe</th>
+      </tr></thead>
+      <tbody id="validCurtaBody"></tbody>
+    </table></div>
+    <div id="validCurtaEmpty" class="empty" style="display:none"><div class="empty-i">📅</div><div>Carrega o ficheiro Unilog para analisar validades</div></div>
+    <div id="validCurtaOk" class="empty" style="display:none"><div class="empty-i">✅</div><div>Nenhum produto com validade curta no stock disponível</div></div>
+  </div>
+  </div><!-- /alert-validcurta -->
 </div>
 
 <!-- ══ CADASTRO ══ -->
@@ -2227,7 +2260,7 @@ let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
 const EXCL=['93','Total',''];
 
-let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,valConflData=[],valConflStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={},suspValidados=new Set(),suspValidadosOcultos=0;
+let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,valConflData=[],valConflStats=null,validCurtaData=[],validCurtaStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={},suspValidados=new Set(),suspValidadosOcultos=0;
 let showAll=false,showAllOcc=true,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[],pecasMesesBase=3;
 
 // ── INIT ──
@@ -2521,6 +2554,19 @@ function normUni(rows){
   return out;
 }
 function getVencidosDepotKey(){return company==='QB'?'99':'9';}
+function getDisponivelDepotKey(){return '11';}
+const VALID_CURTA_MESES=4;
+function isDisponivelUniRow(r){
+  if(!r||r.classe!=='00')return false;
+  const dk=DKS.find(k=>DEPOT_MAP[k].classes.includes(r.classe));
+  return dk===getDisponivelDepotKey();
+}
+function getValidCurtaLimitDate(fromDate){
+  const d=new Date(fromDate);
+  d.setMonth(d.getMonth()+VALID_CURTA_MESES);
+  d.setHours(0,0,0,0);
+  return d;
+}
 function getMuimCat(){const muimConf=Object.values(DEPOT_MAP).find(d=>d.catOnly);return muimConf?.catOnly||null;}
 const CAIXAS_PAPELAO_CAT='Caixas de Papelão';
 const RECON_EXCL_KS='excl. equip. prof. / cx. papelão';
@@ -3518,11 +3564,13 @@ function alertTab(name,el){
   document.getElementById('alert-vencforadep').style.display=name==='vencforadep'?'':'none';
   document.getElementById('alert-semvalidade').style.display=name==='semvalidade'?'':'none';
   document.getElementById('alert-valconfl').style.display=name==='valconfl'?'':'none';
+  document.getElementById('alert-validcurta').style.display=name==='validcurta'?'':'none';
   if(name==='suspeitos')renderSusp();
   else if(name==='somunilog')renderSoUnilog();
   else if(name==='vencforadep')renderVencidoForaDep();
   else if(name==='semvalidade')renderSemValidade();
   else if(name==='valconfl')renderValConfl();
+  else if(name==='validcurta')renderValidCurta();
   else renderPosClasse();
   scheduleColResize();
 }
@@ -3534,13 +3582,14 @@ function renderAlertPage(){
   else if(tab==='vencforadep')renderVencidoForaDep();
   else if(tab==='semvalidade')renderSemValidade();
   else if(tab==='valconfl')renderValConfl();
+  else if(tab==='validcurta')renderValidCurta();
   else renderPosClasse();
   scheduleColResize();
 }
 function updateAlertBadge(){
   const badge=document.getElementById('alertBadge');
   if(!badge)return;
-  const n=(suspData?.length||0)+(posClasseData?.length||0)+(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0)+(semValidadeData?.length||0)+(valConflData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
+  const n=(suspData?.length||0)+(posClasseData?.length||0)+(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0)+(semValidadeData?.length||0)+(valConflData?.length||0)+(validCurtaData?.length||0)+new Set((soUnilogData||[]).map(r=>r.EAN_norm)).size;
   badge.textContent=n;
   badge.style.display=n>0?'':'none';
 }
@@ -3734,6 +3783,7 @@ function buildVencidoForaDep(){
   buildVencidoForaDepSap();
   buildSemValidade();
   buildValConfl();
+  buildValidCurta();
   const total=(vencidoForaDepData?.length||0)+(vencidoForaDepSapData?.length||0);
   const badge=document.getElementById('vencForaDepBadge');
   if(badge){badge.textContent=total;badge.style.display=total>0?'':'none';}
@@ -4383,6 +4433,149 @@ function exportValConflXlsx(){
   XLSX.writeFile(wb,`validades_conflituosas_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
+// ── VALIDADE CURTA PARA ESCOAR (stock disponível dep. 0011 / cl. 00) ──
+function buildValidCurta(){
+  validCurtaData=[];
+  validCurtaStats=null;
+  if(!uniData)return;
+  const today=new Date();today.setHours(0,0,0,0);
+  const limit=getValidCurtaLimitDate(today);
+  const dispDk=getDisponivelDepotKey();
+  const stats={analizadas:uniData.length,disponivel:0,comValidade:0,curta:0,validadeNaoParseada:0,vencida:0,validadeLonga:0,equipProf:0,maquinaDom:0,vinho:0,validadeIgnorada:0,semLote:0,semEan:0,qtZero:0,classeDesconhecida:0,faltaInventario:0,foraDisponivel:0};
+  const dm={};
+  if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
+  uniData.forEach(r=>{
+    if(!isDisponivelUniRow(r)){stats.foraDisponivel++;return;}
+    stats.disponivel++;
+    if(!r.EAN_norm){stats.semEan++;return;}
+    if(!r.Lote_norm){stats.semLote++;return;}
+    if(r.qt<=0){stats.qtZero++;return;}
+    if(isClasseFI(r.classe)){stats.faltaInventario++;return;}
+    const desc=r.produto||dm[r.EAN_norm]||'';
+    const param=occParams.find(p=>p.ean===r.EAN_norm);
+    const cat=param?.cat||autoCat(desc).cat||'';
+    const validadeStr=pickUniRowValidadeDisplay(r);
+    if(isValidadeIgnorada(validadeStr,r.EAN_norm,desc,cat)){
+      if(isMaquinaDomestica(r.EAN_norm,desc))stats.maquinaDom++;
+      else if(isVinhoProduct(r.EAN_norm,desc,cat))stats.vinho++;
+      else stats.validadeIgnorada++;
+      return;
+    }
+    const validadeDate=parseValidadeDate(validadeStr);
+    if(validadeDate)stats.comValidade++;
+    else if((validadeStr||'').trim())stats.validadeNaoParseada++;
+    if(!validadeDate)return;
+    if(validadeDate<=today){stats.vencida++;return;}
+    if(validadeDate>=limit){stats.validadeLonga++;return;}
+    if(isExcluidoDifStock(r.EAN_norm,dispDk,desc)){stats.equipProf++;return;}
+    stats.curta++;
+    const depLabel=DEPOT_MAP[dispDk]?.label.split('—')[1]?.trim()||dispDk;
+    validCurtaData.push({
+      EAN_norm:r.EAN_norm,
+      produto:desc,
+      Lote_norm:r.Lote_norm,
+      qt:r.qt,
+      validade:validadeStr||'',
+      validadeDate,
+      diasRestantes:Math.floor((validadeDate-today)/(1000*86400)),
+      dk:dispDk,
+      depLabel,
+      classe:r.classe,
+      depClasseActual:`${depLabel} / Cl.${r.classe}`,
+      cat,
+      sapCode:getSapCode(r.EAN_norm)
+    });
+  });
+  validCurtaStats=stats;
+  validCurtaData.sort((a,b)=>a.diasRestantes-b.diasRestantes||a.EAN_norm.localeCompare(b.EAN_norm));
+  console.log('[buildValidCurta]',stats,'alertas:',validCurtaData.length);
+  const badge=document.getElementById('validCurtaBadge');
+  if(badge){badge.textContent=validCurtaData.length;badge.style.display=validCurtaData.length>0?'':'none';}
+  updateAlertBadge();
+}
+let _renderValidCurtaBusy=false;
+function renderValidCurta(){if(_renderValidCurtaBusy)return;_renderValidCurtaBusy=true;try{_renderValidCurta();}finally{_renderValidCurtaBusy=false;}}
+function _renderValidCurta(){
+  const body=document.getElementById('validCurtaBody');
+  const empty=document.getElementById('validCurtaEmpty');
+  const ok=document.getElementById('validCurtaOk');
+  if(!uniData){
+    if(body)body.innerHTML='';
+    if(empty)empty.style.display='block';
+    if(ok)ok.style.display='none';
+    return;
+  }
+  if(empty)empty.style.display='none';
+  let rows=[...validCurtaData];
+  const srch=document.getElementById('validCurtaSrch')?.value.toLowerCase()||'';
+  const cats=[...new Set(validCurtaData.map(r=>r.cat).filter(Boolean))].sort();
+  msUpdate('validCurtaCat',cats,'Categorias','renderValidCurta');
+  const selCats=msGet('validCurtaCat');
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm));
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
+  applySort('validcurta',rows);updateSortHeaders('validcurta');
+  const totalQt=rows.reduce((s,r)=>s+r.qt,0);
+  const totalEans=new Set(rows.map(r=>r.EAN_norm)).size;
+  const st=validCurtaStats||{};
+  let extra='';
+  if(st.vencida)extra+=` · ${fmt(st.vencida)} já vencidos (excl.)`;
+  if(st.validadeLonga)extra+=` · ${fmt(st.validadeLonga)} validade ≥${VALID_CURTA_MESES}m (excl.)`;
+  if(st.equipProf)extra+=` · ${fmt(st.equipProf)} equip. prof. / cx. papelão`;
+  if(st.faltaInventario)extra+=` · ${fmt(st.faltaInventario)} classe FI`;
+  if(st.validadeIgnorada)extra+=` · ${fmt(st.validadeIgnorada)} validade 00.0000 ignorada`;
+  const {total:valorSap,temPreco:temPrecoSap}=calcValorTotSapFromRows(rows,{getDk:r=>r.dk});
+  const {total:valorWms,temPreco:temPrecoWms}=calcValorTotWmsFromUniMatch(rows,{getDk:r=>r.dk});
+  document.getElementById('validCurtaKpis').innerHTML=`
+    <div class="kpi"><div class="kl">Linhas</div><div class="kv r">${fmtKvNum(rows.length)}</div><div class="ks">${fmt(st.disponivel??0)} linhas no dep. 0011 / cl. 00${extra}</div></div>
+    <div class="kpi"><div class="kl">EANs</div><div class="kv b">${fmtKvNum(totalEans)}</div></div>
+    <div class="kpi"><div class="kl">Qtd total</div><div class="kv y">${fmtKvNum(totalQt)}</div></div>
+    ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
+  `;
+  body.innerHTML='';
+  document.getElementById('validCurtaOk').style.display=rows.length===0?'block':'none';
+  for(const r of rows){
+    const diasCls=r.diasRestantes<=30?'neg':r.diasRestantes<=60?'warn':'';
+    const tr=document.createElement('tr');tr.className='dr';
+    tr.innerHTML=`
+      <td>${sapCodeHtml(r.EAN_norm)}</td>
+      <td><span class="badge bneu">${r.EAN_norm}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.produto)}">${r.produto||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:11px">${r.Lote_norm}</span></td>
+      <td class="num">${fmt(r.qt)}</td>
+      <td><span class="badge bwarn">${r.validade||'—'}</span></td>
+      <td class="num ${diasCls}">${fmt(r.diasRestantes)}</td>
+      <td><span class="badge binfo">${r.depClasseActual}</span></td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!rows.length&&uniData)document.getElementById('validCurtaOk').style.display='block';
+  setTimeout(applyResizable,0);
+}
+function exportValidCurtaXlsx(){
+  if(!validCurtaData.length){toast('Sem dados','error');return;}
+  let rows=[...validCurtaData];
+  const srch=document.getElementById('validCurtaSrch')?.value.toLowerCase()||'';
+  const selCats=msGet('validCurtaCat');
+  if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN_norm,r.produto,r.Lote_norm));
+  if(selCats.size)rows=rows.filter(r=>selCats.has(r.cat));
+  applySort('validcurta',rows);
+  const data=rows.map(r=>({
+    Categoria:r.cat||'',
+    Cod_SAP:r.sapCode||getSapCode(r.EAN_norm),
+    EAN:r.EAN_norm,
+    Descricao:r.produto||'',
+    Lote:r.Lote_norm,
+    Qtd:r.qt,
+    Validade:r.validade,
+    Dias_Restantes:r.diasRestantes,
+    Deposito_Classe:r.depClasseActual
+  }));
+  if(!data.length){toast('Sem dados','error');return;}
+  const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Validade Curta');
+  XLSX.writeFile(wb,`validade_curta_escoar_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 
 function simRatio(a,b){const la=a.length,lb=b.length;if(!la||!lb)return 0;const dp=Array.from({length:la+1},(_,i)=>Array.from({length:lb+1},(_,j)=>i===0?j:j===0?i:0));for(let i=1;i<=la;i++)for(let j=1;j<=lb;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return 1-dp[la][lb]/Math.max(la,lb);}
 
@@ -4566,7 +4759,7 @@ function recalcBanner(){
 function switchCompany(){
   syncCompanyDepotMap();
   // Reset all data
-  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;valConflData=[];valConflStats=null;vencForaDepStats=null;vencForaDepSapStats=null;suspValidados=new Set();suspValidadosOcultos=0;
+  sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;valConflData=[];valConflStats=null;validCurtaData=[];validCurtaStats=null;vencForaDepStats=null;vencForaDepSapStats=null;suspValidados=new Set();suspValidadosOcultos=0;
   stockSapFileName='';stockUniFileName='';stockSapBuffer=null;stockUniBuffer=null;
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
@@ -4584,6 +4777,7 @@ function switchCompany(){
   const vencForaDepBadge=document.getElementById('vencForaDepBadge');if(vencForaDepBadge){vencForaDepBadge.textContent='';vencForaDepBadge.style.display='none';}
   const semValidadeBadge=document.getElementById('semValidadeBadge');if(semValidadeBadge){semValidadeBadge.textContent='';semValidadeBadge.style.display='none';}
   const valConflBadge=document.getElementById('valConflBadge');if(valConflBadge){valConflBadge.textContent='';valConflBadge.style.display='none';}
+  const validCurtaBadge=document.getElementById('validCurtaBadge');if(validCurtaBadge){validCurtaBadge.textContent='';validCurtaBadge.style.display='none';}
   const alertBadge=document.getElementById('alertBadge');if(alertBadge){alertBadge.textContent='';alertBadge.style.display='none';}
   // Try to load saved data for the new company
   if(typeof reloadFretesForCompany==='function')reloadFretesForCompany();
@@ -6463,6 +6657,7 @@ function doSort(table,col){
   else if(table==='vencforadep'||table==='vencforadepSap')renderVencidoForaDep();
   else if(table==='semval')renderSemValidade();
   else if(table==='valconfl')renderValConfl();
+  else if(table==='validcurta')renderValidCurta();
   else if(table==='occ')renderOccView();
   else if(table==='transEc')renderTrans('ecommerce');
   else if(table==='transQb')renderTrans('qbrasil');
@@ -6484,7 +6679,7 @@ function applySort(table,rows){
 }
 function updateSortHeaders(table){
   const s=sorts[table];
-  const tableEl=document.getElementById({recon:'reconTable',ean:'eanTable',susp:'suspTable',su:'suTable',poscl:'posTable',semval:'semValTable',valconfl:'valConflTable',occ:'ovTable',transEc:'transEcTable',transQb:'transQbTable',audit:'auditTable',rec:'recTable',hist:'histTable',pecas:'pecasTable',vencforadep:'vencTable',vencforadepSap:'vencTable',ia:'iaTable'}[table]);
+  const tableEl=document.getElementById({recon:'reconTable',ean:'eanTable',susp:'suspTable',su:'suTable',poscl:'posTable',semval:'semValTable',valconfl:'valConflTable',validcurta:'validCurtaTable',occ:'ovTable',transEc:'transEcTable',transQb:'transQbTable',audit:'auditTable',rec:'recTable',hist:'histTable',pecas:'pecasTable',vencforadep:'vencTable',vencforadepSap:'vencTable',ia:'iaTable'}[table]);
   document.querySelectorAll('th[onclick]').forEach(th=>{
     const oc=th.getAttribute('onclick')||'';
     let t=table,col;
@@ -7699,6 +7894,7 @@ const TABLE_COL_PROFILES={
   vencTable:['sap','ean','desc','lote','num','validade','dep','num'],
   semValTable:['sap','ean','desc','lote','num','validade','validade','cat','dep'],
   valConflTable:['lote','desc','sistema','validade','validade','flex','narrow','num','num','dep','dep'],
+  validCurtaTable:['sap','ean','desc','lote','num','validade','num','dep'],
   cadTable:['cat','subcat','sap','ean','desc','flex','num','num','num','num','bool','bool','bool','notes'],
   dupTable:['ean','desc','narrow','flex','flex'],
   ovTable:['ean','cat','subcat','desc','num','num','num','num','num'],
