@@ -14,6 +14,7 @@ $mime = @{
     '.xlsx' = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     '.ico'  = 'image/x-icon'
 }
+$listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$port/")
 $listener.Prefixes.Add("http://127.0.0.1:$port/")
 $listener.Start()

@@ -1,4 +1,4 @@
-<!DOCTYPE html><!-- v20260703143000 -->
+<!DOCTYPE html><!-- v20260706143000 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -470,7 +470,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.18 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.19 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -2343,7 +2343,7 @@ function nEAN(v){
   }
   return s.replace(/\.0+$/,'');
 }
-function nLote(v){if(v===null||v===undefined)return'';const s=String(v).trim();return(s===''||s==='nan'||s==='None')?'':s;}
+function nLote(v){if(v===null||v===undefined)return'';if(typeof v==='number'&&Number.isFinite(v))return String(Math.trunc(v));const s=String(v).trim();if(s===''||s==='nan'||s==='None')return'';if(/^\d+\.0+$/.test(s))return s.replace(/\.0+$/,'');return s;}
 function isLoteSemControle(lote){const s=nLote(lote);if(!s)return false;const n=parseFloat(String(s).replace(',','.'));return !isNaN(n)&&n===1;}
 function nQty(v){if(v===null||v===undefined||v==='')return 0;const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?0:n;}
 const SAP_EAN_COLS=['EAN11','EAN','EAN/UPC','GTIN','Código EAN','Codigo EAN'];
@@ -4505,7 +4505,7 @@ function buildValidCurta(){
     if(validadeDate>=limit){stats.validadeLonga++;return;}
     if(isExcluidoDifStock(r.EAN_norm,dispDk,desc)){stats.equipProf++;return;}
     stats.curta++;
-    const key=r.EAN_norm+'|'+r.Lote_norm;
+    const key=r.EAN_norm+'|'+nLote(r.Lote_norm);
     const qt_uni=r.qt;
     const diasRestantes=Math.floor((validadeDate-today)/(1000*86400));
     if(!byKey[key]){
