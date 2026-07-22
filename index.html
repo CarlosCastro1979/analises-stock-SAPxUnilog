@@ -197,6 +197,13 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 .occ-end-chip--para{background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;}
 .occ-moves-alert{font-size:11px;padding:4px 0;}
 .occ-moves-alert-warn{color:var(--yellow);}
+.occ-pk-sub{font-size:9px;padding:1px 5px;border-radius:3px;font-weight:600;display:inline-block;vertical-align:middle;margin-left:4px;white-space:nowrap;}
+.occ-pk-sub--1_palete{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;}
+.occ-pk-sub--meia_palete{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;}
+.occ-pk-sub--scaninho{background:#f5f3ff;color:#5b21b6;border:1px solid #ddd6fe;}
+.occ-pk-sub--desconhecido{background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb;}
+.occ-pkpk-mismatch td{background:#fffbeb;}
+.occ-pkpk-note{font-size:11px;color:var(--text2);margin:0 0 10px;line-height:1.4;max-width:920px;}
 #ovTable{table-layout:fixed;}
 #ovTable col.ov-col-ean{width:128px;}
 #ovTable col.ov-col-cat{width:72px;}
@@ -470,7 +477,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.19 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.26 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1031,6 +1038,7 @@ select.cad-inp{cursor:pointer;}
 <div class="page" id="page-occupation">
   <div class="its">
     <div class="it active" onclick="innerTab('view',this)">Vista de Stock</div>
+    <div class="it" onclick="innerTab('pkpk',this)">Ajustes PK→PK</div>
     <div class="it" onclick="innerTab('base',this)">Base de Parâmetros</div>
   </div>
   <div id="occView">
@@ -1078,6 +1086,52 @@ select.cad-inp{cursor:pointer;}
         </tr></thead>
         <tbody id="ovBody"></tbody>
       </table></div>
+    </div>
+  </div>
+  <div id="occPkPk" style="display:none;">
+    <div class="card">
+      <div class="ch">
+        <div class="ct">Ajustes PK → PK</div>
+        <button class="btn bg bs" onclick="exportOccPkPkXlsx()">⬇ Excel</button>
+      </div>
+      <p class="occ-pkpk-note">Só consolidação entre posições de picking (PK→PK). Tipos físicos: <strong>1 palete</strong>, <strong>½ palete</strong>, <strong>scaninho</strong> (armário). Preferimos o mesmo tipo; pares com tipos diferentes aparecem assinalados para decisão operacional. Mapeamento em <code>OCC_PK_SUBTYPE_MAP</code> / <code>OCC_PK_SUBTYPE_BY_RUA</code> (heurística de nível se não mapeado).</p>
+      <div class="tb">
+        <input class="inp is" id="opkSrch" placeholder="EAN, código SAP, descrição ou posição…" oninput="renderOccPkPk()">
+        <select class="inp" id="opkTipo" onchange="renderOccPkPk()">
+          <option value="">Todos os tipos</option>
+          <option value="same">Só mesmo tipo</option>
+          <option value="diff">Só tipos diferentes</option>
+          <option value="1_palete">Com 1 palete</option>
+          <option value="meia_palete">Com ½ palete</option>
+          <option value="scaninho">Com scaninho</option>
+          <option value="desconhecido">Com desconhecido</option>
+        </select>
+        <select class="inp" id="opkDep" onchange="renderOccPkPk()">
+          <option value="">Todos os depósitos</option>
+          <option value="11">0011 — Disponível</option>
+          <option value="8">0008 — B2C</option>
+          <option value="9">0009 — Vencidos</option>
+          <option value="22">0022 — Quarentena</option>
+          <option value="44">0044 — Avarias</option>
+        </select>
+      </div>
+      <div class="kr" id="opkKpis"></div>
+      <div class="tw2"><table id="opkTable">
+        <thead><tr>
+          <th onclick="doSort('occpkpk','ean')">EAN</th>
+          <th onclick="doSort('occpkpk','desc')">Descrição</th>
+          <th onclick="doSort('occpkpk','lote')">Lote</th>
+          <th class="num" onclick="doSort('occpkpk','qt')">Qt</th>
+          <th onclick="doSort('occpkpk','de')">De</th>
+          <th onclick="doSort('occpkpk','deTipoLbl')">Tipo De</th>
+          <th onclick="doSort('occpkpk','para')">Para</th>
+          <th onclick="doSort('occpkpk','paraTipoLbl')">Tipo Para</th>
+          <th onclick="doSort('occpkpk','liberta')">Liberta</th>
+          <th onclick="doSort('occpkpk','alerta')">Alerta</th>
+        </tr></thead>
+        <tbody id="opkBody"></tbody>
+      </table></div>
+      <div id="opkEmpty" class="empty" style="display:none"><div class="empty-i">📦</div><div>Sem ajustes PK→PK com os filtros actuais</div></div>
     </div>
   </div>
   <div id="occBase" style="display:none;">
@@ -2279,7 +2333,7 @@ async function init(){
       if(t.dataset.page==='inventario-acerto'&&typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
       if(t.dataset.page==='alertas')renderAlertPage();
       if(t.dataset.page==='cadastro')renderCadastro();
-      if(t.dataset.page==='occupation'){renderOccView();renderOccBase();}
+      if(t.dataset.page==='occupation'){renderOccView();renderOccPkPk();renderOccBase();}
       if(t.dataset.page==='reclamacoes'){loadReclamacoes();}
       if(t.dataset.page==='pecas'){
         if(!pecasData.length)loadPecasData().then(()=>renderPecas());
@@ -2464,10 +2518,16 @@ function pickUniEnderecoField(r){return pickUniFieldByPrefix(r,UNI_ENDERECO_COLS
 function pickUniAreaField(r){return pickUniFieldByPrefix(r,UNI_AREA_COLS);}
 const UNI_CLASSE_ALIASES={
   'FALTA DE INVENTARIO':'FI','FALTA DE INVENTÁRIO':'FI','FALTA INVENTARIO':'FI','FALTA INVENTÁRIO':'FI',
-  'SOBRA DE INVENTARIO':'SI','SOBRA DE INVENTÁRIO':'SI','SOBRA INVENTARIO':'SI','SOBRA INVENTÁRIO':'SI'
+  'SOBRA DE INVENTARIO':'SI','SOBRA DE INVENTÁRIO':'SI','SOBRA INVENTARIO':'SI','SOBRA INVENTÁRIO':'SI',
+  'FALTA NO RECEBIMENTO':'FR','FALTA DE RECEBIMENTO':'FR','FALTA RECEBIMENTO':'FR',
+  'SOBRA NO RECEBIMENTO':'SR','SOBRA DE RECEBIMENTO':'SR','SOBRA RECEBIMENTO':'SR'
 };
 const INV_CLASS_LABELS={FI:'Falta de inventário',SI:'Sobra de inventário'};
 const INV_CLASSES=['FI','SI'];
+/** Classes virtuais Unilog — não existem fisicamente; nunca optimizáveis. */
+const OCC_VIRTUAL_INV_CLASSES=['FI','SI'];
+const OCC_VIRTUAL_RECEIPT_CLASSES=['FR','SR'];
+const OCC_VIRTUAL_CLASSES=[...OCC_VIRTUAL_INV_CLASSES,...OCC_VIRTUAL_RECEIPT_CLASSES];
 const UNI_VALIDADE_LOTE_COLS=VALIDADE_LOTE_COLS;
 const UNI_VALIDADE_COLS=[...UNI_VALIDADE_LOTE_COLS,'Validade'];
 function pickUniClasseField(r){
@@ -2558,6 +2618,24 @@ function normUni(rows){
   return out;
 }
 function getVencidosDepotKey(){return company==='QB'?'99':'9';}
+/** Unilog classe 104 = depósito de vencidos (DFB 0009 / QB 0099). Stock misturado por posição — sem optimização de ocupação. */
+const UNI_CLASSE_VENCIDOS='104';
+function isVencidosClasse(classe){return String(classe??'').trim()===UNI_CLASSE_VENCIDOS;}
+function isVencidosUniRow(r){return!!r&&isVencidosClasse(r.classe);}
+/** Dep. 0044 Avarias (A1/A2 + FI/SI): stock misturado / classes virtuais — sem optimização. */
+const OCC_AVARIAS_DEP_KEY='44';
+const OCC_AVARIAS_CLASSES=['A1','A2','FI','SI'];
+function isAvariasClasse(classe){return OCC_AVARIAS_CLASSES.includes(String(classe??'').trim());}
+function isAvariasUniRow(r){return!!r&&isAvariasClasse(r.classe);}
+function isOccVirtualClasse(classe){return OCC_VIRTUAL_CLASSES.includes(String(classe??'').trim().toUpperCase());}
+/** Posições virtuais (ex.: 098INVFT…, REC…): não existem fisicamente. */
+function isOccVirtualEnd(end){
+  const s=String(end??'').toUpperCase().replace(/\s+/g,'');
+  if(!s)return false;
+  if(/INVFT/.test(s)||/\dINV|INV\d|^INV/.test(s))return true;
+  if(/RECEB|RECFT|\dREC|REC\d|^REC/.test(s))return true;
+  return false;
+}
 function getDisponivelDepotKey(){return '11';}
 const VALID_CURTA_MESES=4;
 function isDisponivelUniRow(r){
@@ -4883,7 +4961,7 @@ async function loadFromDB(silent=false){
     // Re-render active page if it needs data
     const activePage=document.querySelector('.page.active');
     if(activePage){
-      if(activePage.id==='page-occupation')renderOccView();
+      if(activePage.id==='page-occupation'){renderOccView();renderOccPkPk();}
       if(activePage.id==='page-recon')renderReconPage();
       if(activePage.id==='page-inventario-acerto'&&typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
       if(activePage.id==='page-alertas')renderAlertPage();
@@ -5801,7 +5879,7 @@ async function loadOccParams(){
     if(!error&&data){
       occParams=data;invalidateReconExclEANs();updateOccFilters();
       const ap=document.querySelector('.page.active');
-      if(ap&&ap.id==='page-occupation'&&uniData)renderOccView();
+      if(ap&&ap.id==='page-occupation'&&uniData){renderOccView();renderOccPkPk();}
     }
   }catch(e){}
 }
@@ -5816,8 +5894,111 @@ function updateOccFilters(){
 }
 
 // ── OCC VIEW HELPERS ──
-function isOccPKEnd(end){return end&&String(end).includes('PK');}
+/**
+ * PK physical subtypes (picking positions):
+ *  - 1_palete   → posição de 1 palete
+ *  - meia_palete → ½ palete
+ *  - scaninho   → posição em armário / “scaninho”
+ *  - desconhecido → não classificado
+ *
+ * Unilog address shape observed: NNN + PK + digits (ex. 008PK18121 → rua 18, prédio 12, nível 1).
+ * Priority: exact OCC_PK_SUBTYPE_MAP → OCC_PK_SUBTYPE_BY_RUA → heuristic by nível.
+ * Extend the maps as the warehouse confirms aisle/position types.
+ */
+const OCC_PK_SUBTYPE_MAP={
+  // '008PK18121':'1_palete',
+  // '008PKXXXXX':'scaninho',
+};
+const OCC_PK_SUBTYPE_BY_RUA={
+  // 90:'scaninho', 91:'scaninho',
+  // 40:'meia_palete', 41:'meia_palete',
+};
+const OCC_PK_SUBTYPE_LABELS={
+  '1_palete':'1 palete',
+  meia_palete:'½ palete',
+  scaninho:'Scaninho',
+  desconhecido:'Desconhecido'
+};
+function occParsePkEnd(end){
+  const s=String(end||'').toUpperCase().replace(/\s+/g,'');
+  const m=s.match(/^(\d{0,4})PK(\d+)$/i);
+  if(!m)return null;
+  const digs=m[2];
+  if(digs.length>=5){
+    return{prefix:m[1],rua:parseInt(digs.slice(0,2),10),predio:parseInt(digs.slice(2,4),10),nivel:parseInt(digs.slice(4),10)||0,digs};
+  }
+  if(digs.length>=3){
+    return{prefix:m[1],rua:parseInt(digs.slice(0,2),10),predio:parseInt(digs.slice(2),10)||0,nivel:0,digs};
+  }
+  return{prefix:m[1],rua:parseInt(digs,10)||0,predio:0,nivel:0,digs};
+}
+function occPkSubtype(pos){
+  if(!isOccPKEnd(pos))return 'desconhecido';
+  const key=String(pos||'').toUpperCase().replace(/\s+/g,'');
+  if(OCC_PK_SUBTYPE_MAP[key])return OCC_PK_SUBTYPE_MAP[key];
+  if(OCC_PK_SUBTYPE_MAP[pos])return OCC_PK_SUBTYPE_MAP[pos];
+  const parsed=occParsePkEnd(pos);
+  if(parsed&&Object.prototype.hasOwnProperty.call(OCC_PK_SUBTYPE_BY_RUA,parsed.rua)){
+    return OCC_PK_SUBTYPE_BY_RUA[parsed.rua];
+  }
+  // Provisional heuristic (override via maps above):
+  // nível 1 (chão) → 1 palete; nível 2 → ½ palete; nível ≥3 → scaninho/armário.
+  if(parsed){
+    if(parsed.nivel>=3)return 'scaninho';
+    if(parsed.nivel===2)return 'meia_palete';
+    if(parsed.nivel===1||parsed.nivel===0)return '1_palete';
+  }
+  return 'desconhecido';
+}
+function occPkSubtypeLabel(tipo){return OCC_PK_SUBTYPE_LABELS[tipo]||OCC_PK_SUBTYPE_LABELS.desconhecido;}
+function occPkSubtypeBadge(tipo){
+  const t=tipo||'desconhecido';
+  return`<span class="occ-pk-sub occ-pk-sub--${t}">${occPkSubtypeLabel(t)}</span>`;
+}
+function occEndType(end){
+  const s=String(end||'');
+  if(/PK/i.test(s))return 'PK';
+  if(/PP/i.test(s))return 'PP';
+  return 'OTHER';
+}
+function isOccPKEnd(end){return occEndType(end)==='PK';}
+function isOccPPEnd(end){return occEndType(end)==='PP';}
 function isOccDCEnd(end,area){return isUniDocaEnd(end,area);}
+/**
+ * Endereço conta para «posições reais» físicas: não doca, não INV/REC virtual,
+ * e não classes virtuais FI/SI/FR/SR (mesmo que o texto do endereço pareça PP/PK).
+ */
+function isOccPhysicalOccupancyRow(r){
+  if(!r||!r.endereco||!String(r.endereco).trim())return false;
+  if(isOccDCEnd(r.endereco,r.area))return false;
+  if(isOccVirtualClasse(r.classe))return false;
+  if(isOccVirtualEnd(r.endereco))return false;
+  return true;
+}
+/** Set de endereços físicos únicos no filtro (nunca somar POS. REAIS por EAN). */
+function collectOccPhysicalEndSet(uniRows,eanSet){
+  const ends=new Set();
+  (uniRows||[]).forEach(r=>{
+    if(eanSet&&!eanSet.has(r.EAN_norm))return;
+    if(!isOccPhysicalOccupancyRow(r))return;
+    ends.add(String(r.endereco).trim());
+  });
+  return ends;
+}
+function isOccPkPkMove(m){return!!(m&&!m.doca&&isOccPKEnd(m.de)&&isOccPKEnd(m.para));}
+/** PK must never feed PP/OTHER. Allowed: PP→PK, PK→PK, PP→PP (and OTHER↔OTHER). */
+function occMoveTypeAllowed(fromEnd,toEnd){
+  if(!fromEnd||!toEnd||toEnd==='—')return false;
+  const from=occEndType(fromEnd),to=occEndType(toEnd);
+  if(from==='PK'&&to!=='PK')return false;
+  return true;
+}
+/** After emptying `fromEnd`, at least one PK must remain among `pkEnds` (product/lote set). */
+function occMoveKeepsPK(fromEnd,pkEnds){
+  if(!isOccPKEnd(fromEnd))return true;
+  const left=pkEnds.filter(e=>e!==fromEnd);
+  return left.length>0;
+}
 function occEndChip(end,role){const cls=role==='para'?'occ-end-chip occ-end-chip--para':'occ-end-chip occ-end-chip--de';return`<span class="${cls}" title="${end}">${end}</span>`;}
 function occRecoStep(n,body,meta){
   return`<div class="occ-reco-step"><span class="occ-reco-num">${n}</span><div class="occ-reco-body">${body}${meta?`<div class="occ-reco-meta">${meta}</div>`:''}</div></div>`;
@@ -5825,26 +6006,129 @@ function occRecoStep(n,body,meta){
 function occRecoMoveBody(fromEnd,toEnd,qty){
   return`<strong>${fmt(qty)} un</strong><div class="occ-reco-route">${occEndChip(fromEnd,'de')}<span style="color:var(--muted)">→</span>${occEndChip(toEnd,'para')}</div>`;
 }
+const OCC_DEP_CLASS_MAP={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI','SI']};
+function isOccVencidosDepFilter(depF){return depF==='9'||depF===getVencidosDepotKey();}
+function isOccAvariasDepFilter(depF){return depF===OCC_AVARIAS_DEP_KEY;}
+function isOccNoOptimDepFilter(depF){return isOccVencidosDepFilter(depF)||isOccAvariasDepFilter(depF);}
+/** Lista de depósitos seleccionados no multi-select ovDep (vazio = todos, excl. vencidos/avarias por defeito). */
+function getOccDepFilterList(){
+  const vals=[...msGetVals('ovDep')].filter(Boolean);
+  if(vals.length)return vals;
+  const sel=document.getElementById('ovDep');
+  if(sel&&sel.style.display!=='none'&&sel.value)return [sel.value];
+  return [];
+}
+function occDepKpiSubtitle(deps){
+  if(!deps.length)return'Todos os depósitos · endereços físicos únicos';
+  if(deps.length===1)return'Dep '+String(deps[0]).padStart(4,'0')+' · endereços físicos únicos';
+  if(deps.length<=3)return'Dep '+deps.map(d=>String(d).padStart(4,'0')).join(', ')+' · endereços físicos únicos';
+  return deps.length+' depósitos · endereços físicos únicos';
+}
+function occNoOptimNote(deps){
+  if(!deps.length)return'';
+  const hasV=deps.some(isOccVencidosDepFilter);
+  const hasA=deps.some(isOccAvariasDepFilter);
+  const hasOpt=deps.some(d=>!isOccNoOptimDepFilter(d));
+  if(hasOpt||(!hasV&&!hasA))return'';
+  if(hasV&&hasA)return'vencidos/avarias — sem optimização';
+  if(hasA)return'avarias — sem optimização';
+  return'vencidos — sem optimização';
+}
+/**
+ * Filtra Unilog para Ocupação.
+ * `depF`: string, array de depósitos, ou vazio (= todos excepto vencidos/avarias por defeito).
+ * Classe 104 (vencidos): excluída por defeito (não misturar SKUs / não gerar melhorias).
+ * Dep. 0044 (A1/A2/FI/SI): excluído por defeito — avarias misturadas + classes virtuais.
+ * Só entram na Vista de Stock quando o filtro de depósito é explícito (`includeVencidosStock` / `includeAvariasStock`).
+ * PK→PK / optimização nunca incluem 104 nem 0044.
+ * Classes virtuais FI/SI/FR/SR nunca alimentam optimização.
+ */
+function filterUniForOcc(depF,{includeVencidosStock=false,includeAvariasStock=false}={}){
+  const deps=Array.isArray(depF)?depF.filter(Boolean):(depF?[depF]:[]);
+  let filteredClasses=null;
+  if(deps.length){
+    filteredClasses=new Set();
+    deps.forEach(d=>{(OCC_DEP_CLASS_MAP[d]||[]).forEach(c=>filteredClasses.add(c));});
+  }
+  const wantVencidosStock=includeVencidosStock&&(deps.length?deps.some(isOccVencidosDepFilter):true);
+  const wantAvariasStock=includeAvariasStock&&(deps.length?deps.some(isOccAvariasDepFilter):true);
+  return(uniData||[]).filter(r=>{
+    if(filteredClasses&&!filteredClasses.has(r.classe))return false;
+    if(isVencidosUniRow(r)&&!wantVencidosStock)return false;
+    if(isAvariasUniRow(r)&&!wantAvariasStock)return false;
+    if(isOccVirtualClasse(r.classe)&&!wantAvariasStock)return false;
+    return true;
+  });
+}
+/** Neutraliza optimização por EAN conforme classes presentes no filtro (multi-depósito). */
+function applyOccVistaOptimFlags(rows,uniFiltered,deps){
+  const onlyNoOptim=deps.length>0&&deps.every(isOccNoOptimDepFilter);
+  if(onlyNoOptim){
+    const onlyAvarias=deps.every(isOccAvariasDepFilter);
+    return onlyAvarias?neutralizeOccAvariasOptim(rows):neutralizeOccVencidosOptim(rows);
+  }
+  const byEan={};
+  (uniFiltered||[]).forEach(r=>{
+    if(!r.EAN_norm)return;
+    if(!byEan[r.EAN_norm])byEan[r.EAN_norm]={hasOpt:false,hasVenc:false,hasAvar:false};
+    if(isVencidosUniRow(r))byEan[r.EAN_norm].hasVenc=true;
+    else if(isAvariasUniRow(r)||isOccVirtualClasse(r.classe))byEan[r.EAN_norm].hasAvar=true;
+    else byEan[r.EAN_norm].hasOpt=true;
+  });
+  return(rows||[]).map(r=>{
+    const info=byEan[r.ean];
+    if(info&&!info.hasOpt&&(info.hasVenc||info.hasAvar)){
+      return neutralizeOccNoOptim([r],info.hasAvar&&!info.hasVenc?'avariasNoOptim':'vencidosNoOptim')[0];
+    }
+    return applyOccVistaExclPkPk(r);
+  });
+}
+/** Stock visível mas sem poupança, consolidação nem movimentos sugeridos. */
+function neutralizeOccNoOptim(rows,flag){
+  const key=flag||'noOptim';
+  return(rows||[]).map(r=>{
+    const loteDetail=(r.loteDetail||[]).map(l=>({
+      ...l,posMinima:l.posReais,posExcesso:0,pct:100,faltam:0,subutil:false,consolidacao:null,qtDC:0
+    }));
+    return{...r,poupanca:0,posOtimizadas:r.posReal,underutil:false,totalConsolidavel:0,loteDetail,[key]:true};
+  });
+}
+/** Classe vencidos: stock visível mas sem poupança, consolidação nem movimentos sugeridos. */
+function neutralizeOccVencidosOptim(rows){return neutralizeOccNoOptim(rows,'vencidosNoOptim');}
+/** Dep. 0044 Avarias: stock misturado / virtuais — Unilog OK, sem optimização. */
+function neutralizeOccAvariasOptim(rows){return neutralizeOccNoOptim(rows,'avariasNoOptim');}
 function findOccConsolidationPairs(enderecos,qpp){
   if(!enderecos||enderecos.length<2||!qpp)return[];
-  const items=enderecos.map((e,i)=>({end:e.end,qt:e.qt,i}));
-  items.sort((a,b)=>a.qt-b.qt);
+  const items=enderecos.filter(e=>e&&e.end&&!isOccVirtualEnd(e.end)).map((e,i)=>({end:e.end,qt:e.qt,i,type:occEndType(e.end),pkSub:occEndType(e.end)==='PK'?occPkSubtype(e.end):null}));
+  if(items.length<2)return[];
+  // Prefer freeing PP first; among donors prefer smaller qt; among receptors prefer PK then fuller.
+  // For PK→PK, prefer same physical subtype (1 palete / ½ / scaninho).
+  const donorOrder=[...items].sort((a,b)=>{
+    const ta=a.type==='PP'?0:a.type==='OTHER'?1:2;
+    const tb=b.type==='PP'?0:b.type==='OTHER'?1:2;
+    if(ta!==tb)return ta-tb;
+    return a.qt-b.qt;
+  });
   const pairs=[];const used=new Set();
-  for(let si=0;si<items.length;si++){
-    if(used.has(items[si].i))continue;
-    for(let sj=items.length-1;sj>si;sj--){
-      if(used.has(items[sj].i))continue;
-      const a=items[si],b=items[sj];
-      if(a.qt+b.qt>qpp)continue;
-      if(!(isOccPKEnd(a.end)&&!isOccPKEnd(b.end))){
-        pairs.push({end:a.end,qt:a.qt,receptor:b.end,receptorIsPK:isOccPKEnd(b.end)});
-        used.add(a.i);used.add(b.i);break;
-      }
-      if(!(isOccPKEnd(b.end)&&!isOccPKEnd(a.end))){
-        pairs.push({end:b.end,qt:b.qt,receptor:a.end,receptorIsPK:isOccPKEnd(a.end)});
-        used.add(a.i);used.add(b.i);break;
-      }
-    }
+  let pkEnds=items.filter(x=>x.type==='PK').map(x=>x.end);
+  for(const donor of donorOrder){
+    if(used.has(donor.i))continue;
+    const receptors=items.filter(r=>!used.has(r.i)&&r.i!==donor.i&&donor.qt+r.qt<=qpp)
+      .filter(r=>occMoveTypeAllowed(donor.end,r.end)&&occMoveKeepsPK(donor.end,pkEnds))
+      .sort((a,b)=>{
+        if(donor.type==='PK'&&a.type==='PK'&&b.type==='PK'){
+          const sa=a.pkSub===donor.pkSub?0:1,sb=b.pkSub===donor.pkSub?0:1;
+          if(sa!==sb)return sa-sb;
+        }
+        const pa=a.type==='PK'?0:1,pb=b.type==='PK'?0:1;
+        if(pa!==pb)return pa-pb;
+        return b.qt-a.qt;
+      });
+    const rec=receptors[0];
+    if(!rec)continue;
+    pairs.push({end:donor.end,qt:donor.qt,receptor:rec.end,receptorIsPK:rec.type==='PK'});
+    used.add(donor.i);used.add(rec.i);
+    if(donor.type==='PK')pkEnds=pkEnds.filter(e=>e!==donor.end);
   }
   return pairs;
 }
@@ -5874,8 +6158,11 @@ function buildOccAgg(uniFiltered,descMap){
     if(!byEanLote[k])byEanLote[k]={ean:r.EAN_norm,lote:r.Lote_norm,desc:descMap[r.EAN_norm]||r.produto||'',qt:0,enderecos:[],endSet:new Set(),qtDC:0};
     byEanLote[k].qt+=r.qt;
     if(r.endereco&&isOccDCEnd(r.endereco,r.area)){byEanLote[k].qtDC+=r.qt;return;}
-    if(r.endereco&&!byEanLote[k].endSet.has(r.endereco)){byEanLote[k].endSet.add(r.endereco);byEanLote[k].enderecos.push({end:r.endereco,qt:0});}
-    if(r.endereco){const e=byEanLote[k].enderecos.find(x=>x.end===r.endereco);if(e)e.qt+=r.qt;}
+    // Virtuais (INVFT/REC + FI/SI/FR/SR): qt conta no stock, mas não em posições reais.
+    if(r.endereco&&(isOccVirtualEnd(r.endereco)||isOccVirtualClasse(r.classe)))return;
+    const end=String(r.endereco||'').trim();
+    if(end&&!byEanLote[k].endSet.has(end)){byEanLote[k].endSet.add(end);byEanLote[k].enderecos.push({end,qt:0});}
+    if(end){const e=byEanLote[k].enderecos.find(x=>x.end===end);if(e)e.qt+=r.qt;}
   });
   const byEan={};
   Object.values(byEanLote).forEach(v=>{
@@ -5889,6 +6176,7 @@ function buildOccAgg(uniFiltered,descMap){
 function buildOccRow(ean,v){
   const param=occParams.find(p=>p.ean===ean);
   const qpp=param&&param.qty_per_pos>1?param.qty_per_pos:0;
+  // Por EAN: soma posições por lote (optimização). O KPI global usa collectOccPhysicalEndSet (únicos).
   const posReal=v.lotes.reduce((s,l)=>s+l.nEnderecos,0);
   const loteDetail=v.lotes.map(l=>computeOccLoteDetail(l,qpp));
   const posMinimaTotal=loteDetail.reduce((s,l)=>s+l.posMinima,0);
@@ -5905,35 +6193,71 @@ function buildOccRows(uniFiltered,descMap){
   const byEan=buildOccAgg(uniFiltered,descMap);
   return Object.entries(byEan).map(([ean,v])=>buildOccRow(ean,v));
 }
-function occExcessMoveHint(l,qpp){
-  if(!l.enderecos||!l.enderecos.length||l.posReais<=l.posMinima)return null;
-  const sorted=[...l.enderecos].sort((a,b)=>a.qt-b.qt);
-  const donor=sorted[0];
-  const targets=sorted.filter(e=>e.end!==donor.end&&e.qt<qpp).sort((a,b)=>(qpp-b.qt)-(qpp-a.qt));
-  const target=targets[0]||null;
-  return{excess:l.posReais-l.posMinima,donor,target,cap:target?qpp-target.qt:0};
+function occExcessMoveHint(l,qpp,productPkEnds){
+  if(!l.enderecos||!l.enderecos.length||l.posReais<=l.posMinima||!qpp)return null;
+  const physicalEnds=l.enderecos.filter(e=>e&&e.end&&!isOccVirtualEnd(e.end));
+  if(physicalEnds.length<2)return null;
+  const pkEnds=productPkEnds||physicalEnds.filter(e=>isOccPKEnd(e.end)).map(e=>e.end);
+  // Prefer emptying PP/OTHER first; never PK→non-PK; never empty last PK; never virtual ends.
+  const donors=[...physicalEnds].sort((a,b)=>{
+    const ta=occEndType(a.end),tb=occEndType(b.end);
+    const ra=ta==='PP'?0:ta==='OTHER'?1:2;
+    const rb=tb==='PP'?0:tb==='OTHER'?1:2;
+    if(ra!==rb)return ra-rb;
+    return a.qt-b.qt;
+  });
+  for(const donor of donors){
+    if(!occMoveKeepsPK(donor.end,pkEnds))continue;
+    const donorSub=isOccPKEnd(donor.end)?occPkSubtype(donor.end):null;
+    const targets=physicalEnds.filter(e=>e.end!==donor.end&&e.qt<qpp&&occMoveTypeAllowed(donor.end,e.end))
+      .sort((a,b)=>{
+        if(donorSub&&isOccPKEnd(a.end)&&isOccPKEnd(b.end)){
+          const sa=occPkSubtype(a.end)===donorSub?0:1,sb=occPkSubtype(b.end)===donorSub?0:1;
+          if(sa!==sb)return sa-sb;
+        }
+        const pa=isOccPKEnd(a.end)?0:1,pb=isOccPKEnd(b.end)?0:1;
+        if(pa!==pb)return pa-pb;
+        return (qpp-b.qt)-(qpp-a.qt);
+      });
+    const target=targets[0]||null;
+    if(!target)continue;
+    return{excess:l.posReais-l.posMinima,donor,target,cap:qpp-target.qt};
+  }
+  return null;
 }
 function buildOccMoves(r){
+  // Classe 104 (vencidos) / dep. 0044 (avarias+virtuais): posições partilhadas — Unilog OK, sem melhorias.
+  if(r.vencidosNoOptim||r.avariasNoOptim)return{moves:[]};
   const qpp=r.qpp||r.param?.qty_per_pos||0;
   if(r.param&&r.param.lote_obrigatorio===false&&r.nLotes>1)return{alert:'sem-lote',nLotes:r.nLotes,moves:[]};
   if(!r.param)return{alert:'sem-param',moves:[]};
   if(r.nLotes===0)return{moves:[]};
   const moves=[];
+  // Product-level PK set: never suggest emptying the last picking position of the EAN.
+  let productPkEnds=[...new Set((r.loteDetail||[]).flatMap(l=>(l.enderecos||[]).filter(e=>isOccPKEnd(e.end)&&!isOccVirtualEnd(e.end)).map(e=>e.end)))];
+  const pushMove=m=>{
+    if(m.doca){moves.push(m);return;}
+    if(isOccVirtualEnd(m.de)||isOccVirtualEnd(m.para))return;
+    if(!occMoveTypeAllowed(m.de,m.para))return;
+    if(!occMoveKeepsPK(m.de,productPkEnds))return;
+    moves.push(m);
+    if(isOccPKEnd(m.de))productPkEnds=productPkEnds.filter(e=>e!==m.de);
+  };
   const consol=r.loteDetail.filter(l=>l.consolidacao&&l.consolidacao.doadores?.length);
   consol.forEach(l=>{
     l.consolidacao.doadores.forEach(d=>{
-      moves.push({qt:d.qt,de:d.end,para:d.receptor,liberta:'1 pos',lote:l.lote});
+      pushMove({qt:d.qt,de:d.end,para:d.receptor,liberta:'1 pos',lote:l.lote});
     });
   });
-  if(r.poupanca>0&&consol.length===0){
+  if((r._poupancaRaw??r.poupanca)>0&&consol.length===0){
     r.loteDetail.forEach(l=>{
-      const hint=occExcessMoveHint(l,qpp);
+      const hint=occExcessMoveHint(l,qpp,productPkEnds);
       if(!hint)return;
       const{excess,donor,target,cap}=hint;
       if(target&&donor.qt<=cap){
-        moves.push({qt:donor.qt,de:donor.end,para:target.end,liberta:excess+' pos',lote:l.lote});
-      }else if(donor){
-        moves.push({qt:donor.qt,de:donor.end,para:target?target.end:'—',liberta:excess+' pos',lote:l.lote});
+        pushMove({qt:donor.qt,de:donor.end,para:target.end,liberta:excess+' pos',lote:l.lote});
+      }else if(donor&&target){
+        pushMove({qt:donor.qt,de:donor.end,para:target.end,liberta:excess+' pos',lote:l.lote});
       }
     });
   }
@@ -5942,17 +6266,35 @@ function buildOccMoves(r){
   });
   return{moves,full:r.posReal>0&&qpp>0&&moves.length===0};
 }
+/** Vista de Stock: poupança / otimizável sem PK→PK (esses só na subaba Ajustes PK→PK). */
+function applyOccVistaExclPkPk(r){
+  if(!r||r.vencidosNoOptim||r.avariasNoOptim)return r;
+  const info=buildOccMoves(r);
+  const mainMoves=(info.moves||[]).filter(m=>!isOccPkPkMove(m)&&!m.doca);
+  let poupanca=0;
+  for(const m of mainMoves){
+    const n=parseInt(String(m.liberta||'1').replace(/\D/g,''),10);
+    poupanca+=Number.isFinite(n)&&n>0?n:1;
+  }
+  const hasDC=(info.moves||[]).some(m=>m.doca)||(r.loteDetail||[]).some(l=>l.qtDC>0);
+  const semLote=info.alert==='sem-lote';
+  const underutil=poupanca>0||hasDC||semLote;
+  // Keep raw poupança so buildOccMoves excess-path still sees original triggers.
+  return{...r,poupanca,posOtimizadas:r.posReal-poupanca,underutil,_poupancaRaw:r.poupanca};
+}
 function occMovesSubRowHtml(r){
   const info=buildOccMoves(r);
   if(info.alert==='sem-lote'){
     return`<div class="occ-moves-alert occ-moves-alert-warn">Produto sem lote — solicitar à Unilog unificar ${info.nLotes} lotes numa só posição</div>`;
   }
   if(info.alert==='sem-param')return'<span class="badge bgray">Sem parâm.</span>';
-  if(!info.moves.length){
+  // Vista de Stock: nunca mostrar PK→PK nem texto a apontar para a subaba.
+  const mainMoves=(info.moves||[]).filter(m=>!isOccPkPkMove(m));
+  if(!mainMoves.length){
     if(info.full)return'<span class="badge bok">Posições cheias</span>';
     return'';
   }
-  const rows=info.moves.map(m=>{
+  const rows=mainMoves.map(m=>{
     const deCell=m.doca?`<span style="font-family:var(--mono);color:var(--yellow)">${m.de}</span>`:occEndChip(m.de,'de');
     const paraCell=m.para&&m.para!=='—'?occEndChip(m.para,'para'):'—';
     return`<tr><td class="num">${fmt(m.qt)}</td><td>${deCell}</td><td>${paraCell}</td><td>${m.liberta}</td></tr>`;
@@ -5964,18 +6306,19 @@ function occRecomendacaoText(r){
   const info=buildOccMoves(r);
   if(info.alert==='sem-lote')return'Produto sem lote — solicitar à Unilog unificar posições';
   if(info.alert==='sem-param')return'Sem parâmetro de ocupação definido';
-  if(!info.moves.length){
+  const mainMoves=(info.moves||[]).filter(m=>!isOccPkPkMove(m));
+  if(!mainMoves.length){
     if(info.full)return'Posições cheias';
     return'';
   }
-  return info.moves.map(m=>`Mover ${m.qt} un de ${m.de} → ${m.para}${m.liberta&&m.liberta!=='—'?' (liberta '+m.liberta+')':''}`).join(' /// ');
+  return mainMoves.map(m=>`Mover ${m.qt} un de ${m.de} → ${m.para}${m.liberta&&m.liberta!=='—'?' (liberta '+m.liberta+')':''}`).join(' /// ');
 }
 
 // ── RENDER OCC VIEW ──
 let _renderOccViewBusy=false;
 function refreshOccIfVisible(){
   const ap=document.querySelector('.page.active');
-  if(ap?.id==='page-occupation')renderOccView();
+  if(ap?.id==='page-occupation'){renderOccView();renderOccPkPk();}
 }
 function initOccToggle(){
   const tg=document.getElementById('showAllOccTg');
@@ -5999,7 +6342,7 @@ function _renderOccView(){
     return;
   }
   const srch=document.getElementById('ovSrch').value.toLowerCase();
-  const depF=msGetValOrSelect('ovDep');
+  const deps=getOccDepFilterList();
   const alertF=msGetValOrSelect('ovAlerta');
   const allCats=[...new Set(occParams.map(p=>p.cat).filter(Boolean))].sort();
   msUpdate('ovCat',allCats,'Categorias','renderOccView');
@@ -6008,32 +6351,42 @@ function _renderOccView(){
   const allSubs=[...new Set(subSrc.map(p=>p.subcat).filter(Boolean))].sort();
   msUpdate('ovSub',allSubs,'Subcategorias','renderOccView');
   const selSubs=msGet('ovSub');
-  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI','SI']};
-  const filteredClasses=depF?(depClassMap[depF]||[]):null;
-  const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
+  const hasVencDep=deps.some(isOccVencidosDepFilter);
+  const hasAvariasDep=deps.some(isOccAvariasDepFilter);
+  const onlyNoOptim=deps.length>0&&deps.every(isOccNoOptimDepFilter);
+  const onlyAvariasDep=onlyNoOptim&&deps.every(isOccAvariasDepFilter);
+  const uniFiltered=filterUniForOcc(deps,{includeVencidosStock:hasVencDep,includeAvariasStock:hasAvariasDep});
   const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
   let kpiRows=buildOccRows(uniFiltered,descMap);
+  kpiRows=applyOccVistaOptimFlags(kpiRows,uniFiltered,deps);
   if(srch)kpiRows=kpiRows.filter(r=>matchProdSrch(srch,r.ean,r.desc));
   if(selCats.size)kpiRows=kpiRows.filter(r=>selCats.has(r.cat));
   if(selSubs.size)kpiRows=kpiRows.filter(r=>selSubs.has(r.subcat));
   if(alertF==='sem')kpiRows=kpiRows.filter(r=>!r.param);
-  let rows=showAllOcc?kpiRows:kpiRows.filter(r=>r.underutil);
+  // Dep. vencidos: stock visível sem melhorias (não aplicar filtro «só otimizável»).
+  // Dep. 0044: com «Só otimizável» → 0 melhorias (tabela vazia); «Mostrar tudo» → stock sem optimização.
+  // Multi-select só avarias: mesma regra; multi vencidos/avarias: mostrar stock (sem underutil).
+  let rows;
+  if(onlyAvariasDep)rows=showAllOcc?kpiRows:[];
+  else rows=(showAllOcc||onlyNoOptim)?kpiRows:kpiRows.filter(r=>r.underutil);
   if(sorts['occ'])applySort('occ',rows);
   else rows.sort((a,b)=>{const cc=String(a.cat||'zzz').localeCompare(String(b.cat||'zzz'));if(cc!==0)return cc;const sc=String(a.subcat||'').localeCompare(String(b.subcat||''));if(sc!==0)return sc;return String(a.desc||'').localeCompare(String(b.desc||''));});
   updateSortHeaders('occ');
   const kpiEANs=new Set(kpiRows.map(r=>r.ean));
-  const kpiEnderecos=new Set(uniFiltered.filter(r=>r.endereco&&r.endereco.trim()!==''&&!isOccDCEnd(r.endereco,r.area)&&kpiEANs.has(r.EAN_norm)).map(r=>r.endereco));
-  const tP=kpiEnderecos.size;
-  const tPoup=kpiRows.reduce((s,r)=>s+(r.poupanca||0),0);
+  // Únicos físicos no depósito/filtro — posições partilhadas por vários EAN/lote contam 1×.
+  // Exclui doca, INVFT/REC e classes virtuais FI/SI/FR/SR (não somar coluna POS. REAIS).
+  const tP=collectOccPhysicalEndSet(uniFiltered,kpiEANs).size;
+  const tPoup=onlyNoOptim?0:kpiRows.reduce((s,r)=>s+(r.poupanca||0),0);
   const tOpt=tP-tPoup;
   const wP=kpiRows.filter(r=>r.param).length;
-  const nOpt=kpiRows.filter(r=>r.underutil).length;
+  const nOpt=onlyNoOptim?0:kpiRows.filter(r=>r.underutil).length;
+  const noOptimNote=occNoOptimNote(deps);
   document.getElementById('ovKpis').innerHTML=`
-    <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmtKvNum(kpiRows.length)}</div>${!showAllOcc?`<div class="ks">${fmtKvNum(rows.length)} otimizáveis</div>`:''}</div>
+    <div class="kpi"><div class="kl">EANs com stock</div><div class="kv">${fmtKvNum(kpiRows.length)}</div>${!showAllOcc&&!onlyNoOptim?`<div class="ks">${fmtKvNum(rows.length)} otimizáveis</div>`:noOptimNote?`<div class="ks">${noOptimNote}</div>`:''}</div>
     <div class="kpi"><div class="kl">Com parâmetro</div><div class="kv g">${fmtKvNum(wP)}</div><div class="ks">${kpiRows.length?Math.round(wP/kpiRows.length*100):0}%</div></div>
-    <div class="kpi"><div class="kl">Posições Reais</div><div class="kv b">${fmtKvNum(tP)}</div><div class="ks">${depF?("Dep "+depF.padStart(4,"0")):"Todos os depósitos"} · endereços únicos</div></div>
-    <div class="kpi"><div class="kl">Após Optimização</div><div class="kv">${fmtKvNum(tOpt)}</div></div>
-    <div class="kpi"><div class="kl">Posições a Libertar</div><div class="kv ${tPoup>0?'r':''}">${fmtKvNum(tPoup)}</div><div class="ks">${tP>0?Math.round(tPoup/tP*100):0}% do total${!showAllOcc&&nOpt?` · ${fmtKvNum(nOpt)} EANs na tabela`:''}</div></div>
+    <div class="kpi"><div class="kl">Posições Reais</div><div class="kv b">${fmtKvNum(tP)}</div><div class="ks">${occDepKpiSubtitle(deps)}</div></div>
+    <div class="kpi"><div class="kl">Após Optimização</div><div class="kv">${fmtKvNum(tOpt)}</div>${noOptimNote?`<div class="ks">igual às reais</div>`:''}</div>
+    <div class="kpi"><div class="kl">Posições a Libertar</div><div class="kv ${tPoup>0?'r':''}">${fmtKvNum(tPoup)}</div><div class="ks">${onlyNoOptim?'0% — sem optimização':`${tP>0?Math.round(tPoup/tP*100):0}% do total${!showAllOcc&&nOpt?` · ${fmtKvNum(nOpt)} EANs na tabela`:''}`}</div></div>
   `;
   const body=document.getElementById('ovBody');body.innerHTML='';
   for(const r of rows){
@@ -6058,7 +6411,133 @@ function _renderOccView(){
       body.appendChild(trSub);
     }
   }
-  if(!rows.length)eRow(body,9,'Nenhum resultado');
+  if(!rows.length)eRow(body,9,onlyAvariasDep&&!showAllOcc?'Dep. 0044 Avarias — sem optimização (stock misturado / classes virtuais)':'Nenhum resultado');
+}
+
+// ── OCC PK→PK SUB-TAB ──
+function collectOccPkPkRows(uniFiltered,descMap){
+  const productRows=buildOccRows(uniFiltered,descMap);
+  const out=[];
+  for(const r of productRows){
+    const info=buildOccMoves(r);
+    (info.moves||[]).filter(isOccPkPkMove).forEach(m=>{
+      const deTipo=occPkSubtype(m.de);
+      const paraTipo=occPkSubtype(m.para);
+      const sameTipo=deTipo===paraTipo;
+      out.push({
+        ean:r.ean,
+        sapCode:r.sapCode||'',
+        desc:r.desc||'',
+        cat:r.cat||'',
+        subcat:r.subcat||'',
+        lote:m.lote||'',
+        qt:m.qt||0,
+        de:m.de,
+        para:m.para,
+        deTipo,
+        paraTipo,
+        deTipoLbl:occPkSubtypeLabel(deTipo),
+        paraTipoLbl:occPkSubtypeLabel(paraTipo),
+        sameTipo,
+        alerta:sameTipo?'':'tipos diferentes',
+        liberta:m.liberta||'',
+        _sortMismatch:sameTipo?0:1
+      });
+    });
+  }
+  return out;
+}
+function renderOccPkPk(){
+  const body=document.getElementById('opkBody');
+  const empty=document.getElementById('opkEmpty');
+  const kpis=document.getElementById('opkKpis');
+  if(!body)return;
+  if(!uniData){
+    body.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:30px">Carrega os ficheiros para ver ajustes PK→PK</td></tr>';
+    if(kpis)kpis.innerHTML='';
+    if(empty)empty.style.display='none';
+    return;
+  }
+  const srch=(document.getElementById('opkSrch')?.value||'').toLowerCase();
+  const tipoF=document.getElementById('opkTipo')?.value||'';
+  const depF=document.getElementById('opkDep')?.value||'';
+  // PK→PK: nunca classe 104 (vencidos) nem dep. 0044 (avarias/virtuais).
+  const uniFiltered=filterUniForOcc(depF);
+  const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
+  let rows=collectOccPkPkRows(uniFiltered,descMap);
+  if(srch){
+    rows=rows.filter(r=>
+      matchProdSrch(srch,r.ean,r.desc)||
+      String(r.de||'').toLowerCase().includes(srch)||
+      String(r.para||'').toLowerCase().includes(srch)||
+      String(r.lote||'').toLowerCase().includes(srch)||
+      String(r.sapCode||'').toLowerCase().includes(srch)
+    );
+  }
+  if(tipoF==='same')rows=rows.filter(r=>r.sameTipo);
+  else if(tipoF==='diff')rows=rows.filter(r=>!r.sameTipo);
+  else if(tipoF)rows=rows.filter(r=>r.deTipo===tipoF||r.paraTipo===tipoF);
+  if(sorts['occpkpk'])applySort('occpkpk',rows);
+  else rows.sort((a,b)=>a._sortMismatch-b._sortMismatch||String(a.desc||'').localeCompare(String(b.desc||''),'pt')||String(a.de).localeCompare(String(b.de)));
+  updateSortHeaders('occpkpk');
+  const nDiff=rows.filter(r=>!r.sameTipo).length;
+  const nSame=rows.length-nDiff;
+  if(kpis)kpis.innerHTML=`
+    <div class="kpi"><div class="kl">Ajustes PK→PK</div><div class="kv b">${fmtKvNum(rows.length)}</div></div>
+    <div class="kpi"><div class="kl">Mesmo tipo</div><div class="kv g">${fmtKvNum(nSame)}</div></div>
+    <div class="kpi"><div class="kl">Tipos diferentes</div><div class="kv ${nDiff?'y':''}">${fmtKvNum(nDiff)}</div><div class="ks">revisar operacionalmente</div></div>
+  `;
+  body.innerHTML='';
+  if(empty)empty.style.display=rows.length?'none':'block';
+  for(const r of rows){
+    const tr=document.createElement('tr');
+    if(!r.sameTipo)tr.className='occ-pkpk-mismatch';
+    tr.innerHTML=`
+      <td><span class="badge bneu">${r.ean}</span></td>
+      <td class="col-desc" title="${esc(r.desc)}">${esc(r.desc)}</td>
+      <td style="font-family:var(--mono);font-size:11px">${esc(r.lote)||'—'}</td>
+      <td class="num">${fmt(r.qt)}</td>
+      <td>${occEndChip(r.de,'de')}</td>
+      <td>${occPkSubtypeBadge(r.deTipo)}</td>
+      <td>${occEndChip(r.para,'para')}</td>
+      <td>${occPkSubtypeBadge(r.paraTipo)}</td>
+      <td style="font-size:11px;color:var(--text2)">${esc(r.liberta)||'—'}</td>
+      <td>${r.sameTipo?'<span style="color:var(--muted)">—</span>':'<span class="badge bwarn">tipos diferentes</span>'}</td>
+    `;
+    body.appendChild(tr);
+  }
+  if(!rows.length&&!empty)eRow(body,10,'Sem ajustes PK→PK');
+  scheduleColResize();
+}
+function exportOccPkPkXlsx(){
+  if(!uniData){toast('Sem dados Unilog','error');return;}
+  const srch=(document.getElementById('opkSrch')?.value||'').toLowerCase();
+  const tipoF=document.getElementById('opkTipo')?.value||'';
+  const depF=document.getElementById('opkDep')?.value||'';
+  const uniFiltered=filterUniForOcc(depF);
+  const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
+  let rows=collectOccPkPkRows(uniFiltered,descMap);
+  if(srch){
+    rows=rows.filter(r=>
+      matchProdSrch(srch,r.ean,r.desc)||
+      String(r.de||'').toLowerCase().includes(srch)||
+      String(r.para||'').toLowerCase().includes(srch)||
+      String(r.lote||'').toLowerCase().includes(srch)
+    );
+  }
+  if(tipoF==='same')rows=rows.filter(r=>r.sameTipo);
+  else if(tipoF==='diff')rows=rows.filter(r=>!r.sameTipo);
+  else if(tipoF)rows=rows.filter(r=>r.deTipo===tipoF||r.paraTipo===tipoF);
+  if(!rows.length){toast('Sem dados para exportar','error');return;}
+  const data=rows.map(r=>({
+    EAN:r.ean,Cod_SAP:r.sapCode||'',Descricao:r.desc,Lote:r.lote,
+    Qt:r.qt,De:r.de,Tipo_De:r.deTipoLbl,Para:r.para,Tipo_Para:r.paraTipoLbl,
+    Liberta:r.liberta,Alerta:r.alerta||''
+  }));
+  const ws=XLSX.utils.json_to_sheet(data);
+  ws['!cols']=[{wch:16},{wch:12},{wch:40},{wch:12},{wch:8},{wch:14},{wch:12},{wch:14},{wch:12},{wch:10},{wch:16}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Ajustes PK-PK');
+  XLSX.writeFile(wb,`ocupacao_pkpk_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 // ── OCC BASE ──
@@ -6102,7 +6581,7 @@ async function saveOcc(){
   if(editOccId)({error}=await db.from('logistica_occ_params').update(payload).eq('id',editOccId));
   else({error}=await db.from('logistica_occ_params').insert(payload));
   if(error){errEl.textContent='Erro: '+error.message;errEl.style.display='block';return;}
-  closeOccModal();await loadOccParams();renderOccBase();renderOccView();toast('Guardado ✓','success');
+  closeOccModal();await loadOccParams();renderOccBase();renderOccView();renderOccPkPk();toast('Guardado ✓','success');
 }
 function exportOccXlsx(){
   if(!uniData)return;
@@ -6110,13 +6589,17 @@ function exportOccXlsx(){
   const srch=document.getElementById('ovSrch').value.toLowerCase();
   const selCats=msGet('ovCat');
   const selSubs=msGet('ovSub');
-  const depF=msGetValOrSelect('ovDep');
+  const deps=getOccDepFilterList();
   const alertF=msGetValOrSelect('ovAlerta');
-  const depClassMap={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI','SI']};
-  const filteredClasses=depF?(depClassMap[depF]||[]):null;
-  const uniFiltered=uniData.filter(r=>!filteredClasses||filteredClasses.includes(r.classe));
+  const hasVencDep=deps.some(isOccVencidosDepFilter);
+  const hasAvariasDep=deps.some(isOccAvariasDepFilter);
+  const onlyNoOptim=deps.length>0&&deps.every(isOccNoOptimDepFilter);
+  const onlyAvariasDep=onlyNoOptim&&deps.every(isOccAvariasDepFilter);
+  const uniFiltered=filterUniForOcc(deps,{includeVencidosStock:hasVencDep,includeAvariasStock:hasAvariasDep});
   const descMap={};if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)descMap[r.EAN_norm]=r.desc;});
-  let rows=buildOccRows(uniFiltered,descMap).map(r=>({
+  let occRows=buildOccRows(uniFiltered,descMap);
+  occRows=applyOccVistaOptimFlags(occRows,uniFiltered,deps);
+  let rows=occRows.map(r=>({
     Categoria:r.cat||'',Subcategoria:r.subcat||'',EAN:r.ean,Descricao:r.desc,
     StockUnilog:r.qt,UnPosicao:r.qpp||'',PosReais:r.posReal,PosOptimizadas:r.posOtimizadas,
     PosALibertar:r.poupanca||'',LoteObrigatorio:r.param?.lote_obrigatorio!==false?'Sim':'Não',
@@ -6126,7 +6609,8 @@ function exportOccXlsx(){
   if(srch)rows=rows.filter(r=>matchProdSrch(srch,r.EAN,r.Descricao));
   if(selCats.size)rows=rows.filter(r=>selCats.has(r.Categoria));
   if(selSubs.size)rows=rows.filter(r=>selSubs.has(r.Subcategoria));
-  if(!showAllOcc)rows=rows.filter(r=>r._row.underutil);
+  if(onlyAvariasDep){if(!showAllOcc)rows=[];}
+  else if(!showAllOcc&&!onlyNoOptim)rows=rows.filter(r=>r._row.underutil);
   if(alertF==='sem')rows=rows.filter(r=>!r.UnPosicao);
   rows=rows.map(({_row,...rest})=>rest);
   rows.sort((a,b)=>{const cc=String(a.Categoria||'zzz').localeCompare(String(b.Categoria||'zzz'));if(cc!==0)return cc;const sc=String(a.Subcategoria||'').localeCompare(String(b.Subcategoria||''));if(sc!==0)return sc;return String(a.Descricao||'').localeCompare(String(b.Descricao||''));});
@@ -6734,6 +7218,7 @@ function doSort(table,col){
   else if(table==='valconfl')renderValConfl();
   else if(table==='validcurta')renderValidCurta();
   else if(table==='occ')renderOccView();
+  else if(table==='occpkpk')renderOccPkPk();
   else if(table==='transEc')renderTrans('ecommerce');
   else if(table==='transQb')renderTrans('qbrasil');
   else if(table==='audit')renderAuditoria();
@@ -6754,7 +7239,7 @@ function applySort(table,rows){
 }
 function updateSortHeaders(table){
   const s=sorts[table];
-  const tableEl=document.getElementById({recon:'reconTable',ean:'eanTable',susp:'suspTable',su:'suTable',poscl:'posTable',semval:'semValTable',valconfl:'valConflTable',validcurta:'validCurtaTable',occ:'ovTable',transEc:'transEcTable',transQb:'transQbTable',audit:'auditTable',rec:'recTable',hist:'histTable',pecas:'pecasTable',vencforadep:'vencTable',vencforadepSap:'vencTable',ia:'iaTable'}[table]);
+  const tableEl=document.getElementById({recon:'reconTable',ean:'eanTable',susp:'suspTable',su:'suTable',poscl:'posTable',semval:'semValTable',valconfl:'valConflTable',validcurta:'validCurtaTable',occ:'ovTable',occpkpk:'opkTable',transEc:'transEcTable',transQb:'transQbTable',audit:'auditTable',rec:'recTable',hist:'histTable',pecas:'pecasTable',vencforadep:'vencTable',vencforadepSap:'vencTable',ia:'iaTable'}[table]);
   document.querySelectorAll('th[onclick]').forEach(th=>{
     const oc=th.getAttribute('onclick')||'';
     let t=table,col;
@@ -6790,7 +7275,7 @@ function scheduleTableSort(){
 }
 
 // ── INNER TABS ──
-function innerTab(name,el){el.closest('.page').querySelectorAll('.it').forEach(t=>t.classList.remove('active'));el.classList.add('active');document.getElementById('occView').style.display=name==='view'?'':'none';document.getElementById('occBase').style.display=name==='base'?'':'none';if(name==='base')renderOccBase();if(name==='view')renderOccView();}
+function innerTab(name,el){el.closest('.page').querySelectorAll('.it').forEach(t=>t.classList.remove('active'));el.classList.add('active');document.getElementById('occView').style.display=name==='view'?'':'none';document.getElementById('occPkPk').style.display=name==='pkpk'?'':'none';document.getElementById('occBase').style.display=name==='base'?'':'none';if(name==='base')renderOccBase();if(name==='view')renderOccView();if(name==='pkpk')renderOccPkPk();}
 
 // ── UTILS ──
 function fmt(n){if(n===null||n===undefined)return'—';return fmtPtNum(n);}
