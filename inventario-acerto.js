@@ -2,16 +2,26 @@
 (function (global) {
   'use strict';
 
-  const INVENTARIO_ACERTO_JS_VERSION = '1.0.3';
+  const INVENTARIO_ACERTO_JS_VERSION = '1.0.5';
   const INVENTARIO_ACERTO_DEPOTS = ['8', '9', '11', '22', '44'];
   const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
   const DATA_START_ROW = 9;
   const DATE_CELL = 'L5';
   const DEPOT_CELL = 'M3';
-  const TEMPLATE_URL = 'assets/inventario_acerto_template.xlsx';
+  const TEMPLATE_URL = 'assets/inventario_acerto_template.xlsx?v=' + INVENTARIO_ACERTO_JS_VERSION;
+
+  const IA_DRILL_LABELS = {
+    wms: 'Só Unilog (H>0, I=0)',
+    sap: 'Só SAP (H=0, I>0)',
+    diverg: 'Divergência (ambos com stock)',
+    subir: 'Subir SAP (Δ qty > 0)',
+    descer: 'Descer SAP (Δ qty < 0)',
+  };
 
   let inventarioAcertoRows = [];
   let inventarioAcertoTemplateBuf = null;
+  /** @type {null|'wms'|'sap'|'diverg'|'subir'|'descer'} */
+  let iaDrill = null;
 
   function iaDepotLabel(dk) {
     const m = typeof DEPOT_MAP !== 'undefined' ? DEPOT_MAP : {};
@@ -47,10 +57,30 @@
     return umb ? String(umb).trim() : 'UN';
   }
 
+  function iaResolveCat(ean, existingCat, existingSub) {
+    if (existingCat || existingSub) return { cat: existingCat || '', subcat: existingSub || '' };
+    const params = typeof occParams !== 'undefined' ? occParams : [];
+    const p = params.find((x) => x.ean === ean);
+    return { cat: p?.cat || '', subcat: p?.subcat || '' };
+  }
+
+  /** H = físico Unilog, I = SAP contabilístico. */
   function iaAcertoHI(r) {
     if (r.qt_uni > 0 && r.qt_sap === 0) return { h: r.qt_uni, i: 0 };
     if (r.qt_sap > 0 && r.qt_uni === 0) return { h: 0, i: r.qt_sap };
     return { h: r.qt_uni, i: r.qt_sap };
+  }
+
+  function iaRowEstado(hi) {
+    if (hi.h > 0 && hi.i === 0) return 'Só WMS';
+    if (hi.i > 0 && hi.h === 0) return 'Só SAP';
+    return 'Diverg.';
+  }
+
+  function iaRowDir(diff) {
+    if (diff > 0) return 'Subir';
+    if (diff < 0) return 'Descer';
+    return '—';
   }
 
   function buildAcertoRowsForDepot(dk) {
@@ -62,6 +92,11 @@
       .map((r) => {
         const hi = iaAcertoHI(r);
         const material = resolveSapMaterial(r, dk);
+        const diff = hi.h - hi.i;
+        const preco = precoMap[r.EAN_norm] || 0;
+        const cs = iaResolveCat(r.EAN_norm, r.cat, r.subcat);
+        const excl =
+          typeof isExcluidoDifStock === 'function' && isExcluidoDifStock(r.EAN_norm, dk, r.desc);
         return {
           depot: dk,
           depotSheet: INVENTARIO_ACERTO_SHEETS[dk] || dk.padStart(4, '0'),
@@ -70,12 +105,17 @@
           EAN_norm: r.EAN_norm,
           desc: r.desc || '',
           lote: r.Lote_norm || '',
-          preco: precoMap[r.EAN_norm] || 0,
+          cat: cs.cat,
+          subcat: cs.subcat,
+          preco,
           umb: getSapUmb(r.EAN_norm),
           qt_wms: hi.h,
           qt_sap: hi.i,
-          diff: hi.h - hi.i,
-          _estado: hi.h > 0 && hi.i === 0 ? 'Só WMS' : hi.i > 0 && hi.h === 0 ? 'Só SAP' : 'Diverg.',
+          diff,
+          valor: excl || preco <= 0 ? 0 : diff * preco,
+          _semValor: !!excl || preco <= 0,
+          _estado: iaRowEstado(hi),
+          _dir: iaRowDir(diff),
         };
       })
       .filter((r) => {
@@ -98,6 +138,77 @@
     for (const dk of INVENTARIO_ACERTO_DEPOTS) out.push(...buildAcertoRowsForDepot(dk));
     inventarioAcertoRows = out;
     return out;
+  }
+
+  function iaMatchSrch(srch, r) {
+    if (!srch) return true;
+    const s = srch.toLowerCase();
+    return (
+      String(r.material || '')
+        .toLowerCase()
+        .includes(s) ||
+      String(r.EAN_norm || '')
+        .toLowerCase()
+        .includes(s) ||
+      String(r.lote || '')
+        .toLowerCase()
+        .includes(s) ||
+      String(r.desc || '')
+        .toLowerCase()
+        .includes(s)
+    );
+  }
+
+  function iaApplyDrill(rows) {
+    if (!iaDrill) return rows;
+    if (iaDrill === 'wms') return rows.filter((r) => r._estado === 'Só WMS');
+    if (iaDrill === 'sap') return rows.filter((r) => r._estado === 'Só SAP');
+    if (iaDrill === 'diverg') return rows.filter((r) => r._estado === 'Diverg.');
+    if (iaDrill === 'subir') return rows.filter((r) => r.diff > 0);
+    if (iaDrill === 'descer') return rows.filter((r) => r.diff < 0);
+    return rows;
+  }
+
+  /** Rows after cat/sub/search/(optional drill) — used by UI and Excel export. */
+  function getInventarioAcertoFilteredRows(opts) {
+    const skipDrill = !!(opts && opts.skipDrill);
+    let rows = buildInventarioAcertoRows();
+
+    const cats = [...new Set(rows.map((r) => r.cat).filter(Boolean))].sort();
+    if (typeof msUpdate === 'function') msUpdate('iaCat', cats, 'Categorias', 'renderInventarioAcertoPage');
+    const selCats = typeof msGet === 'function' ? msGet('iaCat') : new Set();
+    const subSrc = selCats.size ? rows.filter((r) => selCats.has(r.cat)) : rows;
+    const subs = [...new Set(subSrc.map((r) => r.subcat).filter(Boolean))].sort();
+    if (typeof msUpdate === 'function') msUpdate('iaSub', subs, 'Subcategorias', 'renderInventarioAcertoPage');
+    const selSubs = typeof msGet === 'function' ? msGet('iaSub') : new Set();
+
+    if (selCats.size) rows = rows.filter((r) => selCats.has(r.cat));
+    if (selSubs.size) rows = rows.filter((r) => selSubs.has(r.subcat));
+
+    const srchEl = document.getElementById('iaSrch');
+    const srch = (srchEl?.value || '').trim().toLowerCase();
+    if (srch) rows = rows.filter((r) => iaMatchSrch(srch, r));
+
+    if (!skipDrill) rows = iaApplyDrill(rows);
+    return rows;
+  }
+
+  function iaFmtSignedQty(n) {
+    if (n == null || !Number.isFinite(n)) return '—';
+    const abs = typeof fmtPtNum === 'function' ? fmtPtNum(Math.abs(n)) : String(Math.abs(n));
+    if (n > 0) return '+' + abs;
+    if (n < 0) return '-' + abs;
+    return abs;
+  }
+
+  function iaSetDrill(kind) {
+    iaDrill = iaDrill === kind ? null : kind;
+    renderInventarioAcertoPage();
+  }
+
+  function iaClearDrill() {
+    iaDrill = null;
+    renderInventarioAcertoPage();
   }
 
   function iaExcelSerialDate(d) {
@@ -353,89 +464,171 @@
       toast('Sem dados de conciliação — carrega SAP e Unilog', 'error');
       return;
     }
-    buildInventarioAcertoRows();
-    const totalLines = inventarioAcertoRows.length;
+    const filtered = getInventarioAcertoFilteredRows();
+    const totalLines = filtered.length;
     if (!totalLines) {
-      toast('Sem linhas com diferença nos depósitos 0008–0044 (ou sem código SAP)', 'info');
+      toast('Sem linhas com diferença nos filtros actuais (ou sem código SAP)', 'info');
       return;
     }
     try {
       const buf = await loadInventarioAcertoTemplate();
       const depotRowsMap = {};
-      let skippedNoMaterial = 0;
+      for (const dk of INVENTARIO_ACERTO_DEPOTS) depotRowsMap[dk] = [];
+      for (const r of filtered) {
+        if (!depotRowsMap[r.depot]) depotRowsMap[r.depot] = [];
+        depotRowsMap[r.depot].push(r);
+      }
       for (const dk of INVENTARIO_ACERTO_DEPOTS) {
-        const rows = buildAcertoRowsForDepot(dk);
-        skippedNoMaterial += rows._skippedNoMaterial || 0;
-        depotRowsMap[dk] = rows;
+        depotRowsMap[dk].sort((a, b) => {
+          const ma = a.material.localeCompare(b.material);
+          if (ma) return ma;
+          return (a.lote || '').localeCompare(b.lote || '');
+        });
       }
       const out = iaPatchTemplateXlsx(buf, depotRowsMap, iaExcelSerialDate(new Date()));
       iaDownloadXlsx(out, inventarioAcertoExportFilename());
-      let msg = 'Exportado: ' + totalLines + ' linhas de acerto';
-      if (skippedNoMaterial) msg += ' · ' + skippedNoMaterial + ' omitidas (sem código SAP)';
+      const valorTot = filtered.reduce((s, r) => s + (r.valor || 0), 0);
+      const fmtV =
+        typeof fmtBrlLiq === 'function' ? fmtBrlLiq(valorTot) : String(valorTot);
+      let msg = 'Exportado: ' + totalLines + ' linhas · valor acerto ' + fmtV;
+      const selCats = typeof msGet === 'function' ? msGet('iaCat') : new Set();
+      const selSubs = typeof msGet === 'function' ? msGet('iaSub') : new Set();
+      if (selCats.size || selSubs.size || iaDrill) msg += ' (filtrado)';
       toast(msg, 'success');
     } catch (e) {
       toast('Erro ao exportar: ' + (e.message || e), 'error');
     }
   }
 
-  function renderInventarioAcertoKpis(rows) {
+  function iaKpiClk(kind, htmlKv, label, sub) {
+    const active = iaDrill === kind ? ' active' : '';
+    return (
+      '<div class="kpi kpi-clk' +
+      active +
+      '" role="button" tabindex="0" title="Clica para filtrar" onclick="iaSetDrill(\'' +
+      kind +
+      '\')">' +
+      '<div class="kl">' +
+      label +
+      '</div><div class="kv clk-num">' +
+      htmlKv +
+      '</div><div class="ks">' +
+      sub +
+      '</div></div>'
+    );
+  }
+
+  function renderInventarioAcertoKpis(rows, allBeforeDrill) {
     const el = document.getElementById('iaKpis');
     if (!el) return;
-    if (!rows.length) {
+    if (!allBeforeDrill.length && !rows.length) {
       el.innerHTML = '';
       return;
     }
+    const base = allBeforeDrill.length ? allBeforeDrill : rows;
     const units = rows.reduce((s, r) => s + Math.abs(r.diff), 0);
-    const wmsOnly = rows.filter((r) => r.qt_wms > 0 && r.qt_sap === 0).length;
-    const sapOnly = rows.filter((r) => r.qt_sap > 0 && r.qt_wms === 0).length;
-    const both = rows.length - wmsOnly - sapOnly;
+    const valorTot = rows.reduce((s, r) => s + (r.valor || 0), 0);
+    const wmsOnly = base.filter((r) => r._estado === 'Só WMS').length;
+    const sapOnly = base.filter((r) => r._estado === 'Só SAP').length;
+    const both = base.filter((r) => r._estado === 'Diverg.').length;
+    const subir = base.filter((r) => r.diff > 0).length;
+    const descer = base.filter((r) => r.diff < 0).length;
+    const fmtN = typeof fmtKvNum === 'function' ? fmtKvNum : (n) => String(n);
+    const fmtV = typeof fmtKvBrlLiq === 'function' ? fmtKvBrlLiq : (v) => String(v);
+    const liqCls = typeof kvLiqCls === 'function' ? kvLiqCls(valorTot) : '';
+
     el.innerHTML =
+      '<div class="kpi" style="border-color:' +
+      (valorTot > 0 ? 'var(--yellow)' : valorTot < 0 ? 'var(--red)' : 'var(--border)') +
+      ';grid-column:span 2">' +
+      '<div class="kl">Valor final do acerto</div>' +
+      '<div class="kv ' +
+      liqCls +
+      '">' +
+      fmtV(valorTot) +
+      '</div>' +
+      '<div class="ks">Σ (Unilog−SAP)×preço SAP · vista filtrada · + = subir stock SAP</div></div>' +
       '<div class="kpi"><div class="kl">Linhas acerto</div><div class="kv">' +
-      (typeof fmtKvNum === 'function' ? fmtKvNum(rows.length) : rows.length) +
-      '</div><div class="ks">depósitos 0008–0044 · só diferenças</div></div>' +
-      '<div class="kpi"><div class="kl">Unidades |dif|</div><div class="kv">' +
-      (typeof fmtKvNum === 'function' ? fmtKvNum(units) : units) +
-      '</div><div class="ks">soma |WMS−SAP| por linha</div></div>' +
-      '<div class="kpi"><div class="kl">Só WMS</div><div class="kv b">' +
-      (typeof fmtKvNum === 'function' ? fmtKvNum(wmsOnly) : wmsOnly) +
-      '</div><div class="ks">H físico · I=0</div></div>' +
-      '<div class="kpi"><div class="kl">Só SAP / diverg.</div><div class="kv">' +
-      (typeof fmtKvNum === 'function' ? fmtKvNum(sapOnly) : sapOnly) +
-      ' / ' +
-      (typeof fmtKvNum === 'function' ? fmtKvNum(both) : both) +
-      '</div><div class="ks">SAP-only · ambos com stock</div></div>';
+      fmtN(rows.length) +
+      '</div><div class="ks">' +
+      (base.length !== rows.length ? fmtN(base.length) + ' antes do drill · ' : '') +
+      'depósitos 0008–0044</div></div>' +
+      '<div class="kpi"><div class="kl">Δ qty |líq|</div><div class="kv">' +
+      fmtN(units) +
+      '</div><div class="ks">soma |Unilog−SAP|</div></div>' +
+      iaKpiClk('subir', fmtN(subir), 'Subir SAP', 'Δ qty positiva') +
+      iaKpiClk('descer', fmtN(descer), 'Descer SAP', 'Δ qty negativa') +
+      iaKpiClk('wms', fmtN(wmsOnly), 'Só Unilog', 'H físico · I=0') +
+      iaKpiClk('sap', fmtN(sapOnly), 'Só SAP', 'H=0 · I SAP') +
+      iaKpiClk('diverg', fmtN(both), 'Divergência', 'ambos com stock');
   }
 
   function renderInventarioAcertoTable(rows) {
     const body = document.getElementById('iaBody');
     const empty = document.getElementById('iaEmpty');
+    const emptyMsg = document.getElementById('iaEmptyMsg');
     const wrap = document.getElementById('iaTableWrap');
     if (!body) return;
     if (!rows.length) {
       body.innerHTML = '';
       if (empty) empty.style.display = 'block';
       if (wrap) wrap.style.display = 'none';
+      if (emptyMsg) {
+        const hasFilt =
+          iaDrill ||
+          (typeof msGet === 'function' && (msGet('iaCat').size || msGet('iaSub').size)) ||
+          (document.getElementById('iaSrch')?.value || '').trim();
+        emptyMsg.textContent = hasFilt
+          ? 'Nenhuma linha com os filtros activos — limpa categoria/subcategoria ou o filtro do resumo'
+          : 'Carrega SAP e Unilog e processa — ou sem diferenças nos 5 depósitos';
+      }
       return;
     }
     if (empty) empty.style.display = 'none';
     if (wrap) wrap.style.display = '';
-    const sorted = typeof sorts !== 'undefined' && sorts.ia ? rows.slice() : rows;
+    const sorted = typeof sorts !== 'undefined' && sorts.ia ? rows.slice() : rows.slice();
     if (typeof sorts !== 'undefined' && sorts.ia && typeof applySort === 'function') applySort('ia', sorted);
+    else sorted.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+
+    const fmtNum = typeof fmtPtNum === 'function' ? fmtPtNum : (n) => n;
     body.innerHTML = sorted
       .map((r) => {
-        const estado =
-          r.qt_wms > 0 && r.qt_sap === 0
-            ? '<span class="badge binfo">Só WMS</span>'
-            : r.qt_sap > 0 && r.qt_wms === 0
+        const estadoBadge =
+          r._estado === 'Só WMS'
+            ? '<span class="badge binfo">Só Unilog</span>'
+            : r._estado === 'Só SAP'
               ? '<span class="badge bwarn">Só SAP</span>'
               : '<span class="badge bwarn">Diverg.</span>';
+        const dirBadge =
+          r.diff > 0
+            ? '<span class="badge bok">Subir</span>'
+            : r.diff < 0
+              ? '<span class="badge berr">Descer</span>'
+              : '—';
+        const diffCls = r.diff > 0 ? 'pos' : r.diff < 0 ? 'neg' : '';
+        const valorCls = r.valor > 0 ? 'pos' : r.valor < 0 ? 'neg' : '';
+        const valorTxt =
+          r._semValor || !(r.preco > 0)
+            ? '—'
+            : typeof fmtBrlLiq === 'function'
+              ? fmtBrlLiq(r.valor)
+              : r.valor;
         return (
           '<tr>' +
           '<td><span class="badge bgray">' +
           r.depotSheet +
           '</span></td>' +
+          '<td>' +
+          (r.cat || '—') +
+          '</td>' +
+          '<td>' +
+          (r.subcat || '—') +
+          '</td>' +
           '<td style="font-family:var(--mono);font-size:11px">' +
           r.material +
+          '</td>' +
+          '<td style="font-family:var(--mono);font-size:11px">' +
+          (r.EAN_norm || '—') +
           '</td>' +
           '<td class="col-desc">' +
           (r.desc || '—') +
@@ -444,16 +637,26 @@
           (r.lote || '—') +
           '</td>' +
           '<td class="num">' +
-          (typeof fmtPtNum === 'function' ? fmtPtNum(r.qt_wms) : r.qt_wms) +
+          fmtNum(r.qt_sap) +
           '</td>' +
           '<td class="num">' +
-          (typeof fmtPtNum === 'function' ? fmtPtNum(r.qt_sap) : r.qt_sap) +
+          fmtNum(r.qt_wms) +
           '</td>' +
-          '<td class="num">' +
-          (typeof fmtKvSigned === 'function' ? fmtKvSigned(r.diff) : r.diff) +
+          '<td class="num ' +
+          diffCls +
+          '">' +
+          iaFmtSignedQty(r.diff) +
+          '</td>' +
+          '<td class="num ' +
+          valorCls +
+          '">' +
+          valorTxt +
           '</td>' +
           '<td>' +
-          estado +
+          dirBadge +
+          '</td>' +
+          '<td>' +
+          estadoBadge +
           '</td>' +
           '</tr>'
         );
@@ -475,11 +678,26 @@
     }
     if (qbNote) qbNote.style.display = 'none';
     if (main) main.style.display = '';
-    const rows = buildInventarioAcertoRows();
-    renderInventarioAcertoKpis(rows);
+
+    const beforeDrill = getInventarioAcertoFilteredRows({ skipDrill: true });
+    const rows = iaApplyDrill(beforeDrill);
+
+    const banner = document.getElementById('iaFilterBanner');
+    const lbl = document.getElementById('iaFilterLbl');
+    if (banner && lbl) {
+      if (iaDrill) {
+        banner.style.display = 'flex';
+        lbl.textContent = IA_DRILL_LABELS[iaDrill] || iaDrill;
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+
+    renderInventarioAcertoKpis(rows, beforeDrill);
     renderInventarioAcertoTable(rows);
+
     const depCounts = INVENTARIO_ACERTO_DEPOTS.map((dk) => {
-      const n = buildAcertoRowsForDepot(dk).length;
+      const n = rows.filter((r) => r.depot === dk).length;
       return INVENTARIO_ACERTO_SHEETS[dk] + ': ' + n;
     }).join(' · ');
     const sub = document.getElementById('iaDepotCounts');
@@ -499,9 +717,12 @@
   global.INVENTARIO_ACERTO_JS_VERSION = INVENTARIO_ACERTO_JS_VERSION;
   global.INVENTARIO_ACERTO_DEPOTS = INVENTARIO_ACERTO_DEPOTS;
   global.buildInventarioAcertoRows = buildInventarioAcertoRows;
+  global.getInventarioAcertoFilteredRows = getInventarioAcertoFilteredRows;
   global.renderInventarioAcertoPage = renderInventarioAcertoPage;
   global.exportInventarioAcertoXlsx = exportInventarioAcertoXlsx;
   global.inventarioAcertoExportFilename = inventarioAcertoExportFilename;
   global.syncInventarioAcertoNav = syncInventarioAcertoNav;
   global.iaDoSort = iaDoSort;
+  global.iaSetDrill = iaSetDrill;
+  global.iaClearDrill = iaClearDrill;
 })(typeof window !== 'undefined' ? window : globalThis);
