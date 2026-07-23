@@ -1,7 +1,7 @@
 /* Mapa Acertos — doc. acerto sem valor (redistribuição EAN neto zero + sobras SAP→0044) */
 (function (global) {
   'use strict';
-  const MAPA_ACERTOS_JS_VERSION = '1.0.10';
+  const MAPA_ACERTOS_JS_VERSION = '1.0.11';
   /** @deprecated test filter removed — full SAP-stock scope. Kept empty for old callers. */
   const MA_TEST_MATERIALS = [];
   /** @deprecated */
@@ -382,8 +382,9 @@
   }
   function maFflateApi(f) {
     if (!f) return null;
-    const unzip = f.unzipSync || f.unzip;
-    const zip = f.zipSync || f.zip;
+    // Sync only — async zip/unzip return Promises and corrupt the download.
+    const unzip = f.unzipSync;
+    const zip = f.zipSync;
     if (!unzip || !zip || !f.strFromU8 || !f.strToU8) return null;
     return { unzip: unzip, zip: zip, strFromU8: f.strFromU8, strToU8: f.strToU8 };
   }
@@ -506,7 +507,8 @@
     const sm = m[1].match(/\bs="(\d+)"/);
     return sm ? sm[1] : fallback;
   }
-  function maJustification() {
+  function maJustification(row) {
+    if (row && row.justificacao) return String(row.justificacao);
     return 'acerto entre depositos';
   }
   /** Dif (+)/(−) from acerto adj: SUBIR → L; DESCER (SAP > física) → M absolute qty. */
@@ -613,7 +615,7 @@
     const descer = dif.descer;
     const existVal = preco > 0 ? maRound3(qtUni * preco) : null;
     const difVal = preco > 0 ? maRound3((subir - descer) * preco) : null;
-    const note = maJustification();
+    const note = maJustification(row);
 
     sheetXml = maSetRowHeight(sheetXml, rowNum, DATA_ROW_HEIGHT);
     sheetXml = maReplaceCell(sheetXml, 'A' + rowNum, maCellText('A' + rowNum, styles.A, row.material));
@@ -720,7 +722,7 @@
     const dif = maDifParts(row);
     const subir = dif.subir;
     const descer = dif.descer;
-    const note = maJustification();
+    const note = maJustification(row);
     // Plain cells — no style/fill copied from green sample rows.
     maSetCell(ws, 'A' + rowNum, { t: 's', v: String(row.material) });
     maSetCell(ws, 'B' + rowNum, { t: 's', v: String(row.desc || '') });
@@ -801,6 +803,42 @@
     return 'acerto_sem_valor_' + new Date().toISOString().slice(0, 10) + '.xlsx';
   }
 
+  /**
+   * Shared Excel emit pipeline (Mapa Acertos / Acerto Inventário).
+   * Same template + ZIP patch — callers only choose which rows go into each depot sheet.
+   * @returns {{ outBuf: Uint8Array, written: number, truncated: boolean, maxPerSheet: number, depotRowsMap: Object }}
+   */
+  async function maExportPatchedXlsx(rows, filename) {
+    const depotRowsMap = {};
+    var truncated = false;
+    const maxPerSheet = DATA_END_ROW - DATA_START_ROW + 1;
+    for (const dk of MAPA_ACERTOS_DEPOTS) depotRowsMap[dk] = [];
+    for (const r of rows) {
+      const list = depotRowsMap[r.depot];
+      if (!list) continue;
+      if (list.length >= maxPerSheet) { truncated = true; continue; }
+      list.push(r);
+    }
+    // Always re-fetch template (avoid stale ArrayBuffer)
+    mapaAcertosTemplateBuf = null;
+    const buf = await loadMapaAcertosTemplate();
+    const ff = await maEnsureFflate();
+    var outBuf;
+    if (ff) {
+      outBuf = maPatchTemplateXlsx(buf, depotRowsMap);
+    } else if (typeof XLSX !== 'undefined' && XLSX.read && XLSX.write) {
+      console.warn('[mapa-acertos] fflate indisponível — export via SheetJS');
+      outBuf = maPatchTemplateXlsxSheetJS(buf, depotRowsMap);
+    } else {
+      throw new Error('fflate não carregado — recarrega a página');
+    }
+    const written = MAPA_ACERTOS_DEPOTS.reduce(function (s, dk) {
+      return s + (depotRowsMap[dk] || []).length;
+    }, 0);
+    if (filename) maDownloadXlsx(outBuf, filename);
+    return { outBuf: outBuf, written: written, truncated: truncated, maxPerSheet: maxPerSheet, depotRowsMap: depotRowsMap };
+  }
+
   async function exportMapaAcertosXlsx() {
     if (typeof company !== 'undefined' && company !== 'DFB') {
       toast('Acerto sem valor disponível apenas para DFB', 'error');
@@ -824,36 +862,12 @@
       return;
     }
     try {
-      // Always re-fetch template (avoid stale ArrayBuffer after template ZIP fix)
-      mapaAcertosTemplateBuf = null;
-      const buf = await loadMapaAcertosTemplate();
-      const depotRowsMap = {};
-      var truncated = false;
-      const maxPerSheet = DATA_END_ROW - DATA_START_ROW + 1;
-      for (const dk of MAPA_ACERTOS_DEPOTS) depotRowsMap[dk] = [];
-      for (const r of rows) {
-        const list = depotRowsMap[r.depot];
-        if (!list) continue;
-        if (list.length >= maxPerSheet) { truncated = true; continue; }
-        list.push(r);
-      }
-      const ff = await maEnsureFflate();
-      var outBuf;
-      if (ff) {
-        outBuf = maPatchTemplateXlsx(buf, depotRowsMap);
-      } else if (typeof XLSX !== 'undefined' && XLSX.read && XLSX.write) {
-        console.warn('[mapa-acertos] fflate indisponível — export via SheetJS');
-        outBuf = maPatchTemplateXlsxSheetJS(buf, depotRowsMap);
-      } else {
-        throw new Error('fflate não carregado — recarrega a página');
-      }
-      const written = MAPA_ACERTOS_DEPOTS.reduce(function (s, dk) { return s + (depotRowsMap[dk] || []).length; }, 0);
-      maDownloadXlsx(outBuf, mapaAcertosExportFilename());
+      const result = await maExportPatchedXlsx(rows, mapaAcertosExportFilename());
       const subir = rows.reduce(function (s, r) { return s + r.subir; }, 0);
       const descer = rows.reduce(function (s, r) { return s + r.descer; }, 0);
-      var msg = 'Exportado: ' + written + ' linhas · subir ' + subir + ' / descer ' + descer + ' · neto qty/valor 0';
-      if (truncated) msg += ' · aviso: limite ' + maxPerSheet + ' linhas/folha (template)';
-      toast(msg, truncated ? 'info' : 'success');
+      var msg = 'Exportado: ' + result.written + ' linhas · subir ' + subir + ' / descer ' + descer + ' · neto qty/valor 0';
+      if (result.truncated) msg += ' · aviso: limite ' + result.maxPerSheet + ' linhas/folha (template)';
+      toast(msg, result.truncated ? 'info' : 'success');
       renderMapaAcertosPage();
     } catch (e) {
       toast('Erro ao exportar: ' + (e.message || e), 'error');
@@ -961,6 +975,11 @@
   global.renderMapaAcertosPage = renderMapaAcertosPage;
   global.exportMapaAcertosXlsx = exportMapaAcertosXlsx;
   global.mapaAcertosExportFilename = mapaAcertosExportFilename;
+  global.maExportPatchedXlsx = maExportPatchedXlsx;
+  global.maPatchTemplateXlsx = maPatchTemplateXlsx;
+  global.maPatchTemplateXlsxSheetJS = maPatchTemplateXlsxSheetJS;
+  global.loadMapaAcertosTemplate = loadMapaAcertosTemplate;
+  global.maDownloadXlsx = maDownloadXlsx;
   global.maDoSort = maDoSort;
   global.maBalanceGaps = maBalanceGaps;
   global.maMoveExcessTo0044 = maMoveExcessTo0044;
@@ -970,4 +989,6 @@
   global.maTestMaterialsLabel = maTestMaterialsLabel;
   global.MAPA_ACERTOS_DEPOT_SOBRA = MAPA_ACERTOS_DEPOT_SOBRA;
   global.MAPA_ACERTOS_DATA_START_ROW = DATA_START_ROW;
+  global.MAPA_ACERTOS_DATA_END_ROW = DATA_END_ROW;
+  global.MAPA_ACERTOS_TEMPLATE_URL = TEMPLATE_URL;
 })(typeof window !== 'undefined' ? window : globalThis);
