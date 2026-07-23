@@ -2,7 +2,7 @@
 (function (global) {
   'use strict';
 
-  const INVENTARIO_ACERTO_JS_VERSION = '1.0.7';
+  const INVENTARIO_ACERTO_JS_VERSION = '1.0.8';
   const INVENTARIO_ACERTO_DEPOTS = ['8', '9', '11', '22', '44'];
   const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
   const DATA_START_ROW = 9;
@@ -507,12 +507,14 @@
       el.innerHTML = '';
       return;
     }
-    // |Δ| so subir+descer não se anulam — total de unidades a acertar
-    const units = rows.reduce((s, r) => s + Math.abs(r.diff), 0);
+    // Saldo líquido assinado (mesmo sinal que o valor) — subir e descer anulam-se
+    const units = rows.reduce((s, r) => s + (Number(r.diff) || 0), 0);
     const valorTot = rows.reduce((s, r) => s + (r.valor || 0), 0);
-    const fmtN = typeof fmtKvNum === 'function' ? fmtKvNum : (n) => String(n);
     const fmtV = typeof fmtKvBrlLiq === 'function' ? fmtKvBrlLiq : (v) => String(v);
+    const fmtQ =
+      typeof fmtKv === 'function' ? (n) => fmtKv(iaFmtSignedQty(n)) : iaFmtSignedQty;
     const liqCls = typeof kvLiqCls === 'function' ? kvLiqCls(valorTot) : '';
+    const qtyCls = typeof kvLiqCls === 'function' ? kvLiqCls(units) : '';
 
     el.innerHTML =
       '<div class="kpi" style="border-color:' +
@@ -525,12 +527,16 @@
       fmtV(valorTot) +
       '</div>' +
       '<div class="ks">Σ (Unilog−SAP)×preço SAP · vista filtrada · + = subir stock SAP</div></div>' +
-      '<div class="kpi" style="grid-column:span 2">' +
-      '<div class="kl">Total acerto (qtd)</div>' +
-      '<div class="kv">' +
-      fmtN(units) +
+      '<div class="kpi" style="border-color:' +
+      (units > 0 ? 'var(--yellow)' : units < 0 ? 'var(--red)' : 'var(--border)') +
+      ';grid-column:span 2">' +
+      '<div class="kl">Saldo final (qtd)</div>' +
+      '<div class="kv ' +
+      qtyCls +
+      '">' +
+      fmtQ(units) +
       '</div>' +
-      '<div class="ks">soma |Unilog−SAP| · total qtd a acertar</div></div>';
+      '<div class="ks">Σ (Unilog−SAP) · vista filtrada · + = subir stock SAP</div></div>';
   }
 
   function renderInventarioAcertoTable(rows) {
