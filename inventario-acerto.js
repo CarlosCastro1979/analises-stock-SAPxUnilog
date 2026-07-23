@@ -2,7 +2,7 @@
 (function (global) {
   'use strict';
 
-  const INVENTARIO_ACERTO_JS_VERSION = '1.0.5';
+  const INVENTARIO_ACERTO_JS_VERSION = '1.0.6';
   const INVENTARIO_ACERTO_DEPOTS = ['8', '9', '11', '22', '44'];
   const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
   const DATA_START_ROW = 9;
@@ -705,9 +705,15 @@
   }
 
   function syncInventarioAcertoNav() {
-    const nt = document.getElementById('nt-inventario-acerto');
-    if (!nt) return;
-    nt.style.display = typeof company !== 'undefined' && company === 'DFB' ? '' : 'none';
+    const it = document.getElementById('it-inventario-acerto');
+    if (!it) return;
+    const show = typeof company !== 'undefined' && company === 'DFB';
+    it.style.display = show ? '' : 'none';
+    // If QB hides this tab while it is active, fall back to Por Lote
+    if (!show && it.classList.contains('active')) {
+      const loteTab = document.querySelector('#reconIts .it');
+      if (loteTab && typeof reconTab === 'function') reconTab('lote', loteTab);
+    }
   }
 
   function iaDoSort(col) {
