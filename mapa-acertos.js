@@ -594,7 +594,7 @@
       if (dif.descer > 0) {
         if (new RegExp('<c r="M' + rowNum + '"[^>]*>\\s*<v>' + String(dif.descer).replace('.', '\\.') + '</v>').test(sheetXml)) m++;
       }
-      if (sheetXml.indexOf('acerto entre depositos') >= 0) o = 1;
+      if (sheetXml.indexOf('acerto entre depositos') >= 0 || sheetXml.indexOf('acerto invent') >= 0) o = 1;
     }
     try {
       console.log('[mapa-acertos] sheet ' + sheetName + ' verify L<' + l + '> M<' + m + '> Otext=' + !!o + ' rows=' + n);
@@ -666,6 +666,27 @@
     _maLastFilled[sheetName] = n;
     return sheetXml;
   }
+  /** Drop calcChain after rewriting data cells — stale formula refs trigger Excel "LIVRO REPARADO". */
+  function maStripCalcChain(files, strFromU8, strToU8) {
+    Object.keys(files).forEach(function (k) {
+      if (/calcChain\.xml$/i.test(String(k).replace(/\\/g, '/'))) delete files[k];
+    });
+    const relsPath = 'xl/_rels/workbook.xml.rels';
+    const relsU8 = maZipGet(files, relsPath);
+    if (relsU8) {
+      var rels = strFromU8(relsU8);
+      rels = rels.replace(/<Relationship[^>]*calcChain[^>]*\/?>/gi, '');
+      files[relsPath] = strToU8(rels);
+    }
+    const ctPath = '[Content_Types].xml';
+    const ctU8 = maZipGet(files, ctPath);
+    if (ctU8) {
+      var ct = strFromU8(ctU8);
+      ct = ct.replace(/<Override[^>]*calcChain[^>]*\/>/gi, '');
+      files[ctPath] = strToU8(ct);
+    }
+  }
+
   function maPatchTemplateXlsx(templateBuf, depotRowsMap) {
     const ff = maFflate();
     const files = maNormalizeZipFiles(ff.unzip(new Uint8Array(templateBuf)));
@@ -692,6 +713,7 @@
       patched++;
     }
     if (!patched) throw new Error('Nenhuma folha do Mapa Acertos foi escrita');
+    maStripCalcChain(files, ff.strFromU8, ff.strToU8);
     return ff.zip(files);
   }
 
