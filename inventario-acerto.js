@@ -2,7 +2,7 @@
 (function (global) {
   'use strict';
 
-  const INVENTARIO_ACERTO_JS_VERSION = '1.0.6';
+  const INVENTARIO_ACERTO_JS_VERSION = '1.0.7';
   const INVENTARIO_ACERTO_DEPOTS = ['8', '9', '11', '22', '44'];
   const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
   const DATA_START_ROW = 9;
@@ -500,39 +500,16 @@
     }
   }
 
-  function iaKpiClk(kind, htmlKv, label, sub) {
-    const active = iaDrill === kind ? ' active' : '';
-    return (
-      '<div class="kpi kpi-clk' +
-      active +
-      '" role="button" tabindex="0" title="Clica para filtrar" onclick="iaSetDrill(\'' +
-      kind +
-      '\')">' +
-      '<div class="kl">' +
-      label +
-      '</div><div class="kv clk-num">' +
-      htmlKv +
-      '</div><div class="ks">' +
-      sub +
-      '</div></div>'
-    );
-  }
-
-  function renderInventarioAcertoKpis(rows, allBeforeDrill) {
+  function renderInventarioAcertoKpis(rows) {
     const el = document.getElementById('iaKpis');
     if (!el) return;
-    if (!allBeforeDrill.length && !rows.length) {
+    if (!rows.length) {
       el.innerHTML = '';
       return;
     }
-    const base = allBeforeDrill.length ? allBeforeDrill : rows;
+    // |Δ| so subir+descer não se anulam — total de unidades a acertar
     const units = rows.reduce((s, r) => s + Math.abs(r.diff), 0);
     const valorTot = rows.reduce((s, r) => s + (r.valor || 0), 0);
-    const wmsOnly = base.filter((r) => r._estado === 'Só WMS').length;
-    const sapOnly = base.filter((r) => r._estado === 'Só SAP').length;
-    const both = base.filter((r) => r._estado === 'Diverg.').length;
-    const subir = base.filter((r) => r.diff > 0).length;
-    const descer = base.filter((r) => r.diff < 0).length;
     const fmtN = typeof fmtKvNum === 'function' ? fmtKvNum : (n) => String(n);
     const fmtV = typeof fmtKvBrlLiq === 'function' ? fmtKvBrlLiq : (v) => String(v);
     const liqCls = typeof kvLiqCls === 'function' ? kvLiqCls(valorTot) : '';
@@ -548,19 +525,12 @@
       fmtV(valorTot) +
       '</div>' +
       '<div class="ks">Σ (Unilog−SAP)×preço SAP · vista filtrada · + = subir stock SAP</div></div>' +
-      '<div class="kpi"><div class="kl">Linhas acerto</div><div class="kv">' +
-      fmtN(rows.length) +
-      '</div><div class="ks">' +
-      (base.length !== rows.length ? fmtN(base.length) + ' antes do drill · ' : '') +
-      'depósitos 0008–0044</div></div>' +
-      '<div class="kpi"><div class="kl">Δ qty |líq|</div><div class="kv">' +
+      '<div class="kpi" style="grid-column:span 2">' +
+      '<div class="kl">Total acerto (qtd)</div>' +
+      '<div class="kv">' +
       fmtN(units) +
-      '</div><div class="ks">soma |Unilog−SAP|</div></div>' +
-      iaKpiClk('subir', fmtN(subir), 'Subir SAP', 'Δ qty positiva') +
-      iaKpiClk('descer', fmtN(descer), 'Descer SAP', 'Δ qty negativa') +
-      iaKpiClk('wms', fmtN(wmsOnly), 'Só Unilog', 'H físico · I=0') +
-      iaKpiClk('sap', fmtN(sapOnly), 'Só SAP', 'H=0 · I SAP') +
-      iaKpiClk('diverg', fmtN(both), 'Divergência', 'ambos com stock');
+      '</div>' +
+      '<div class="ks">soma |Unilog−SAP| · total qtd a acertar</div></div>';
   }
 
   function renderInventarioAcertoTable(rows) {
@@ -693,7 +663,7 @@
       }
     }
 
-    renderInventarioAcertoKpis(rows, beforeDrill);
+    renderInventarioAcertoKpis(rows);
     renderInventarioAcertoTable(rows);
 
     const depCounts = INVENTARIO_ACERTO_DEPOTS.map((dk) => {
