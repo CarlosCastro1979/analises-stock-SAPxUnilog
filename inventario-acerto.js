@@ -116,10 +116,12 @@
 
   function iaFflate() {
     const f = typeof fflate !== 'undefined' ? fflate : global.fflate;
-    if (!f?.unzip || !f?.zip || !f?.strFromU8 || !f?.strToU8) {
+    const unzip = f?.unzipSync || f?.unzip;
+    const zip = f?.zipSync || f?.zip;
+    if (!unzip || !zip || !f?.strFromU8 || !f?.strToU8) {
       throw new Error('fflate não carregado — recarrega a página');
     }
-    return f;
+    return { unzip, zip, strFromU8: f.strFromU8, strToU8: f.strToU8 };
   }
 
   function iaBuildSheetPathMap(files) {
