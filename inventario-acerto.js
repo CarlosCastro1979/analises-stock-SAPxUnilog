@@ -2,9 +2,10 @@
 (function (global) {
   'use strict';
 
-  const INVENTARIO_ACERTO_JS_VERSION = '1.0.8';
+  const INVENTARIO_ACERTO_JS_VERSION = '1.0.9';
   const INVENTARIO_ACERTO_DEPOTS = ['8', '9', '11', '22', '44'];
   const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
+  /** Headers 1–8; data from row 9. Cols: A Mat · B Desc · C Lote · D Preço · E UMB · F Dep · H Unilog · I SAP · J D×H · K/L H−I · M L×D */
   const DATA_START_ROW = 9;
   const DATE_CELL = 'L5';
   const DEPOT_CELL = 'M3';
@@ -227,30 +228,59 @@
 
   function iaFflate() {
     const f = typeof fflate !== 'undefined' ? fflate : global.fflate;
-    const unzip = f?.unzipSync || f?.unzip;
-    const zip = f?.zipSync || f?.zip;
-    if (!unzip || !zip || !f?.strFromU8 || !f?.strToU8) {
+    // Require Sync APIs — async zip returns a Promise and produces a corrupt download.
+    const unzip = f && f.unzipSync;
+    const zip = f && f.zipSync;
+    if (!unzip || !zip || !f.strFromU8 || !f.strToU8) {
       throw new Error('fflate não carregado — recarrega a página');
     }
-    return { unzip, zip, strFromU8: f.strFromU8, strToU8: f.strToU8 };
+    return { unzip: unzip, zip: zip, strFromU8: f.strFromU8, strToU8: f.strToU8 };
+  }
+
+  /** Windows Zip may store backslashes; fflate keeps them → xl/workbook.xml lookups miss. */
+  function iaNormalizeZipFiles(files) {
+    const out = {};
+    Object.keys(files).forEach(function (k) {
+      const nk = String(k).replace(/\\/g, '/');
+      if (!out[nk] || k === nk) out[nk] = files[k];
+    });
+    return out;
+  }
+  function iaZipGet(files, path) {
+    if (files[path]) return files[path];
+    return files[path.replace(/\//g, '\\')] || null;
   }
 
   function iaBuildSheetPathMap(files) {
     const { strFromU8 } = iaFflate();
-    const wb = strFromU8(files['xl/workbook.xml']);
-    const rels = strFromU8(files['xl/_rels/workbook.xml.rels']);
+    const wbU8 = iaZipGet(files, 'xl/workbook.xml');
+    const relsU8 = iaZipGet(files, 'xl/_rels/workbook.xml.rels');
+    if (!wbU8 || !relsU8) {
+      throw new Error('Template ZIP inválido — workbook.xml / rels em falta');
+    }
+    const wb = strFromU8(wbU8);
+    const rels = strFromU8(relsU8);
     const relMap = {};
-    const relRe = /<Relationship[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"[^>]*\/?>/g;
     let m;
+    const relRe = /<Relationship[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"[^>]*\/?>/g;
     while ((m = relRe.exec(rels))) {
-      const target = m[2].replace(/^\//, '');
-      relMap[m[1]] = target.startsWith('xl/') ? target : 'xl/' + target;
+      var target = m[2].replace(/^\//, '').replace(/\\/g, '/');
+      relMap[m[1]] = target.indexOf('xl/') === 0 ? target : 'xl/' + target;
+    }
+    const relRe2 = /<Relationship[^>]*\bTarget="([^"]+)"[^>]*\bId="([^"]+)"[^>]*\/?>/g;
+    while ((m = relRe2.exec(rels))) {
+      if (relMap[m[2]]) continue;
+      var t2 = m[1].replace(/^\//, '').replace(/\\/g, '/');
+      relMap[m[2]] = t2.indexOf('xl/') === 0 ? t2 : 'xl/' + t2;
     }
     const sheetMap = {};
-    const sheetRe = /<sheet[^>]*\bname="([^"]+)"[^>]*\br:id="([^"]+)"[^>]*\/?>/g;
-    while ((m = sheetRe.exec(wb))) {
-      const path = relMap[m[2]];
-      if (path) sheetMap[m[1]] = path;
+    const sheetTagRe = /<sheet\b[^>]*\/?>/g;
+    while ((m = sheetTagRe.exec(wb))) {
+      const tag = m[0];
+      const nm = tag.match(/\bname="([^"]+)"/);
+      const rid = tag.match(/\br:id="([^"]+)"/);
+      if (!nm || !rid || !relMap[rid[1]]) continue;
+      sheetMap[nm[1]] = relMap[rid[1]];
     }
     return sheetMap;
   }
@@ -269,6 +299,19 @@
     return xml;
   }
 
+  function iaCellStyleAttr(rowXml, col, rowNum) {
+    const m = rowXml.match(new RegExp('<c r="' + col + rowNum + '"([^>/]*)'));
+    if (!m) return '';
+    const sm = m[1].match(/\bs="(\d+)"/);
+    return sm ? ' s="' + sm[1] + '"' : '';
+  }
+
+  function iaReplaceWholeCell(rowXml, col, rowNum, cellXml) {
+    const re = new RegExp('<c r="' + col + rowNum + '"(?:[^>/]*/>|[^>]*>(?:[\\s\\S]*?)</c>)');
+    if (re.test(rowXml)) return rowXml.replace(re, cellXml);
+    return rowXml.replace('</row>', cellXml + '</row>');
+  }
+
   function iaPatchCellXml(sheetXml, addr, innerXml, typeAttr) {
     const cellRe = new RegExp('<c r="' + addr + '"([^>/]*)(?:/>|>[\\s\\S]*?</c>)');
     const m = sheetXml.match(cellRe);
@@ -277,93 +320,126 @@
     return sheetXml.replace(cellRe, '<c r="' + addr + '"' + attrs + '>' + innerXml + '</c>');
   }
 
-  function iaReplaceCellInner(rowXml, col, rowNum, inner, extraAttrs) {
-    const addr = col + rowNum;
-    const cellRe = new RegExp('<c r="' + addr + '"([^>/]*)(?:/>|>[\\s\\S]*?</c>)');
-    const m = rowXml.match(cellRe);
-    if (!m) return rowXml;
-    let attrs = m[1];
-    if (extraAttrs && /t="/.test(extraAttrs)) attrs = attrs.replace(/\s*t="[^"]*"/g, '');
-    attrs += extraAttrs || '';
-    return rowXml.replace(cellRe, '<c r="' + addr + '"' + attrs + '>' + inner + '</c>');
+  /**
+   * Fill one data row with plain values (no shared formulas).
+   * Shared-formula rewrite + stale xl/calcChain.xml was corrupting the xlsx
+   * (Excel: "Só de Leitura - Reparado" / empty sheets).
+   */
+  function iaFillDataRow(rowXml, rowNum, row, sheetName) {
+    // Drop any formula nodes left from the prototype row
+    rowXml = rowXml.replace(/<f\b[^>]*\/>/g, '').replace(/<f\b[^>]*>[\s\S]*?<\/f>/g, '');
+
+    const preco = Number(row.preco) > 0 ? Number(row.preco) : 0;
+    const h = Number(row.qt_wms) || 0;
+    const i = Number(row.qt_sap) || 0;
+    const jv = preco > 0 ? preco * h : 0;
+    const kv = h - i;
+    const mv = preco > 0 ? kv * preco : 0;
+    const st = function (col) {
+      return iaCellStyleAttr(rowXml, col, rowNum);
+    };
+
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'A',
+      rowNum,
+      '<c r="A' + rowNum + '"' + st('A') + ' t="inlineStr"><is><t>' + iaXmlEsc(row.material) + '</t></is></c>'
+    );
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'B',
+      rowNum,
+      '<c r="B' + rowNum + '"' + st('B') + ' t="inlineStr"><is><t>' + iaXmlEsc(row.desc || '') + '</t></is></c>'
+    );
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'C',
+      rowNum,
+      row.lote
+        ? '<c r="C' + rowNum + '"' + st('C') + ' t="inlineStr"><is><t>' + iaXmlEsc(row.lote) + '</t></is></c>'
+        : '<c r="C' + rowNum + '"' + st('C') + '/>'
+    );
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'D',
+      rowNum,
+      preco > 0
+        ? '<c r="D' + rowNum + '"' + st('D') + '><v>' + preco + '</v></c>'
+        : '<c r="D' + rowNum + '"' + st('D') + '/>'
+    );
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'E',
+      rowNum,
+      '<c r="E' + rowNum + '"' + st('E') + ' t="inlineStr"><is><t>' + iaXmlEsc(row.umb || 'UN') + '</t></is></c>'
+    );
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'F',
+      rowNum,
+      '<c r="F' + rowNum + '"' + st('F') + ' t="inlineStr"><is><t>' + iaXmlEsc(sheetName) + '</t></is></c>'
+    );
+    rowXml = iaReplaceWholeCell(rowXml, 'G', rowNum, '<c r="G' + rowNum + '"' + st('G') + '/>');
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'H',
+      rowNum,
+      '<c r="H' + rowNum + '"' + st('H') + '><v>' + h + '</v></c>'
+    );
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'I',
+      rowNum,
+      '<c r="I' + rowNum + '"' + st('I') + '><v>' + i + '</v></c>'
+    );
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'J',
+      rowNum,
+      preco > 0
+        ? '<c r="J' + rowNum + '"' + st('J') + '><v>' + jv + '</v></c>'
+        : '<c r="J' + rowNum + '"' + st('J') + '/>'
+    );
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'K',
+      rowNum,
+      '<c r="K' + rowNum + '"' + st('K') + '><v>' + kv + '</v></c>'
+    );
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'L',
+      rowNum,
+      '<c r="L' + rowNum + '"' + st('L') + '><v>' + kv + '</v></c>'
+    );
+    rowXml = iaReplaceWholeCell(
+      rowXml,
+      'M',
+      rowNum,
+      preco > 0
+        ? '<c r="M' + rowNum + '"' + st('M') + '><v>' + mv + '</v></c>'
+        : '<c r="M' + rowNum + '"' + st('M') + '/>'
+    );
+    return rowXml;
   }
 
-  function iaFillDataRow(rowXml, rowNum, row, sheetName, isFirst, lastRow) {
-    const jv = row.preco > 0 ? row.preco * row.qt_wms : 0;
-    const kv = row.qt_wms - row.qt_sap;
-    const mv = kv * (row.preco > 0 ? row.preco : 0);
-
-    rowXml = iaReplaceCellInner(rowXml, 'A', rowNum, '<is><t>' + iaXmlEsc(row.material) + '</t></is>', ' t="inlineStr"');
-    rowXml = iaReplaceCellInner(rowXml, 'B', rowNum, '<is><t>' + iaXmlEsc(row.desc) + '</t></is>', ' t="inlineStr"');
-
-    if (row.lote) {
-      rowXml = iaReplaceCellInner(rowXml, 'C', rowNum, '<is><t>' + iaXmlEsc(row.lote) + '</t></is>', ' t="inlineStr"');
-    } else {
-      rowXml = iaReplaceCellInner(rowXml, 'C', rowNum, '', '');
+  function iaVerifySheetPatched(sheetXml, sheetName, dataRows) {
+    if (!dataRows.length) return;
+    const a9 = sheetXml.match(
+      new RegExp('<c r="A' + DATA_START_ROW + '"[^>]*>[\\s\\S]*?</c>|<c r="A' + DATA_START_ROW + '"[^>]*/>')
+    );
+    const hasMat = a9 && /<(?:v|t|is)>/.test(a9[0]);
+    if (!hasMat) {
+      throw new Error('Export sheet ' + sheetName + ': A' + DATA_START_ROW + ' sem dados após patch — abortado');
     }
-
-    if (row.preco > 0) {
-      rowXml = iaReplaceCellInner(rowXml, 'D', rowNum, '<v>' + row.preco + '</v>', '');
-    } else {
-      rowXml = iaReplaceCellInner(rowXml, 'D', rowNum, '', '');
+    const rowRe = /<row r="(\d+)"[\s\S]*?<\/row>/g;
+    let m;
+    while ((m = rowRe.exec(sheetXml))) {
+      if (parseInt(m[1], 10) < DATA_START_ROW) continue;
+      if (/t="shared"/.test(m[0])) {
+        throw new Error('Export sheet ' + sheetName + ': fórmulas partilhadas residuais — abortado');
+      }
     }
-
-    rowXml = iaReplaceCellInner(rowXml, 'E', rowNum, '<is><t>' + iaXmlEsc(row.umb || 'UN') + '</t></is>', ' t="inlineStr"');
-
-    if (isFirst) {
-      rowXml = iaReplaceCellInner(
-        rowXml,
-        'F',
-        rowNum,
-        '<f t="shared" ref="F' + rowNum + ':F' + lastRow + '" si="0">+$M$3</f><v>' + iaXmlEsc(sheetName) + '</v>',
-        ' t="str"'
-      );
-      rowXml = iaReplaceCellInner(
-        rowXml,
-        'J',
-        rowNum,
-        '<f t="shared" ref="J' + rowNum + ':J' + lastRow + '" si="1">D' + rowNum + '*H' + rowNum + '</f><v>' + jv + '</v>',
-        ''
-      );
-      rowXml = iaReplaceCellInner(
-        rowXml,
-        'K',
-        rowNum,
-        '<f t="shared" ref="K' + rowNum + ':K' + lastRow + '" si="2">H' + rowNum + '-I' + rowNum + '</f><v>' + kv + '</v>',
-        ''
-      );
-      rowXml = iaReplaceCellInner(
-        rowXml,
-        'L',
-        rowNum,
-        '<f t="shared" ref="L' + rowNum + ':L' + lastRow + '" si="3">H' + rowNum + '-I' + rowNum + '</f><v>' + kv + '</v>',
-        ''
-      );
-      rowXml = iaReplaceCellInner(
-        rowXml,
-        'M',
-        rowNum,
-        '<f t="shared" ref="M' + rowNum + ':M' + lastRow + '" si="4">L' + rowNum + '*D' + rowNum + '</f><v>' + mv + '</v>',
-        ''
-      );
-    } else {
-      rowXml = iaReplaceCellInner(
-        rowXml,
-        'F',
-        rowNum,
-        '<f t="shared" si="0"/><v>' + iaXmlEsc(sheetName) + '</v>',
-        ' t="str"'
-      );
-      rowXml = iaReplaceCellInner(rowXml, 'J', rowNum, '<f t="shared" si="1"/><v>' + jv + '</v>', '');
-      rowXml = iaReplaceCellInner(rowXml, 'K', rowNum, '<f t="shared" si="2"/><v>' + kv + '</v>', '');
-      rowXml = iaReplaceCellInner(rowXml, 'L', rowNum, '<f t="shared" si="3"/><v>' + kv + '</v>', '');
-      rowXml = iaReplaceCellInner(rowXml, 'M', rowNum, '<f t="shared" si="4"/><v>' + mv + '</v>', '');
-    }
-
-    rowXml = iaReplaceCellInner(rowXml, 'H', rowNum, '<v>' + row.qt_wms + '</v>', '');
-    rowXml = iaReplaceCellInner(rowXml, 'I', rowNum, '<v>' + row.qt_sap + '</v>', '');
-    rowXml = iaReplaceCellInner(rowXml, 'G', rowNum, '', '');
-    return rowXml;
   }
 
   function iaPatchSheetXml(sheetXml, sheetName, dataRows, dateSerial) {
@@ -374,6 +450,10 @@
       ' t="inlineStr"'
     );
     sheetXml = iaPatchCellXml(sheetXml, DATE_CELL, '<v>' + dateSerial + '</v>', '');
+
+    // Stale autoFilter ranges from the PT sample cause Excel repair noise
+    sheetXml = sheetXml.replace(/<autoFilter\b[^>]*\/>/g, '');
+    sheetXml = sheetXml.replace(/<autoFilter\b[^>]*>[\s\S]*?<\/autoFilter>/g, '');
 
     const protoFirst = iaExtractRowXml(sheetXml, DATA_START_ROW);
     const protoNext = iaExtractRowXml(sheetXml, DATA_START_ROW + 1) || protoFirst;
@@ -392,12 +472,12 @@
 
     const lastRow = dataRows.length ? DATA_START_ROW + dataRows.length - 1 : DATA_START_ROW - 1;
     const newDataRows = [];
-    dataRows.forEach((row, i) => {
+    dataRows.forEach(function (row, i) {
       const rowNum = DATA_START_ROW + i;
       const proto = i === 0 ? protoFirst : protoNext;
       const srcRow = i === 0 ? DATA_START_ROW : DATA_START_ROW + 1;
       let rowXml = iaRemapRowXml(proto, srcRow, rowNum);
-      rowXml = iaFillDataRow(rowXml, rowNum, row, sheetName, i === 0, Math.max(lastRow, DATA_START_ROW));
+      rowXml = iaFillDataRow(rowXml, rowNum, row, sheetName);
       newDataRows.push(rowXml);
     });
 
@@ -412,21 +492,68 @@
       return '<dimension ref="' + (parts[0] || 'A1') + ':' + endCol + endRow + '"';
     });
 
+    iaVerifySheetPatched(sheetXml, sheetName, dataRows);
     return sheetXml;
+  }
+
+  /** Drop calcChain — it still points at template shared formulas after we rewrite sheetData. */
+  function iaStripCalcChain(files, strFromU8, strToU8) {
+    Object.keys(files).forEach(function (k) {
+      if (/calcChain\.xml$/i.test(String(k).replace(/\\/g, '/'))) delete files[k];
+    });
+    const relsPath = 'xl/_rels/workbook.xml.rels';
+    const relsU8 = iaZipGet(files, relsPath);
+    if (relsU8) {
+      let rels = strFromU8(relsU8);
+      rels = rels.replace(/<Relationship[^>]*calcChain[^>]*\/?>/gi, '');
+      files[relsPath] = strToU8(rels);
+    }
+    const ctPath = '[Content_Types].xml';
+    const ctU8 = iaZipGet(files, ctPath);
+    if (ctU8) {
+      let ct = strFromU8(ctU8);
+      ct = ct.replace(/<Override[^>]*calcChain[^>]*\/>/gi, '');
+      files[ctPath] = strToU8(ct);
+    }
+  }
+
+  function iaStripStaleDefinedNames(files, strFromU8, strToU8) {
+    const wbPath = 'xl/workbook.xml';
+    const wbU8 = iaZipGet(files, wbPath);
+    if (!wbU8) return;
+    let wb = strFromU8(wbU8);
+    wb = wb.replace(/<definedNames>[\s\S]*?<\/definedNames>/g, '<definedNames/>');
+    files[wbPath] = strToU8(wb);
   }
 
   function iaPatchTemplateXlsx(templateBuf, depotRowsMap, dateSerial) {
     const { unzip, zip, strFromU8, strToU8 } = iaFflate();
-    const files = unzip(new Uint8Array(templateBuf));
+    const files = iaNormalizeZipFiles(unzip(new Uint8Array(templateBuf)));
     const sheetPaths = iaBuildSheetPathMap(files);
+    if (!Object.keys(sheetPaths).length) {
+      throw new Error('Template sem folhas mapeadas (workbook sheet/rId)');
+    }
 
+    var patched = 0;
     for (const dk of INVENTARIO_ACERTO_DEPOTS) {
       const sheetName = INVENTARIO_ACERTO_SHEETS[dk];
       const path = sheetPaths[sheetName];
-      if (!path || !files[path]) continue;
-      const xml = strFromU8(files[path]);
-      files[path] = strToU8(iaPatchSheetXml(xml, sheetName, depotRowsMap[dk] || [], dateSerial));
+      const sheetU8 = path ? iaZipGet(files, path) : null;
+      if (!path || !sheetU8) {
+        if ((depotRowsMap[dk] || []).length) {
+          throw new Error('Folha ' + sheetName + ' em falta no template ZIP');
+        }
+        continue;
+      }
+      files[path] = strToU8(
+        iaPatchSheetXml(strFromU8(sheetU8), sheetName, depotRowsMap[dk] || [], dateSerial)
+      );
+      patched++;
     }
+    if (!patched) throw new Error('Nenhuma folha do Acerto Inventário foi escrita');
+
+    iaStripCalcChain(files, strFromU8, strToU8);
+    iaStripStaleDefinedNames(files, strFromU8, strToU8);
 
     return zip(files);
   }
@@ -451,8 +578,11 @@
   }
 
   function inventarioAcertoExportFilename() {
-    const d = new Date().toISOString().slice(0, 10);
-    return 'Inventario_DFB_acerto_inventario_' + d + '.xlsx';
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return 'Inventario_DFB_acerto_inventario_' + yyyy + '-' + mm + '-' + dd + '.xlsx';
   }
 
   async function exportInventarioAcertoXlsx() {
@@ -471,6 +601,8 @@
       return;
     }
     try {
+      // Always re-fetch template (avoid stale ArrayBuffer)
+      inventarioAcertoTemplateBuf = null;
       const buf = await loadInventarioAcertoTemplate();
       const depotRowsMap = {};
       for (const dk of INVENTARIO_ACERTO_DEPOTS) depotRowsMap[dk] = [];
