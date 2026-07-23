@@ -222,6 +222,7 @@
         preco: Number(r.preco) || 0,
         qt_uni: Number(r.qt_wms) || 0,
         qt_sap: Number(r.qt_sap) || 0,
+        qt_sap_after: (Number(r.qt_sap) || 0) + adj,
         adj: adj,
         subir: adj > 0 ? adj : 0,
         descer: adj < 0 ? -adj : 0,

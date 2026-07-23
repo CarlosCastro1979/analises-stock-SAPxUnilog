@@ -1,14 +1,14 @@
 /* Mapa Acertos — doc. acerto sem valor (redistribuição EAN neto zero + sobras SAP→0044) */
 (function (global) {
   'use strict';
-  const MAPA_ACERTOS_JS_VERSION = '1.0.12';
+  const MAPA_ACERTOS_JS_VERSION = '1.0.15';
   /** @deprecated test filter removed — full SAP-stock scope. Kept empty for old callers. */
   const MA_TEST_MATERIALS = [];
   /** @deprecated */
   const MAPA_ACERTOS_TEST_MATERIAL = '';
   const MAPA_ACERTOS_DEPOTS = ['8', '9', '11', '22', '44'];
   const MAPA_ACERTOS_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
-  /** Depósito destino de sobras/falhas de inventário (não deixar excesso nos deps de venda). */
+  /** Depósito destino de sobras SAP (excesso após igualar Unilog nos outros deps). */
   const MAPA_ACERTOS_DEPOT_SOBRA = '44';
   /**
    * Template sheet1 (XML): headers rows 7–8, cols A–O (B = Descrição; NOT B–F merge).
@@ -22,11 +22,11 @@
   const TEMPLATE_URL = 'assets/mapa_acertos_template.xlsx?v=' + MAPA_ACERTOS_JS_VERSION;
   /**
    * Clean (no-fill) style ids from template data row 12 — never from green sample row 10.
-   * A Código · B Descrição · C Lote · D Armazém · E Doc.Pendentes · F Preço · G IVA · H UMB ·
-   * I Existência Física · J Inventário Contabilístico · K Existência Valorizadas ·
-   * L Dif (+) · M Dif (−) · N Dif Valorizadas · O Justificações
-   * L/M use xf 27/28 (numFmt 164/165). Template used to paint positives/negatives [White]
-   * (hiding Dif (−) qty); export patches styles.xml. O xf 52 must be left+dark (not right+theme1).
+   * Acerto sem valor (semValorExcel):
+   *   I Física = alvo pós-acerto (≈ Unilog/WMS; WMS não aparece) · J Contabilístico = SAP actual ·
+   *   K Existência Valorizadas = Física × preço SAP · L Subir · M Descer · N Dif Valorizadas · O Justif.
+   *   Contabilístico + Subir − Descer = Física (acerto pelo físico).
+   * Inventário acerto (classic): I Física = Unilog · J Contabilístico = SAP · K = Física × preço.
    */
   const MA_CLEAN_STYLES = {
     A: '24', B: '20', C: '22', D: '20', E: '26', F: '23', G: '20', H: '20',
@@ -121,42 +121,81 @@
   }
 
   /**
-   * Neto qty / valued diff must be 0 globally and per EAN.
-   * Only depot/lote moves within the same EAN — never inventário that creates value gain/loss.
-   * Price is per EAN ⇒ neto qty 0 within EAN ⇒ neto valor 0.
+   * Conservation rule: never create/destroy SAP qty — only move between depots/lotes of the same EAN.
+   * Checks: Σ adj = 0, Σ subir = Σ descer, Σ SAP after = Σ SAP before (per EAN and global),
+   * and Σ Dif. Valorizadas = 0 (preço SAP).
    */
   function maValidateNetZero(rows) {
     const byEan = {};
     var netQty = 0;
     var netVal = 0;
+    var sumSubir = 0;
+    var sumDescer = 0;
+    var sapBefore = 0;
+    var sapAfter = 0;
     const issues = [];
     for (var i = 0; i < rows.length; i++) {
       const r = rows[i];
       const ean = r.EAN_norm || '';
       const adj = Number(r.adj) || 0;
+      const subir = Number(r.subir) > 0 ? Number(r.subir) : (adj > 0 ? adj : 0);
+      const descer = Number(r.descer) > 0 ? Number(r.descer) : (adj < 0 ? -adj : 0);
+      const before = Number(r.qt_sap) || 0;
+      const after = r.qt_sap_after != null ? Number(r.qt_sap_after) : before + subir - descer;
       const preco = Number(r.preco) > 0 ? Number(r.preco) : maGetSapPrice(ean, r.material);
       const val = adj * (Number(preco) || 0);
-      if (!byEan[ean]) byEan[ean] = { qty: 0, val: 0 };
+      if (!byEan[ean]) byEan[ean] = { qty: 0, val: 0, sapBefore: 0, sapAfter: 0, subir: 0, descer: 0 };
       byEan[ean].qty += adj;
       byEan[ean].val += val;
+      byEan[ean].sapBefore += before;
+      byEan[ean].sapAfter += after;
+      byEan[ean].subir += subir;
+      byEan[ean].descer += descer;
       netQty += adj;
       netVal += val;
+      sumSubir += subir;
+      sumDescer += descer;
+      sapBefore += before;
+      sapAfter += after;
     }
     if (Math.abs(netQty) > MA_BALANCE_EPS) {
-      issues.push('neto qty global = ' + maRound3(netQty));
+      issues.push('neto qty global = ' + maRound3(netQty) + ' (Σ subir deve = Σ descer)');
+    }
+    if (Math.abs(sumSubir - sumDescer) > MA_BALANCE_EPS) {
+      issues.push('Σ subir (' + maRound3(sumSubir) + ') ≠ Σ descer (' + maRound3(sumDescer) + ')');
+    }
+    if (Math.abs(sapAfter - sapBefore) > MA_BALANCE_EPS) {
+      issues.push('Σ SAP depois (' + maRound3(sapAfter) + ') ≠ Σ SAP antes (' + maRound3(sapBefore) + ')');
     }
     if (Math.abs(netVal) > MA_BALANCE_EPS) {
       issues.push('neto valor (Σ Dif. Valorizadas) = ' + maRound3(netVal));
     }
     Object.keys(byEan).forEach(function (ean) {
-      if (Math.abs(byEan[ean].qty) > MA_BALANCE_EPS) {
-        issues.push('EAN ' + ean + ' neto qty = ' + maRound3(byEan[ean].qty));
+      const b = byEan[ean];
+      if (Math.abs(b.qty) > MA_BALANCE_EPS) {
+        issues.push('EAN ' + ean + ' neto qty = ' + maRound3(b.qty));
       }
-      if (Math.abs(byEan[ean].val) > MA_BALANCE_EPS) {
-        issues.push('EAN ' + ean + ' neto valor = ' + maRound3(byEan[ean].val));
+      if (Math.abs(b.sapAfter - b.sapBefore) > MA_BALANCE_EPS) {
+        issues.push('EAN ' + ean + ' Σ SAP depois (' + maRound3(b.sapAfter) + ') ≠ antes (' + maRound3(b.sapBefore) + ')');
+      }
+      if (Math.abs(b.subir - b.descer) > MA_BALANCE_EPS) {
+        issues.push('EAN ' + ean + ' subir (' + maRound3(b.subir) + ') ≠ descer (' + maRound3(b.descer) + ')');
+      }
+      if (Math.abs(b.val) > MA_BALANCE_EPS) {
+        issues.push('EAN ' + ean + ' neto valor = ' + maRound3(b.val));
       }
     });
-    return { ok: issues.length === 0, netQty: netQty, netVal: netVal, byEan: byEan, issues: issues };
+    return {
+      ok: issues.length === 0,
+      netQty: netQty,
+      netVal: netVal,
+      sumSubir: sumSubir,
+      sumDescer: sumDescer,
+      sapBefore: sapBefore,
+      sapAfter: sapAfter,
+      byEan: byEan,
+      issues: issues,
+    };
   }
 
   /**
@@ -185,9 +224,9 @@
   }
 
   /**
-   * Balance gaps within one EAN across any (depot, lote) cells.
+   * Balance gaps within one EAN. Primary key = depot totals (or any entries with .key/.gap).
    * gap = Unilog - SAP. (+) subir SAP; (-) descer SAP. Neto of adjustments = 0.
-   * entries: [{ key, gap, ... }] — key uniquely identifies depot+lote.
+   * Only transfers when excess in some entry can cover shortage in another.
    */
   function maBalanceGaps(entries) {
     const adj = {};
@@ -213,11 +252,31 @@
   }
 
   /**
-   * After EAN-level balance: any remaining SAP excess vs Unilog on non-0044 depots
-   * (sap_after = qt_sap + adj > qt_uni) must DESCER on the source and SUBIR on 0044
-   * (same lote, same EAN, same qty) so neto qty and neto valor stay 0.
-   * Excess already on 0044 is left as-is. Never emits unpaired residual.
-   * Mutates g.cells (may create 0044|lote) and adjMap; sets sobraOut/sobraIn on cells.
+   * After depot-level balance: remaining SAP excess vs Unilog on non-0044 depots
+   * → DESCER source + SUBIR 0044 (same EAN/qty). Excess already on 0044 left as-is.
+   * adjDepot keyed by depot id ('8','9',...). Mutates adjDepot.
+   */
+  function maMoveExcessTo0044Depot(depotAgg, adjDepot) {
+    const deps = Object.keys(depotAgg);
+    for (var i = 0; i < deps.length; i++) {
+      const depot = deps[i];
+      if (depot === MAPA_ACERTOS_DEPOT_SOBRA) continue;
+      const d = depotAgg[depot];
+      if (!d) continue;
+      const adj = adjDepot[depot] || 0;
+      const sapAfter = (Number(d.qt_sap) || 0) + adj;
+      const excess = sapAfter - (Number(d.qt_uni) || 0);
+      if (!(excess > 0)) continue;
+      adjDepot[depot] = adj - excess;
+      adjDepot[MAPA_ACERTOS_DEPOT_SOBRA] = (adjDepot[MAPA_ACERTOS_DEPOT_SOBRA] || 0) + excess;
+      if (!depotAgg[MAPA_ACERTOS_DEPOT_SOBRA]) {
+        depotAgg[MAPA_ACERTOS_DEPOT_SOBRA] = { key: MAPA_ACERTOS_DEPOT_SOBRA, depot: MAPA_ACERTOS_DEPOT_SOBRA, qt_sap: 0, qt_uni: 0, gap: 0 };
+      }
+    }
+  }
+
+  /**
+   * Legacy lote-level excess→0044 (kept for callers/tests). Prefer maMoveExcessTo0044Depot.
    */
   function maMoveExcessTo0044(g, adjMap) {
     const sourceKeys = Object.keys(g.cells);
@@ -252,13 +311,94 @@
     }
   }
 
+  function maEnsureCell(g, depot, lote, seed) {
+    const tKey = depot + '|' + (lote || '');
+    if (!g.cells[tKey]) {
+      g.cells[tKey] = {
+        key: tKey,
+        depot: depot,
+        depotSheet: maDepotSheet(depot),
+        lote: lote || '',
+        material: (seed && seed.material) || g.material || '',
+        desc: (seed && seed.desc) || g.desc || '',
+        qt_sap: 0,
+        qt_uni: 0,
+        gap: 0,
+      };
+    }
+    return g.cells[tKey];
+  }
+
+  /**
+   * Split depot-level adj onto lote lines for Excel emission.
+   * DESCER: take from lotes with SAP (prefer local excess sap>uni).
+   * SUBIR: fill lotes with shortage (uni>sap), then dump remainder on best lote / empty.
+   */
+  function maAllocateDepotAdjToLotes(g, adjDepot) {
+    const loteAdj = {};
+    Object.keys(g.cells).forEach(function (k) { loteAdj[k] = 0; });
+    const depots = Object.keys(adjDepot);
+    for (var di = 0; di < depots.length; di++) {
+      const depot = depots[di];
+      var need = adjDepot[depot] || 0;
+      if (!need) continue;
+      var cells = Object.keys(g.cells).map(function (k) { return g.cells[k]; })
+        .filter(function (c) { return c.depot === depot; });
+
+      if (need < 0) {
+        var remainDown = -need;
+        cells = cells.slice().sort(function (a, b) {
+          var ea = (Number(a.qt_sap) || 0) - (Number(a.qt_uni) || 0);
+          var eb = (Number(b.qt_sap) || 0) - (Number(b.qt_uni) || 0);
+          if (eb !== ea) return eb - ea;
+          return (Number(b.qt_sap) || 0) - (Number(a.qt_sap) || 0);
+        });
+        for (var i = 0; i < cells.length && remainDown > MA_BALANCE_EPS; i++) {
+          var avail = Math.max(0, Number(cells[i].qt_sap) || 0);
+          var take = Math.min(remainDown, avail);
+          if (take <= 0) continue;
+          loteAdj[cells[i].key] = (loteAdj[cells[i].key] || 0) - take;
+          remainDown -= take;
+        }
+        if (remainDown > MA_BALANCE_EPS && cells.length) {
+          loteAdj[cells[0].key] = (loteAdj[cells[0].key] || 0) - remainDown;
+          remainDown = 0;
+        }
+      } else {
+        var remainUp = need;
+        cells = cells.slice().sort(function (a, b) {
+          var ga = (Number(a.qt_uni) || 0) - (Number(a.qt_sap) || 0);
+          var gb = (Number(b.qt_uni) || 0) - (Number(b.qt_sap) || 0);
+          return gb - ga;
+        });
+        for (var j = 0; j < cells.length && remainUp > MA_BALANCE_EPS; j++) {
+          var gap = Math.max(0, (Number(cells[j].qt_uni) || 0) - (Number(cells[j].qt_sap) || 0));
+          var put = Math.min(remainUp, gap);
+          if (put <= 0) continue;
+          loteAdj[cells[j].key] = (loteAdj[cells[j].key] || 0) + put;
+          remainUp -= put;
+        }
+        if (remainUp > MA_BALANCE_EPS) {
+          var dump = cells.find(function (c) { return (Number(c.qt_uni) || 0) > 0; }) || cells[0];
+          if (!dump) {
+            dump = maEnsureCell(g, depot, '', null);
+            loteAdj[dump.key] = 0;
+          }
+          loteAdj[dump.key] = (loteAdj[dump.key] || 0) + remainUp;
+          remainUp = 0;
+        }
+      }
+    }
+    return loteAdj;
+  }
+
   function buildMapaAcertosRows(options) {
     const opts = options || {};
     /** Full scope by default. Pass testOnly:true only for legacy debug. */
     const testOnly = opts.testOnly === true;
     const filterMaterial = opts.material || '';
     const recon = typeof reconData !== 'undefined' ? reconData : {};
-    // Group by EAN only — balance any lote within that product
+    // Group by EAN — balance at depot totals, emit by lote
     const groups = new Map();
 
     for (const dk of MAPA_ACERTOS_DEPOTS) {
@@ -273,7 +413,6 @@
         const ean = r.EAN_norm || '';
         const lote = r.Lote_norm || '';
         if (!ean) continue;
-        // Scope: articles with SAP stock (qt_sap > 0) in at least this cell, or Unilog gap vs SAP
         const qtSapCell = Number(r.qt_sap) || 0;
         const qtUniCell = Number(r.qt_uni) || 0;
         if (qtSapCell <= 0 && qtUniCell <= 0) continue;
@@ -328,18 +467,39 @@
       const entries = Object.keys(g.cells).map(function (k) { return g.cells[k]; });
       var sapTotal = 0;
       for (var ei = 0; ei < entries.length; ei++) sapTotal += Number(entries[ei].qt_sap) || 0;
-      // Only EANs that have SAP stock somewhere in scope depots
       if (sapTotal <= 0) continue;
-      // 1) EAN-level balanced redistrib (match Unilog gaps, neto 0)
-      const adjMap = maBalanceGaps(entries);
-      const balanceAdjByKey = {};
-      Object.keys(adjMap).forEach(function (k) { balanceAdjByKey[k] = adjMap[k]; });
-      // 2) Residual SAP excess (after balance) → 0044 (paired DESCER source + SUBIR 0044, same EAN/qty)
-      maMoveExcessTo0044(g, adjMap);
-      // 3) Harden: per-EAN neto qty must be 0 (never emit unbalanced inventário a valor)
+
+      // 1) Aggregate by depot — match Unilog depot totals (not lote reshuffles)
+      const depotAgg = {};
+      for (var ci = 0; ci < entries.length; ci++) {
+        const e = entries[ci];
+        if (!depotAgg[e.depot]) {
+          depotAgg[e.depot] = { key: e.depot, depot: e.depot, qt_sap: 0, qt_uni: 0, gap: 0 };
+        }
+        depotAgg[e.depot].qt_sap += Number(e.qt_sap) || 0;
+        depotAgg[e.depot].qt_uni += Number(e.qt_uni) || 0;
+      }
+      Object.keys(depotAgg).forEach(function (dk) {
+        const d = depotAgg[dk];
+        d.gap = d.qt_uni - d.qt_sap;
+      });
+      const depotEntries = Object.keys(depotAgg).map(function (dk) { return depotAgg[dk]; });
+      const adjDepot = maBalanceGaps(depotEntries);
+      const balanceDepot = {};
+      Object.keys(adjDepot).forEach(function (k) { balanceDepot[k] = adjDepot[k]; });
+      // 2) Residual SAP excess after matching Unilog → 0044
+      maMoveExcessTo0044Depot(depotAgg, adjDepot);
+      if (!maFixAdjMapNetZero(adjDepot)) {
+        try {
+          console.error('[mapa-acertos] EAN ' + g.EAN_norm + ' adj depot desequilibrado — omitido', adjDepot);
+        } catch (e) {}
+        continue;
+      }
+      // 3) Allocate depot adj onto lotes for emission
+      const adjMap = maAllocateDepotAdjToLotes(g, adjDepot);
       if (!maFixAdjMapNetZero(adjMap)) {
         try {
-          console.error('[mapa-acertos] EAN ' + g.EAN_norm + ' adj desequilibrado — linhas omitidas', adjMap);
+          console.error('[mapa-acertos] EAN ' + g.EAN_norm + ' adj lote desequilibrado — omitido', adjMap);
         } catch (e) {}
         continue;
       }
@@ -348,8 +508,12 @@
       for (const e of finalEntries) {
         const adj = adjMap[e.key] || 0;
         if (!adj) continue;
-        const sobra0044 = !!(e.sobraOut || e.sobraIn);
-        const hadBalance = !!(balanceAdjByKey[e.key]);
+        const subir = adj > 0 ? adj : 0;
+        const descer = adj < 0 ? -adj : 0;
+        const qt_sap_after = (Number(e.qt_sap) || 0) + subir - descer;
+        const sobra0044 = e.depot === MAPA_ACERTOS_DEPOT_SOBRA
+          ? (adjDepot[MAPA_ACERTOS_DEPOT_SOBRA] || 0) > 0
+          : ((balanceDepot[e.depot] || 0) !== (adjDepot[e.depot] || 0));
         out.push({
           depot: e.depot,
           depotSheet: e.depotSheet,
@@ -363,12 +527,15 @@
           preco: preco,
           qt_uni: e.qt_uni,
           qt_sap: e.qt_sap,
+          qt_sap_after: qt_sap_after,
           gap: e.gap,
           adj: adj,
-          subir: adj > 0 ? adj : 0,
-          descer: adj < 0 ? -adj : 0,
-          sobra0044: sobra0044,
-          hadBalance: hadBalance,
+          subir: subir,
+          descer: descer,
+          sobra0044: !!sobra0044,
+          hadBalance: !!(balanceDepot[e.depot]),
+          /** Excel: Contabilístico=SAP actual, Física=alvo (WMS só nos bastidores). */
+          semValorExcel: true,
         });
       }
     }
@@ -544,7 +711,7 @@
     if (row && row.justificacao) return String(row.justificacao);
     return 'acerto entre depositos';
   }
-  /** Dif (+)/(−) from acerto adj: SUBIR → L; DESCER (SAP > física) → M absolute qty. */
+  /** Dif (+)/(−): Física > Contabilístico → Subir (L); Física < Contabilístico → Descer (M). */
   function maDifParts(row) {
     const adj = Number(row.adj) || 0;
     var subir = adj > 0 ? maRound3(adj) : 0;
@@ -634,20 +801,53 @@
     } catch (e) { /* ignore */ }
   }
   /**
+   * Excel qty mapping.
+   * Acerto sem valor: Contabilístico = SAP actual; Física = alvo pós-acerto (≈ Unilog/WMS;
+   *   WMS qty never written to the sheet). Contabilístico + Subir − Descer = Física.
+   * Inventário: Física = Unilog; Contabilístico = SAP (classic count vs book).
+   */
+  function maRowExcelQtys(row) {
+    const dif = maDifParts(row);
+    const subir = dif.subir;
+    const descer = dif.descer;
+    const qtSap = maRound3(row.qt_sap);
+    const qtUni = maRound3(row.qt_uni);
+    const sapAfter = row.qt_sap_after != null
+      ? maRound3(row.qt_sap_after)
+      : maRound3(qtSap + subir - descer);
+    if (row.semValorExcel) {
+      return { fisica: sapAfter, contabilistico: qtSap, subir: subir, descer: descer };
+    }
+    return { fisica: qtUni, contabilistico: qtSap, subir: subir, descer: descer };
+  }
+  /** Headers for acerto sem valor — WMS not named; Contabilístico = SAP; Física = alvo. */
+  function maPatchAcertoHeadersSemValor(sheetXml) {
+    function hdr(addr, fallbackStyle, text) {
+      return maCellText(addr, maExtractStyle(sheetXml, addr, fallbackStyle), text);
+    }
+    sheetXml = maReplaceCell(sheetXml, 'I7', hdr('I7', '20', 'Existência'));
+    sheetXml = maReplaceCell(sheetXml, 'I8', hdr('I8', '20', 'Física'));
+    sheetXml = maReplaceCell(sheetXml, 'J7', hdr('J7', '20', 'Inventário'));
+    sheetXml = maReplaceCell(sheetXml, 'J8', hdr('J8', '20', 'Contabilístico'));
+    sheetXml = maReplaceCell(sheetXml, 'K7', hdr('K7', '20', 'Existência'));
+    sheetXml = maReplaceCell(sheetXml, 'K8', hdr('K8', '20', 'Valorizadas'));
+    sheetXml = maReplaceCell(sheetXml, 'L7', hdr('L7', '20', 'Diferenças'));
+    sheetXml = maReplaceCell(sheetXml, 'L8', hdr('L8', '20', 'Subir (+)'));
+    sheetXml = maReplaceCell(sheetXml, 'M8', hdr('M8', '20', 'Descer (−)'));
+    sheetXml = maReplaceCell(sheetXml, 'N7', hdr('N7', '20', 'Diferenças'));
+    sheetXml = maReplaceCell(sheetXml, 'N8', hdr('N8', '20', 'Valorizadas'));
+    return sheetXml;
+  }
+  /**
    * Fill one data row — always MA_CLEAN_STYLES (no green fill).
-   * L Dif (+) when SUBIR / physical>SAP adj; M Dif (−) when DESCER / SAP>physical.
-   * N Dif Valorizadas = (L−M)×preço. O = "acerto entre depositos" only.
+   * See maRowExcelQtys for Física / Contabilístico semantics.
    */
   function maFillDataRow(sheetXml, rowNum, row) {
     const styles = MA_CLEAN_STYLES;
     const preco = maRound3(row.preco > 0 ? row.preco : maGetSapPrice(row.EAN_norm, row.material));
-    const qtUni = maRound3(row.qt_uni);
-    const qtSap = maRound3(row.qt_sap);
-    const dif = maDifParts(row);
-    const subir = dif.subir;
-    const descer = dif.descer;
-    const existVal = preco > 0 ? maRound3(qtUni * preco) : null;
-    const difVal = preco > 0 ? maRound3((subir - descer) * preco) : null;
+    const q = maRowExcelQtys(row);
+    const existVal = preco > 0 ? maRound3(q.fisica * preco) : null;
+    const difVal = preco > 0 ? maRound3((q.subir - q.descer) * preco) : null;
     const note = maJustification(row);
 
     sheetXml = maSetRowHeight(sheetXml, rowNum, DATA_ROW_HEIGHT);
@@ -659,11 +859,11 @@
     sheetXml = maReplaceCell(sheetXml, 'F' + rowNum, preco > 0 ? maCellNum('F' + rowNum, styles.F, preco) : maCellEmpty('F' + rowNum, styles.F));
     sheetXml = maReplaceCell(sheetXml, 'G' + rowNum, maCellEmpty('G' + rowNum, styles.G));
     sheetXml = maReplaceCell(sheetXml, 'H' + rowNum, maCellText('H' + rowNum, styles.H, row.umb || 'UN'));
-    sheetXml = maReplaceCell(sheetXml, 'I' + rowNum, maCellNum('I' + rowNum, styles.I, qtUni));
-    sheetXml = maReplaceCell(sheetXml, 'J' + rowNum, maCellNum('J' + rowNum, styles.J, qtSap));
+    sheetXml = maReplaceCell(sheetXml, 'I' + rowNum, maCellNum('I' + rowNum, styles.I, q.fisica));
+    sheetXml = maReplaceCell(sheetXml, 'J' + rowNum, maCellNum('J' + rowNum, styles.J, q.contabilistico));
     sheetXml = maReplaceCell(sheetXml, 'K' + rowNum, existVal != null ? maCellNum('K' + rowNum, styles.K, existVal) : maCellEmpty('K' + rowNum, styles.K));
-    sheetXml = maReplaceCell(sheetXml, 'L' + rowNum, subir > 0 ? maCellNum('L' + rowNum, styles.L, subir) : maCellEmpty('L' + rowNum, styles.L));
-    sheetXml = maReplaceCell(sheetXml, 'M' + rowNum, descer > 0 ? maCellNum('M' + rowNum, styles.M, descer) : maCellEmpty('M' + rowNum, styles.M));
+    sheetXml = maReplaceCell(sheetXml, 'L' + rowNum, q.subir > 0 ? maCellNum('L' + rowNum, styles.L, q.subir) : maCellEmpty('L' + rowNum, styles.L));
+    sheetXml = maReplaceCell(sheetXml, 'M' + rowNum, q.descer > 0 ? maCellNum('M' + rowNum, styles.M, q.descer) : maCellEmpty('M' + rowNum, styles.M));
     sheetXml = maReplaceCell(sheetXml, 'N' + rowNum, difVal != null ? maCellNum('N' + rowNum, styles.N, difVal) : maCellEmpty('N' + rowNum, styles.N));
     sheetXml = maReplaceCell(sheetXml, 'O' + rowNum, maCellText('O' + rowNum, styles.O, note));
     return sheetXml;
@@ -679,6 +879,9 @@
   const _maLastFilled = {};
   function maPatchSheetXml(sheetXml, sheetName, dataRows) {
     sheetXml = maReplaceCell(sheetXml, DEPOT_CELL, maCellText(DEPOT_CELL, maExtractStyle(sheetXml, DEPOT_CELL, '92'), sheetName));
+    if (dataRows.some(function (r) { return r.semValorExcel; })) {
+      sheetXml = maPatchAcertoHeadersSemValor(sheetXml);
+    }
     sheetXml = maStripGreenStyles(sheetXml);
     sheetXml = maEnsureColWidths(sheetXml);
     sheetXml = maFixSumFormulas(sheetXml);
@@ -772,13 +975,8 @@
   }
   function maFillSheetDataRow(ws, rowNum, row) {
     const preco = maRound3(row.preco > 0 ? row.preco : maGetSapPrice(row.EAN_norm, row.material));
-    const qtUni = maRound3(row.qt_uni);
-    const qtSap = maRound3(row.qt_sap);
-    const dif = maDifParts(row);
-    const subir = dif.subir;
-    const descer = dif.descer;
+    const q = maRowExcelQtys(row);
     const note = maJustification(row);
-    // Plain cells — no style/fill copied from green sample rows.
     maSetCell(ws, 'A' + rowNum, { t: 's', v: String(row.material) });
     maSetCell(ws, 'B' + rowNum, { t: 's', v: String(row.desc || '') });
     if (row.lote) maSetCell(ws, 'C' + rowNum, { t: 's', v: String(row.lote) });
@@ -789,15 +987,15 @@
     if (preco > 0) maSetCell(ws, 'F' + rowNum, { t: 'n', v: preco });
     else delete ws['F' + rowNum];
     maSetCell(ws, 'H' + rowNum, { t: 's', v: String(row.umb || 'UN') });
-    maSetCell(ws, 'I' + rowNum, { t: 'n', v: qtUni });
-    maSetCell(ws, 'J' + rowNum, { t: 'n', v: qtSap });
-    if (preco > 0) maSetCell(ws, 'K' + rowNum, { t: 'n', v: maRound3(qtUni * preco) });
+    maSetCell(ws, 'I' + rowNum, { t: 'n', v: q.fisica });
+    maSetCell(ws, 'J' + rowNum, { t: 'n', v: q.contabilistico });
+    if (preco > 0) maSetCell(ws, 'K' + rowNum, { t: 'n', v: maRound3(q.fisica * preco) });
     else delete ws['K' + rowNum];
-    if (subir > 0) maSetCell(ws, 'L' + rowNum, { t: 'n', v: subir });
+    if (q.subir > 0) maSetCell(ws, 'L' + rowNum, { t: 'n', v: q.subir });
     else delete ws['L' + rowNum];
-    if (descer > 0) maSetCell(ws, 'M' + rowNum, { t: 'n', v: descer });
+    if (q.descer > 0) maSetCell(ws, 'M' + rowNum, { t: 'n', v: q.descer });
     else delete ws['M' + rowNum];
-    if (preco > 0) maSetCell(ws, 'N' + rowNum, { t: 'n', v: maRound3((subir - descer) * preco) });
+    if (preco > 0) maSetCell(ws, 'N' + rowNum, { t: 'n', v: maRound3((q.subir - q.descer) * preco) });
     else delete ws['N' + rowNum];
     maSetCell(ws, 'O' + rowNum, { t: 's', v: note });
   }
@@ -811,7 +1009,20 @@
       const ws = wb.Sheets[sheetName];
       if (!ws) continue;
       maSetCell(ws, DEPOT_CELL, { t: 's', v: sheetName });
-      // Fix SUM start row for SheetJS path
+      const dataRows = depotRowsMap[dk] || [];
+      if (dataRows.some(function (r) { return r.semValorExcel; })) {
+        maSetCell(ws, 'I7', { t: 's', v: 'Existência' });
+        maSetCell(ws, 'I8', { t: 's', v: 'Física' });
+        maSetCell(ws, 'J7', { t: 's', v: 'Inventário' });
+        maSetCell(ws, 'J8', { t: 's', v: 'Contabilístico' });
+        maSetCell(ws, 'K7', { t: 's', v: 'Existência' });
+        maSetCell(ws, 'K8', { t: 's', v: 'Valorizadas' });
+        maSetCell(ws, 'L7', { t: 's', v: 'Diferenças' });
+        maSetCell(ws, 'L8', { t: 's', v: 'Subir (+)' });
+        maSetCell(ws, 'M8', { t: 's', v: 'Descer (−)' });
+        maSetCell(ws, 'N7', { t: 's', v: 'Diferenças' });
+        maSetCell(ws, 'N8', { t: 's', v: 'Valorizadas' });
+      }
       ['K129', 'N129'].forEach(function (addr) {
         const cell = ws[addr];
         if (cell && cell.f) {
@@ -820,7 +1031,6 @@
             .replace(/N10:N128/g, 'N' + DATA_START_ROW + ':N' + DATA_END_ROW);
         }
       });
-      const dataRows = depotRowsMap[dk] || [];
       const prev = _maLastFilled[sheetName] || 0;
       const n = Math.min(dataRows.length, DATA_END_ROW - DATA_START_ROW + 1);
       const clearUntil = Math.max(prev, n, 2);
@@ -919,7 +1129,7 @@
     const bal = maValidateNetZero(rows);
     if (!bal.ok) {
       try { console.error('[mapa-acertos] export bloqueado — balanceamento inválido', bal); } catch (e) {}
-      toast('Export bloqueado: Σ Dif. Valorizadas / neto qty ≠ 0 (deve ser 0). ' + bal.issues.join('; '), 'error');
+      toast('Export bloqueado: total SAP por EAN deve conservar-se (só transferências entre depósitos/lotes). ' + bal.issues.slice(0, 3).join('; '), 'error');
       renderMapaAcertosPage();
       return;
     }
@@ -927,7 +1137,7 @@
       const result = await maExportPatchedXlsx(rows, mapaAcertosExportFilename());
       const subir = rows.reduce(function (s, r) { return s + r.subir; }, 0);
       const descer = rows.reduce(function (s, r) { return s + r.descer; }, 0);
-      var msg = 'Exportado: ' + result.written + ' linhas · subir ' + subir + ' / descer ' + descer + ' · neto qty/valor 0';
+      var msg = 'Exportado: ' + result.written + ' linhas · subir ' + subir + ' = descer ' + descer + ' · Σ SAP conservado';
       const selCats = typeof msGet === 'function' ? msGet('maCat') : new Set();
       const selSubs = typeof msGet === 'function' ? msGet('maSub') : new Set();
       if (selCats.size || selSubs.size) msg += ' (filtrado)';
@@ -952,9 +1162,9 @@
     const eans = new Set(rows.map(function (r) { return r.EAN_norm; })).size;
     el.innerHTML =
       '<div class="kpi"><div class="kl">Linhas acerto</div><div class="kv">' + fmt(rows.length) + '</div><div class="ks">' + fmt(eans) + ' EAN · todos c/ stock SAP</div></div>' +
-      '<div class="kpi"><div class="kl">Subir (Σ +)</div><div class="kv y">' + fmt(subir) + '</div><div class="ks">aumentar SAP</div></div>' +
-      '<div class="kpi"><div class="kl">Descer (Σ −)</div><div class="kv r">' + fmt(descer) + '</div><div class="ks">diminuir SAP</div></div>' +
-      '<div class="kpi"><div class="kl">Neto qty / valor</div><div class="kv' + netCls + '">' + fmt(maRound3(bal.netQty)) + ' / ' + fmt(maRound3(bal.netVal)) + '</div><div class="ks">ambos devem ser 0 · ' + fmt(deps) + ' deps</div></div>';
+      '<div class="kpi"><div class="kl">Subir (Σ +)</div><div class="kv y">' + fmt(subir) + '</div><div class="ks">entrada noutro dep/lote</div></div>' +
+      '<div class="kpi"><div class="kl">Descer (Σ −)</div><div class="kv r">' + fmt(descer) + '</div><div class="ks">saída deste dep/lote</div></div>' +
+      '<div class="kpi"><div class="kl">Σ SAP / neto</div><div class="kv' + netCls + '">' + fmt(maRound3(bal.sapBefore)) + ' → ' + fmt(maRound3(bal.sapAfter)) + '</div><div class="ks">neto ' + fmt(maRound3(bal.netQty)) + ' (deve 0) · ' + fmt(deps) + ' deps</div></div>';
   }
 
   function renderMapaAcertosTable(rows) {
@@ -979,8 +1189,10 @@
     const sorted = typeof sorts !== 'undefined' && sorts.ma ? rows.slice() : rows;
     if (typeof sorts !== 'undefined' && sorts.ma && typeof applySort === 'function') applySort('ma', sorted);
     const num = typeof fmtPtNum === 'function' ? fmtPtNum : function (n) { return n; };
-    const signed = typeof fmtKvSigned === 'function' ? fmtKvSigned : function (n) { return n; };
     body.innerHTML = sorted.map(function (r) {
+      const subir = Number(r.subir) || 0;
+      const descer = Number(r.descer) || 0;
+      const alvo = r.qt_sap_after != null ? r.qt_sap_after : (Number(r.qt_sap) || 0) + subir - descer;
       const acao = r.adj > 0
         ? '<span class="badge binfo">Subir ' + num(r.adj) + '</span>'
         : '<span class="badge bwarn">Descer ' + num(-r.adj) + '</span>';
@@ -990,10 +1202,10 @@
         '<td style="font-family:var(--mono);font-size:11px">' + (r.EAN_norm || '—') + '</td>' +
         '<td class="col-desc">' + (r.desc || '—') + '</td>' +
         '<td style="font-family:var(--mono);font-size:11px">' + (r.lote || '—') + '</td>' +
+        '<td class="num">' + num(alvo) + '</td>' +
         '<td class="num">' + num(r.qt_sap) + '</td>' +
-        '<td class="num">' + num(r.qt_uni) + '</td>' +
-        '<td class="num">' + signed(r.gap) + '</td>' +
-        '<td class="num">' + signed(r.adj) + '</td>' +
+        '<td class="num">' + num(subir) + '</td>' +
+        '<td class="num">' + num(descer) + '</td>' +
         '<td>' + acao + '</td></tr>';
     }).join('');
     const table = document.getElementById('maTable');
@@ -1061,6 +1273,8 @@
   global.maDoSort = maDoSort;
   global.maBalanceGaps = maBalanceGaps;
   global.maMoveExcessTo0044 = maMoveExcessTo0044;
+  global.maMoveExcessTo0044Depot = maMoveExcessTo0044Depot;
+  global.maAllocateDepotAdjToLotes = maAllocateDepotAdjToLotes;
   global.maValidateNetZero = maValidateNetZero;
   global.maEnsureFflate = maEnsureFflate;
   global.maGetSapPrice = maGetSapPrice;

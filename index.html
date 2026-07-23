@@ -484,7 +484,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.46 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.49 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -675,12 +675,11 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bp bs" onclick="typeof exportMapaAcertosXlsx==='function'?exportMapaAcertosXlsx():toast('Módulo Mapa Acertos a carregar — aguarde ou recarregue','error')">⬇ Emitir Excel</button>
     </div>
     <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55">
-      Redistribuição contabilística (SAP) para igualar o físico (Unilog) no mesmo <strong>EAN</strong> — podes subir/descer qualquer lote desse produto entre depósitos, desde que o neto seja zero (também acerta diferenças entre lotes).
-      <strong>Diferença</strong> = Unilog − SAP: positiva → subir SAP; negativa → descer SAP.
-      Depois disso, se ainda sobrar SAP &gt; Unilog fora do <strong>0044</strong>, essas unidades vão para <strong>0044</strong> (DESCER origem + SUBIR 0044, mesma qty/EAN), para não deixar stock errado nos depósitos de venda.
-      No final das movimentações <strong>não pode haver diferença de valor</strong> — só alterações de depósito ou redistribuição dentro do mesmo EAN; Σ Diferenças Valorizadas = 0 (neto qty e neto valor zero). Não é inventário a valor.
-      Scope: <strong>todos os artigos com stock SAP</strong> nos depósitos 0008 / 0009 / 0011 / 0022 / 0044 (ficheiro: <code>acerto_sem_valor_AAAA-MM-DD.xlsx</code>).
-      Com filtros activos, o Excel exporta <strong>só os produtos filtrados</strong>.
+      Transferências <strong>SAP</strong> entre depósitos (e lotes) do mesmo <strong>EAN</strong> para aproximar o stock SAP do Unilog por depósito — <strong>sem alterar a quantidade total SAP</strong> desse EAN (Σ subir = Σ descer; Σ SAP depois = Σ SAP antes).
+      Só move quando há excesso num depósito que cubra falta noutro; sobra residual → <strong>0044</strong> (também transferência, não criação de stock).
+      Unilog/WMS serve só para calcular o alvo; <strong>não aparece no Excel</strong>.
+      Excel: <strong>Contabilístico</strong> = SAP actual · <strong>Física</strong> = alvo pós-acerto (≈ Unilog; acerto pelo físico) · <strong>Subir / Descer</strong> · Contabilístico + Subir − Descer = Física · K = Física × preço SAP.
+      Ficheiro <code>acerto_sem_valor_AAAA-MM-DD.xlsx</code> · todos os artigos com stock SAP (0008/0009/0011/0022/0044).
     </p>
     <div class="tb">
       <div class="ms-wrap" id="ms-maCat" data-placeholder="Categorias" data-onchange="renderMapaAcertosPage"><div class="ms-btn" onclick="msTogOpen('maCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('maCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('maCat')">Todas</button><button onclick="msClrAll('maCat')">Limpar</button></div><div class="ms-list"></div></div></div>
@@ -695,10 +694,10 @@ select.cad-inp{cursor:pointer;}
           <th onclick="doSort('ma','EAN_norm')">EAN</th>
           <th onclick="doSort('ma','desc')">Descrição</th>
           <th onclick="doSort('ma','lote')">Lote</th>
-          <th class="num" onclick="doSort('ma','qt_sap')">SAP</th>
-          <th class="num" onclick="doSort('ma','qt_uni')">Unilog</th>
-          <th class="num" onclick="doSort('ma','gap')">Gap (Uni−SAP)</th>
-          <th class="num" onclick="doSort('ma','adj')">Acerto</th>
+          <th class="num" onclick="doSort('ma','qt_sap_after')" title="Alvo pós-acerto ≈ Unilog (= Existência Física no Excel)">Física (alvo)</th>
+          <th class="num" onclick="doSort('ma','qt_sap')" title="SAP actual (= Inventário Contabilístico no Excel)">Contabilístico (SAP)</th>
+          <th class="num" onclick="doSort('ma','subir')">Subir</th>
+          <th class="num" onclick="doSort('ma','descer')">Descer</th>
           <th onclick="doSort('ma','adj')">Acção</th>
         </tr></thead>
         <tbody id="maBody"></tbody>
@@ -719,7 +718,7 @@ select.cad-inp{cursor:pointer;}
       </div>
       <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55">
         Lista <strong>todas</strong> as diferenças (positivas e negativas) para o inventário contabilístico (SAP) ficar igual ao físico (Unilog).
-        Excel no <strong>mesmo template</strong> do «Emitir doc acerto sem valor» (<code>mapa_acertos_template.xlsx</code>): folhas 0008 / 0009 / 0011 / 0022 / 0044 — cols A–O (I físico, J SAP, L Dif +, M Dif −, N valorizadas).
+        Excel no <strong>mesmo template</strong> (<code>mapa_acertos_template.xlsx</code>): folhas 0008 / 0009 / 0011 / 0022 / 0044 — aqui I Física = Unilog, J Contabilístico = SAP, L/M Dif ±, N valorizadas @ preço SAP (doc. de inventário clássico).
         Com filtros activos, o Excel exporta <strong>só os produtos filtrados</strong>.
       </p>
       <div class="tb">
@@ -3083,15 +3082,23 @@ function fmtKvBrl(v){return fmtKv(fmtBrl(v));}
 function fmtKvBrlLiq(v){return fmtKv(fmtBrlLiq(v));}
 function fmtValorDifCell(diff,preco){const p=Number(preco)||0;if(p<=0)return '—';return fmtBrlLiq(diff*p);}
 function reconRowValor(r,precoMap,dk){if(isExcluidoDifStock(r.EAN_norm,dk,r.desc))return 0;const p=(precoMap||buildSapPrecoMap())[r.EAN_norm]||0;return r.diff*p;}
-function wmsLineValor(r){const qt=Number(r.qt)||0;if(qt<=0)return 0;const vlr=Number(r.vlr)||0;if(vlr>0)return qt*vlr;const vt=Number(r.vlrTotal)||0;return vt>0?vt:0;}
-function wmsResumoValor(r){const vt=Number(r.vlrTotal)||0;if(vt>0)return vt;const qt=Number(r.qt)||0;const vlr=Number(r.vlr)||0;if(qt>0&&vlr>0)return qt*vlr;return 0;}
+/** Valor de linha Unilog/WMS sempre a preço SAP (custeio WMS ignorado). */
+function wmsLineValor(r,precoMap){
+  const qt=Number(r.qt)||0;if(qt<=0)return 0;
+  const pm=precoMap||buildSapPrecoMap();
+  const p=pm[r.EAN_norm]||0;if(p<=0)return 0;
+  return qt*p;
+}
+/** @deprecated alias — mesmo critério que wmsLineValor (qt × preço SAP). */
+function wmsResumoValor(r,precoMap){return wmsLineValor(r,precoMap);}
 function calcUniInventarioResumo(classes){
   if(!uniData?.length)return{sku:0,qtd:0,vlr:0};
   const cls=classes?.length?classes:INV_CLASSES;
   const rows=uniData.filter(r=>cls.includes(r.classe)&&r.qt>0);
   const sku=new Set(rows.map(r=>r.EAN_norm).filter(Boolean)).size;
+  const pm=buildSapPrecoMap();
   let qtd=0,vlr=0;
-  for(const r of rows){qtd+=r.qt;vlr+=wmsResumoValor(r);}
+  for(const r of rows){qtd+=r.qt;vlr+=wmsLineValor(r,pm);}
   return{sku,qtd,vlr};
 }
 function kpiResumoInventarioHtml(dk,activeCl){
@@ -3101,11 +3108,11 @@ function kpiResumoInventarioHtml(dk,activeCl){
   const cards=show.map(cl=>{
     const s=calcUniInventarioResumo([cl]);
     const lbl=INV_CLASS_LABELS[cl]||('Cl. '+cl);
-    return `<div class="kpi"><div class="kl">${lbl} (Cl. ${cl})</div><div class="kv b">${fmtKvNum(s.sku)}</div><div class="ks">${fmtKvNum(s.qtd)} un · ${fmtBrl(s.vlr)} · resumo Unilog</div></div>`;
+    return `<div class="kpi"><div class="kl">${lbl} (Cl. ${cl})</div><div class="kv b">${fmtKvNum(s.sku)}</div><div class="ks">${fmtKvNum(s.qtd)} un · ${fmtBrl(s.vlr)} · @ preço SAP</div></div>`;
   }).join('');
   if(!activeCl){
     const tot=calcUniInventarioResumo(INV_CLASSES);
-    return cards+`<div class="kpi"><div class="kl">Inventário FI+SI</div><div class="kv">${fmtKvNum(tot.sku)}</div><div class="ks">${fmtKvNum(tot.qtd)} un · ${fmtBrl(tot.vlr)} · total resumo Unilog</div></div>`;
+    return cards+`<div class="kpi"><div class="kl">Inventário FI+SI</div><div class="kv">${fmtKvNum(tot.sku)}</div><div class="ks">${fmtKvNum(tot.qtd)} un · ${fmtBrl(tot.vlr)} · @ preço SAP</div></div>`;
   }
   return cards;
 }
@@ -3132,71 +3139,81 @@ function calcValorTotSapFromRows(rows,{eanKey='EAN_norm',qtKey='qt',dk=null,getD
   }
   return{total,temPreco:temPreco||total>0};
 }
+/**
+ * Valor Unilog/WMS das linhas filtradas = Σ (qtd Unilog × preço SAP).
+ * Nunca usa Vlr Méd / Valor Total do ficheiro WMS (custeio diferente do SAP).
+ */
 function calcValorTotWmsFromUniMatch(rows,{eanKey='EAN_norm',loteKey='Lote_norm',classeKey=null,getDk=null,itemsKey=null}={}){
+  const pm=buildSapPrecoMap();
   let total=0,temPreco=false;
   for(const r of rows){
     if(itemsKey&&Array.isArray(r[itemsKey])){
       for(const ur of r[itemsKey]){
         const urDk=DKS.find(k=>DEPOT_MAP[k].classes.includes(ur.classe));
         if(isExcluidoDifStock(ur.EAN_norm,urDk,ur.produto))continue;
-        const lv=wmsLineValor(ur);
-        if(lv!==0)temPreco=true;
-        total+=lv;
+        const p=pm[ur.EAN_norm]||0;
+        if(p>0)temPreco=true;
+        total+=(Number(ur.qt)||0)*p;
       }
       continue;
     }
-    if(!uniData)continue;
     const ean=r[eanKey];
-    const lote=loteKey in r?(r[loteKey]||''):null;
-    const classe=classeKey?r[classeKey]:null;
     const depot=getDk?getDk(r):null;
-    uniData.forEach(ur=>{
-      if(ur.EAN_norm!==ean)return;
-      if(lote!==null&&(ur.Lote_norm||'')!==lote)return;
-      if(classe&&ur.classe!==classe)return;
-      const urDk=DKS.find(k=>DEPOT_MAP[k].classes.includes(ur.classe));
-      if(depot&&urDk!==depot)return;
-      if(isExcluidoDifStock(ean,urDk,ur.produto))return;
-      const lv=wmsLineValor(ur);
-      if(lv!==0)temPreco=true;
-      total+=lv;
-    });
+    if(isExcluidoDifStock(ean,depot,r.desc||r.produto))continue;
+    let qt=null;
+    if(r.qt_uni!=null)qt=Number(r.qt_uni)||0;
+    else if(r.qt!=null)qt=Number(r.qt)||0;
+    if(qt===null){
+      if(!uniData)continue;
+      const lote=loteKey in r?(r[loteKey]||''):null;
+      const classe=classeKey?r[classeKey]:null;
+      qt=0;
+      uniData.forEach(ur=>{
+        if(ur.EAN_norm!==ean)return;
+        if(lote!==null&&(ur.Lote_norm||'')!==lote)return;
+        if(classe&&ur.classe!==classe)return;
+        const urDk=DKS.find(k=>DEPOT_MAP[k].classes.includes(ur.classe));
+        if(depot&&urDk!==depot)return;
+        if(isExcluidoDifStock(ean,urDk,ur.produto))return;
+        qt+=Number(ur.qt)||0;
+      });
+    }
+    const p=pm[ean]||0;
+    if(p>0)temPreco=true;
+    total+=qt*p;
   }
   return{total,temPreco};
 }
 function calcReconDepotWmsValor(filteredRows,dk,cl=null){
-  if(!uniData||!filteredRows.length)return{total:0,temPreco:false};
-  const keys=new Set(filteredRows.map(r=>r.EAN_norm+'|'+(r.Lote_norm||'')));
+  if(!filteredRows.length)return{total:0,temPreco:false};
+  const pm=buildSapPrecoMap();
   let total=0,temPreco=false;
-  for(const ur of uniRowsForDepot(dk)){
-    if(cl&&ur.classe!==cl)continue;
-    if(!keys.has(ur.EAN_norm+'|'+(ur.Lote_norm||'')))continue;
-    if(isExcluidoDifStock(ur.EAN_norm,dk,ur.produto))continue;
-    const lv=wmsLineValor(ur);
-    if(lv!==0)temPreco=true;
-    total+=lv;
+  for(const r of filteredRows){
+    if(isExcluidoDifStock(r.EAN_norm,dk,r.desc))continue;
+    let qt=Number(r.qt_uni)||0;
+    if(cl&&r.qt_uni_by_class)qt=Number(r.qt_uni_by_class[cl])||0;
+    const p=pm[r.EAN_norm]||0;
+    if(p>0)temPreco=true;
+    total+=qt*p;
   }
   return{total,temPreco};
 }
 function calcEanViewWmsValor(filteredRows){
-  if(!uniData||!filteredRows.length)return{total:0,temPreco:false};
-  const eans=new Set(filteredRows.map(r=>r.EAN_norm));
+  if(!filteredRows.length)return{total:0,temPreco:false};
+  const pm=buildSapPrecoMap();
   let total=0,temPreco=false;
-  for(const dk of DKS){
-    for(const ur of uniRowsForDepot(dk)){
-      if(!eans.has(ur.EAN_norm))continue;
-      if(isExcluidoDifStock(ur.EAN_norm,dk,ur.produto))continue;
-      const lv=wmsLineValor(ur);
-      if(lv!==0)temPreco=true;
-      total+=lv;
-    }
+  for(const r of filteredRows){
+    if(isExcluidoDifStock(r.EAN_norm,null,r.desc))continue;
+    const p=pm[r.EAN_norm]||0;
+    if(p>0)temPreco=true;
+    total+=(Number(r.qt_uni!=null?r.qt_uni:r.qtUni)||0)*p;
   }
   return{total,temPreco};
 }
 function kpiValorTotCards(valorSap,valorWms,temPreco){
   if(!temPreco)return '';
-  return `<div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fmtKvBrl(valorSap)}</div><div class="ks">preço SAP × qtd · ${RECON_EXCL_KS}</div></div>
-    <div class="kpi"><div class="kl">Valor WMS</div><div class="kv b">${fmtKvBrl(valorWms)}</div><div class="ks">preço WMS × qtd · ${RECON_EXCL_KS}</div></div>`;
+  return `<div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fmtKvBrl(valorSap)}</div><div class="ks">preço SAP × qtd SAP · ${RECON_EXCL_KS}</div></div>
+    <div class="kpi"><div class="kl">Valor Unilog @ preço SAP</div><div class="kv b">${fmtKvBrl(valorWms)}</div><div class="ks">preço SAP × qtd Unilog · ${RECON_EXCL_KS}</div></div>`;
 }
 function sapRowsForDepot(dk){
   if(!sapData?.length)return[];
@@ -3273,27 +3290,16 @@ function auditEanCoverage(){
   return report;
 }
 function calcEanViewKpis(rows,precoMap){
-  const eans=new Set(rows.map(r=>r.EAN_norm));
-  let difVlr=0,valorSap=0,valorUni=0,temPrecoWms=false;
+  let difVlr=0,valorSap=0,valorUni=0;
   for(const r of rows){
     const semValor=r.semValor||isExcluidoDifStock(r.EAN_norm,null,r.desc);
     if(semValor)continue;
     const preco=precoMap[r.EAN_norm]||0;
     difVlr+=(r.qt_sap-r.qt_uni)*preco;
     valorSap+=r.qt_sap*preco;
+    valorUni+=r.qt_uni*preco;
   }
-  if(uniData&&eans.size){
-    for(const dk of DKS){
-      for(const ur of uniRowsForDepot(dk)){
-        if(!eans.has(ur.EAN_norm))continue;
-        if(isExcluidoDifStock(ur.EAN_norm,dk,ur.produto))continue;
-        const lv=wmsLineValor(ur);
-        if(lv!==0)temPrecoWms=true;
-        valorUni+=lv;
-      }
-    }
-  }
-  const temPreco=Object.values(precoMap).some(p=>p>0)||temPrecoWms;
+  const temPreco=Object.values(precoMap).some(p=>p>0);
   return{difVlr,valorSap,valorUni,temPreco};
 }
 function sumEanValorDiff(rows,precoMap){
@@ -3319,7 +3325,6 @@ function calcReconTotals({catFilter=null,subcatFilter=null,depotFilter=null,diff
   let totalValorLiq=0,qtSap=0,qtUni=0,valorSap=0,valorUni=0;
   const sapPairs=new Set(),uniPairs=new Set();
   const dks=depotFilter?[depotFilter]:DKS;
-  const wmsKeys=diffOnly||rowPredicate?new Set():null;
   for(const dk of dks){
     for(const r of (reconData[dk]||[])){
       if(rowPredicate&&!rowPredicate(r,dk))continue;
@@ -3332,65 +3337,34 @@ function calcReconTotals({catFilter=null,subcatFilter=null,depotFilter=null,diff
       if(!exclValor)totalValorLiq+=r.diff*preco;
       qtSap+=r.qt_sap;
       qtUni+=r.qt_uni;
-      if(!exclValor)valorSap+=r.qt_sap*preco;
+      if(!exclValor){
+        valorSap+=r.qt_sap*preco;
+        valorUni+=r.qt_uni*preco;
+      }
       if(r.qt_sap>0)sapPairs.add(r.EAN_norm+'|'+r.Lote_norm);
-      if(r.qt_uni>0){
-        uniPairs.add(r.EAN_norm+'|'+r.Lote_norm);
-        if(wmsKeys)wmsKeys.add(r.EAN_norm+'|'+r.Lote_norm);
-      }
+      if(r.qt_uni>0)uniPairs.add(r.EAN_norm+'|'+r.Lote_norm);
     }
   }
-  let temPrecoWms=false;
-  if(uniData){
-    for(const dk of dks){
-      for(const ur of uniRowsForDepot(dk)){
-        const param=occParams.find(p=>p.ean===ur.EAN_norm);
-        if(catFilter?.size&&!catFilter.has(param?.cat||''))continue;
-        if(subcatFilter?.size&&!subcatFilter.has(param?.subcat||''))continue;
-        if(wmsKeys&&!wmsKeys.has(ur.EAN_norm+'|'+ur.Lote_norm))continue;
-        if(isExcluidoDifStock(ur.EAN_norm,dk,ur.produto))continue;
-        const lv=wmsLineValor(ur);
-        if(lv!==0)temPrecoWms=true;
-        valorUni+=lv;
-      }
-    }
-  }
-  return{totalValorLiq,difVlr:totalValorLiq,qtSap,qtUni,valorSap,valorUni,sapPairs,uniPairs,temPreco:Object.values(precoMap).some(p=>p>0)||temPrecoWms,precoMap};
+  return{totalValorLiq,difVlr:totalValorLiq,qtSap,qtUni,valorSap,valorUni,sapPairs,uniPairs,temPreco:Object.values(precoMap).some(p=>p>0),precoMap};
 }
 
 function calcValorGapByEan({catFilter=null}={}){
-  // Exclui equipamento profissional / MUIM e caixas de papelão. Dif. valor = dif. qtd × preço SAP (igual banner / Por EAN).
+  // Exclui equipamento profissional / MUIM e caixas de papelão.
+  // Valor Unilog e Dif. valor usam sempre preço SAP (qtd Unilog × preço SAP).
   const precoMap=buildSapPrecoMap();
   const byEan=buildEanAgg({catFilter});
-  const wmsValorByEan={};
   const dm={};
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&r.desc)dm[r.EAN_norm]=r.desc;});
   if(uniData)uniData.forEach(r=>{if(r.EAN_norm&&r.produto&&!dm[r.EAN_norm])dm[r.EAN_norm]=r.produto;});
   for(const ean of Object.keys(byEan)){
     if(!byEan[ean].desc)byEan[ean].desc=dm[ean]||'';
   }
-  if(uniData){
-    for(const dk of DKS){
-      for(const ur of uniRowsForDepot(dk)){
-        if(isExcluidoDifStock(ur.EAN_norm,dk,ur.produto))continue;
-        const param=occParams.find(p=>p.ean===ur.EAN_norm);
-        if(catFilter?.size&&!catFilter.has(param?.cat||''))continue;
-        const ean=ur.EAN_norm;
-        if(!byEan[ean]){
-          byEan[ean]={EAN_norm:ean,desc:ur.produto||dm[ean]||'',cat:param?.cat||'',subcat:param?.subcat||'',qt_sap:0,qt_uni:0,difQt:0,depDiffs:[]};
-        }
-        const lv=wmsLineValor(ur);
-        wmsValorByEan[ean]=(wmsValorByEan[ean]||0)+lv;
-      }
-    }
-  }
   const rows=Object.values(byEan).map(r=>{
     const precoSap=precoMap[r.EAN_norm]||0;
     const valorSap=r.qt_sap*precoSap;
-    const valorWms=wmsValorByEan[r.EAN_norm]||0;
-    const precoWms=r.qt_uni>0&&valorWms>0?valorWms/r.qt_uni:0;
+    const valorWms=r.qt_uni*precoSap;
     const difValor=r.difQt*precoSap;
-    return{...r,qtSap:r.qt_sap,qtUni:r.qt_uni,precoSap,precoWms,valorSap,valorWms,difValor,sapCode:getSapCode(r.EAN_norm)};
+    return{...r,qtSap:r.qt_sap,qtUni:r.qt_uni,precoSap,precoWms:precoSap,valorSap,valorWms,difValor,sapCode:getSapCode(r.EAN_norm)};
   }).filter(r=>!isExcluidoDifStock(r.EAN_norm,null,r.desc)&&(r.valorSap!==0||r.valorWms!==0||r.qt_sap!==0||r.qt_uni!==0));
   return{rows,gapTotal:rows.reduce((s,r)=>s+r.difValor,0),precoMap};
 }
@@ -5118,7 +5092,8 @@ function updateLoadBanner(uploadedAt){
           <thead><tr>
             <th>Cód. SAP</th><th>EAN</th><th>Descrição</th>
             <th class="num">Qtd SAP</th><th class="num">Qtd WMS</th>
-            <th class="num">Preço SAP</th><th class="num">Preço WMS</th>
+            <th class="num">Preço SAP</th>
+            <th class="num" title="Valor Unilog = qtd WMS × preço SAP">Valor Unilog @ SAP</th>
             <th class="num" title="Dif. qtd × preço SAP">Dif. valor</th>
             <th class="num">Dif. Qtd</th>
           </tr></thead>
@@ -5169,7 +5144,7 @@ function renderValorGapPanel(){
       <td class="num">${fQ(r.qtSap)}</td>
       <td class="num">${fQ(r.qtUni)}</td>
       <td class="num">${fP(r.precoSap)}</td>
-      <td class="num">${fP(r.precoWms)}</td>
+      <td class="num">${fmtBrl(r.valorWms)}</td>
       <td class="num ${liqCls(r.difValor)}">${fmtBrlLiq(r.difValor)}</td>
       <td class="num ${dqCls}">${r.difQt>0?'+':''}${fQ(r.difQt)}</td>
     </tr>`;
@@ -5181,12 +5156,13 @@ function exportValorGapXlsx(){
   if(!_valorGapRows.length){toast('Sem dados','error');return;}
   const data=_valorGapRows.map(r=>({
     Cod_SAP:r.sapCode,EAN:r.EAN_norm,Descricao:r.desc,Categoria:r.cat,Subcategoria:r.subcat,
-    Qtd_SAP:r.qtSap,Qtd_WMS:r.qtUni,Preco_SAP:r.precoSap,Preco_WMS:r.precoWms,
+    Qtd_SAP:r.qtSap,Qtd_WMS:r.qtUni,Preco_SAP:r.precoSap,
+    Valor_SAP:r.valorSap,Valor_Unilog_preco_SAP:r.valorWms,
     Dif_Valor:r.difValor,Dif_Qtd:r.difQt
   }));
   const ws=XLSX.utils.json_to_sheet(data);
-  ws['!cols']=[{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12},{wch:12},{wch:14},{wch:10}];
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Dif Valor SAP WMS');
+  ws['!cols']=[{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:10},{wch:12},{wch:12},{wch:14},{wch:12},{wch:10}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Dif Valor @ preço SAP');
   XLSX.writeFile(wb,`dif_valor_sap_wms_${company}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
@@ -5210,8 +5186,8 @@ function recalcBanner(){
     <div class="kpi"><div class="kl">Qtd SAP</div><div class="kv">${fmtKvNum(qtSap)}</div></div>
     <div class="kpi"><div class="kl">Qtd WMS</div><div class="kv">${fmtKvNum(qtUni)}</div></div>
     ${temVlr?`
-    <div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fmtKvBrl(recon.valorSap)}</div><div class="ks">preço SAP × qtd · ${RECON_EXCL_KS}</div></div>
-    <div class="kpi"><div class="kl">Valor WMS</div><div class="kv b">${fmtKvBrl(recon.valorUni)}</div><div class="ks">preço WMS × qtd · ${RECON_EXCL_KS}</div></div>
+    <div class="kpi"><div class="kl">Valor SAP</div><div class="kv b">${fmtKvBrl(recon.valorSap)}</div><div class="ks">preço SAP × qtd SAP · ${RECON_EXCL_KS}</div></div>
+    <div class="kpi"><div class="kl">Valor Unilog @ preço SAP</div><div class="kv b">${fmtKvBrl(recon.valorUni)}</div><div class="ks">preço SAP × qtd Unilog · ${RECON_EXCL_KS}</div></div>
     <div class="kpi"><div class="kl">Dif. Valor</div><div class="kv ${kvLiqCls(difVlr)}">${fmtKvBrlLiq(difVlr)}</div><div class="ks">preço SAP × dif qtd · ${RECON_EXCL_KS}</div></div>`:''}
   `;
   if(temVlr)renderValorGapPanel();
@@ -9064,7 +9040,7 @@ function applyResizable(){scheduleColResize();}
   // inventario-acerto.js / mapa-acertos.js are optional — never block app boot on them
   function loadInventarioAcerto() {
     // mapa-acertos first — Acerto Inventário reuses maExportPatchedXlsx / same template
-    load('mapa-acertos.js', 'v=1.0.12', function () {
+    load('mapa-acertos.js', 'v=1.0.15', function () {
       load('inventario-acerto.js', 'v=1.0.10');
     }, function () {
       load('inventario-acerto.js', 'v=1.0.10');
