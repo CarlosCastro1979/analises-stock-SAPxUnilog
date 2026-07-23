@@ -680,7 +680,12 @@ select.cad-inp{cursor:pointer;}
       Depois disso, se ainda sobrar SAP &gt; Unilog fora do <strong>0044</strong>, essas unidades vão para <strong>0044</strong> (DESCER origem + SUBIR 0044, mesma qty/EAN), para não deixar stock errado nos depósitos de venda.
       No final das movimentações <strong>não pode haver diferença de valor</strong> — só alterações de depósito ou redistribuição dentro do mesmo EAN; Σ Diferenças Valorizadas = 0 (neto qty e neto valor zero). Não é inventário a valor.
       Scope: <strong>todos os artigos com stock SAP</strong> nos depósitos 0008 / 0009 / 0011 / 0022 / 0044 (ficheiro: <code>acerto_sem_valor_AAAA-MM-DD.xlsx</code>).
+      Com filtros activos, o Excel exporta <strong>só os produtos filtrados</strong>.
     </p>
+    <div class="tb">
+      <div class="ms-wrap" id="ms-maCat" data-placeholder="Categorias" data-onchange="renderMapaAcertosPage"><div class="ms-btn" onclick="msTogOpen('maCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('maCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('maCat')">Todas</button><button onclick="msClrAll('maCat')">Limpar</button></div><div class="ms-list"></div></div></div>
+      <div class="ms-wrap" id="ms-maSub" data-placeholder="Subcategorias" data-onchange="renderMapaAcertosPage"><div class="ms-btn" onclick="msTogOpen('maSub')"><span class="ms-btn-lbl">Todas as subcategorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('maSub',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('maSub')">Todas</button><button onclick="msClrAll('maSub')">Limpar</button></div><div class="ms-list"></div></div></div>
+    </div>
     <div class="kr" id="maKpis"></div>
     <div class="tw2" id="maTableWrap" style="display:none">
       <table id="maTable">
@@ -9059,7 +9064,7 @@ function applyResizable(){scheduleColResize();}
   // inventario-acerto.js / mapa-acertos.js are optional — never block app boot on them
   function loadInventarioAcerto() {
     // mapa-acertos first — Acerto Inventário reuses maExportPatchedXlsx / same template
-    load('mapa-acertos.js', 'v=1.0.11', function () {
+    load('mapa-acertos.js', 'v=1.0.12', function () {
       load('inventario-acerto.js', 'v=1.0.10');
     }, function () {
       load('inventario-acerto.js', 'v=1.0.10');

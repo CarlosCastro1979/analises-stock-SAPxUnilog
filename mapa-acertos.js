@@ -1,7 +1,7 @@
 /* Mapa Acertos — doc. acerto sem valor (redistribuição EAN neto zero + sobras SAP→0044) */
 (function (global) {
   'use strict';
-  const MAPA_ACERTOS_JS_VERSION = '1.0.11';
+  const MAPA_ACERTOS_JS_VERSION = '1.0.12';
   /** @deprecated test filter removed — full SAP-stock scope. Kept empty for old callers. */
   const MA_TEST_MATERIALS = [];
   /** @deprecated */
@@ -94,6 +94,12 @@
     const anyEan = sap.find(function (x) { return x.EAN_norm === ean && x.material; });
     if (anyEan) return String(anyEan.material).trim();
     return '';
+  }
+  function maResolveCat(ean, existingCat, existingSub) {
+    if (existingCat || existingSub) return { cat: existingCat || '', subcat: existingSub || '' };
+    const params = typeof occParams !== 'undefined' ? occParams : [];
+    const p = params.find(function (x) { return x.ean === ean; });
+    return { cat: (p && p.cat) || '', subcat: (p && p.subcat) || '' };
   }
   function maGetUmb(ean) {
     const row = (typeof sapData !== 'undefined' ? sapData : []).find(function (x) { return x.EAN_norm === ean; });
@@ -272,10 +278,13 @@
         const qtUniCell = Number(r.qt_uni) || 0;
         if (qtSapCell <= 0 && qtUniCell <= 0) continue;
         if (!groups.has(ean)) {
+          const cs0 = maResolveCat(ean, r.cat, r.subcat);
           groups.set(ean, {
             EAN_norm: ean,
             material: material,
             desc: r.desc || '',
+            cat: cs0.cat,
+            subcat: cs0.subcat,
             umb: maGetUmb(ean),
             cells: {},
           });
@@ -283,6 +292,11 @@
         const g = groups.get(ean);
         if (!g.material && material) g.material = material;
         if (!g.desc && r.desc) g.desc = r.desc;
+        if ((!g.cat && !g.subcat) && (r.cat || r.subcat)) {
+          const cs1 = maResolveCat(ean, r.cat, r.subcat);
+          g.cat = cs1.cat;
+          g.subcat = cs1.subcat;
+        }
         const cellKey = dk + '|' + lote;
         const qt_sap = Number(r.qt_sap) || 0;
         const qt_uni = Number(r.qt_uni) || 0;
@@ -343,6 +357,8 @@
           EAN_norm: g.EAN_norm,
           desc: e.desc || g.desc || '',
           lote: e.lote || '',
+          cat: g.cat || '',
+          subcat: g.subcat || '',
           umb: g.umb || 'UN',
           preco: preco,
           qt_uni: e.qt_uni,
@@ -372,6 +388,23 @@
       console.log('[mapa-acertos] net adj qty (deve ser 0):', bal.netQty, '| net valor (deve ser 0):', bal.netVal, bal.ok ? 'OK' : bal.issues);
     } catch (e) {}
     return out;
+  }
+
+  /** Rows after cat/sub filters — used by UI and Excel export. */
+  function getMapaAcertosFilteredRows(options) {
+    let rows = buildMapaAcertosRows(options || { testOnly: false });
+
+    const cats = [...new Set(rows.map(function (r) { return r.cat; }).filter(Boolean))].sort();
+    if (typeof msUpdate === 'function') msUpdate('maCat', cats, 'Categorias', 'renderMapaAcertosPage');
+    const selCats = typeof msGet === 'function' ? msGet('maCat') : new Set();
+    const subSrc = selCats.size ? rows.filter(function (r) { return selCats.has(r.cat); }) : rows;
+    const subs = [...new Set(subSrc.map(function (r) { return r.subcat; }).filter(Boolean))].sort();
+    if (typeof msUpdate === 'function') msUpdate('maSub', subs, 'Subcategorias', 'renderMapaAcertosPage');
+    const selSubs = typeof msGet === 'function' ? msGet('maSub') : new Set();
+
+    if (selCats.size) rows = rows.filter(function (r) { return selCats.has(r.cat); });
+    if (selSubs.size) rows = rows.filter(function (r) { return selSubs.has(r.subcat); });
+    return rows;
   }
 
   function maXmlEsc(s) {
@@ -870,9 +903,16 @@
       toast('Sem dados de conciliação — carrega SAP e Unilog e processa', 'error');
       return;
     }
-    const rows = buildMapaAcertosRows({ testOnly: false });
+    const rows = getMapaAcertosFilteredRows({ testOnly: false });
     if (!rows.length) {
-      toast('Sem acertos (sem gaps balanceáveis nem sobra SAP fora do 0044)', 'info');
+      const selCats = typeof msGet === 'function' ? msGet('maCat') : new Set();
+      const selSubs = typeof msGet === 'function' ? msGet('maSub') : new Set();
+      toast(
+        selCats.size || selSubs.size
+          ? 'Sem acertos nos filtros actuais (categoria/subcategoria)'
+          : 'Sem acertos (sem gaps balanceáveis nem sobra SAP fora do 0044)',
+        'info'
+      );
       renderMapaAcertosPage();
       return;
     }
@@ -888,6 +928,9 @@
       const subir = rows.reduce(function (s, r) { return s + r.subir; }, 0);
       const descer = rows.reduce(function (s, r) { return s + r.descer; }, 0);
       var msg = 'Exportado: ' + result.written + ' linhas · subir ' + subir + ' / descer ' + descer + ' · neto qty/valor 0';
+      const selCats = typeof msGet === 'function' ? msGet('maCat') : new Set();
+      const selSubs = typeof msGet === 'function' ? msGet('maSub') : new Set();
+      if (selCats.size || selSubs.size) msg += ' (filtrado)';
       if (result.truncated) msg += ' · aviso: limite ' + result.maxPerSheet + ' linhas/folha (template)';
       toast(msg, result.truncated ? 'info' : 'success');
       renderMapaAcertosPage();
@@ -918,11 +961,17 @@
     const body = document.getElementById('maBody');
     const empty = document.getElementById('maEmpty');
     const wrap = document.getElementById('maTableWrap');
+    const msgEl = document.getElementById('maEmptyMsg');
     if (!body) return;
     if (!rows.length) {
       body.innerHTML = '';
       if (empty) empty.style.display = 'block';
       if (wrap) wrap.style.display = 'none';
+      const selCats = typeof msGet === 'function' ? msGet('maCat') : new Set();
+      const selSubs = typeof msGet === 'function' ? msGet('maSub') : new Set();
+      if (msgEl && (selCats.size || selSubs.size)) {
+        msgEl.textContent = 'Nenhuma linha com os filtros activos — limpa categoria/subcategoria';
+      }
       return;
     }
     if (empty) empty.style.display = 'none';
@@ -973,14 +1022,20 @@
       if (msg) msg.textContent = 'Carrega SAP + Unilog e clica Processar na página Dados';
       return;
     }
-    const rows = buildMapaAcertosRows({ testOnly: false });
+    const rows = getMapaAcertosFilteredRows({ testOnly: false });
     renderMapaAcertosKpis(rows);
     renderMapaAcertosTable(rows);
     const empty = document.getElementById('maEmpty');
     const msg = document.getElementById('maEmptyMsg');
     if (!rows.length && empty) {
       empty.style.display = 'block';
-      if (msg) msg.textContent = 'Sem acertos (sem gaps SAP↔Unilog balanceáveis no EAN, nem sobra SAP fora do 0044 para mover).';
+      const selCats = typeof msGet === 'function' ? msGet('maCat') : new Set();
+      const selSubs = typeof msGet === 'function' ? msGet('maSub') : new Set();
+      if (msg) {
+        msg.textContent = selCats.size || selSubs.size
+          ? 'Nenhuma linha com os filtros activos — limpa categoria/subcategoria'
+          : 'Sem acertos (sem gaps SAP↔Unilog balanceáveis no EAN, nem sobra SAP fora do 0044 para mover).';
+      }
     }
   }
 
@@ -994,6 +1049,7 @@
   global.MAPA_ACERTOS_TEST_MATERIAL = MAPA_ACERTOS_TEST_MATERIAL;
   global.MAPA_ACERTOS_DEPOTS = MAPA_ACERTOS_DEPOTS;
   global.buildMapaAcertosRows = buildMapaAcertosRows;
+  global.getMapaAcertosFilteredRows = getMapaAcertosFilteredRows;
   global.renderMapaAcertosPage = renderMapaAcertosPage;
   global.exportMapaAcertosXlsx = exportMapaAcertosXlsx;
   global.mapaAcertosExportFilename = mapaAcertosExportFilename;
