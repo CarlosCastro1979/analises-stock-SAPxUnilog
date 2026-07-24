@@ -1,15 +1,16 @@
-/* Mapa Acertos — doc. acerto sem valor (redistribuição EAN neto zero + sobras SAP→0044) */
+/* Mapa Acertos — doc. acerto sem valor (redistribuição EAN neto zero; cx→0044 só se ainda fora) */
 (function (global) {
   'use strict';
-  const MAPA_ACERTOS_JS_VERSION = '1.0.15';
+  const MAPA_ACERTOS_JS_VERSION = '1.0.16';
   /** @deprecated test filter removed — full SAP-stock scope. Kept empty for old callers. */
   const MA_TEST_MATERIALS = [];
   /** @deprecated */
   const MAPA_ACERTOS_TEST_MATERIAL = '';
   const MAPA_ACERTOS_DEPOTS = ['8', '9', '11', '22', '44'];
   const MAPA_ACERTOS_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
-  /** Depósito destino de sobras SAP (excesso após igualar Unilog nos outros deps). */
+  /** Destino desejado para caixas de papelão (sem WMS): consolidar SAP fora deste dep. */
   const MAPA_ACERTOS_DEPOT_SOBRA = '44';
+  const MA_CAIXAS_CAT = (typeof CAIXAS_PAPELAO_CAT !== 'undefined') ? CAIXAS_PAPELAO_CAT : 'Caixas de Papelão';
   /**
    * Template sheet1 (XML): headers rows 7–8, cols A–O (B = Descrição; NOT B–F merge).
    * First data row = 9 (overwrite thin spacer). SUM formulas updated to K9/N9 at export.
@@ -251,9 +252,16 @@
     return adj;
   }
 
+  /** Caixas de papelão: sem WMS — físico desejado = SAP no 0044. */
+  function maIsCaixasPapelao(ean, desc, cat) {
+    if (cat && String(cat) === MA_CAIXAS_CAT) return true;
+    if (typeof isCaixasPapelao === 'function') return !!isCaixasPapelao(ean, desc);
+    if (desc && /\bPAPEL[ÃA]O\b|\bCAIXA[S]?\s+DE\s+PAPEL|\bCX\.?\s+PAPEL/i.test(String(desc))) return true;
+    return false;
+  }
   /**
-   * After depot-level balance: remaining SAP excess vs Unilog on non-0044 depots
-   * → DESCER source + SUBIR 0044 (same EAN/qty). Excess already on 0044 left as-is.
+   * Só para caixas (físico desejado = 0044): SAP ainda fora do 0044 → DESCER source + SUBIR 0044.
+   * Excess já no 0044 fica. NÃO usar para artigos com WMS — sobra residual fica para inventário.
    * adjDepot keyed by depot id ('8','9',...). Mutates adjDepot.
    */
   function maMoveExcessTo0044Depot(depotAgg, adjDepot) {
@@ -264,6 +272,7 @@
       const d = depotAgg[depot];
       if (!d) continue;
       const adj = adjDepot[depot] || 0;
+      // Cx: físico desejado é 0044 — move SAP residual fora do 0044 (vs uni local, tipicamente 0).
       const sapAfter = (Number(d.qt_sap) || 0) + adj;
       const excess = sapAfter - (Number(d.qt_uni) || 0);
       if (!(excess > 0)) continue;
@@ -392,6 +401,85 @@
     return loteAdj;
   }
 
+  /**
+   * Recon exclui caixas do dep. 0011 (fora da dif. SAP×WMS). Para o mapa, o físico
+   * desejado das caixas é 0044 — precisamos ver SAP em TODOS os deps (incl. 0011).
+   * Soma SAP por dep|lote e aplica como fonte de verdade (evita double-count com recon).
+   */
+  function maAugmentCaixasSapIntoGroups(groups) {
+    const sap = typeof sapData !== 'undefined' && sapData ? sapData : [];
+    const sapSum = {}; // ean -> cellKey -> {dk,lote,qt,material,desc}
+    for (var i = 0; i < sap.length; i++) {
+      const r = sap[i];
+      const dk = String(r.deposito || '');
+      if (MAPA_ACERTOS_DEPOTS.indexOf(dk) < 0) continue;
+      const ean = r.EAN_norm || '';
+      if (!ean) continue;
+      const qt = Number(r.qt) || 0;
+      if (qt <= 0) continue;
+      if (!maIsCaixasPapelao(ean, r.desc, '')) continue;
+      const lote = r.Lote_norm || '';
+      const cellKey = dk + '|' + lote;
+      if (!sapSum[ean]) sapSum[ean] = {};
+      if (!sapSum[ean][cellKey]) {
+        sapSum[ean][cellKey] = {
+          depot: dk,
+          lote: lote,
+          qt: 0,
+          material: r.material ? String(r.material).trim() : '',
+          desc: r.desc || '',
+        };
+      }
+      sapSum[ean][cellKey].qt += qt;
+      if (!sapSum[ean][cellKey].material && r.material) sapSum[ean][cellKey].material = String(r.material).trim();
+      if (!sapSum[ean][cellKey].desc && r.desc) sapSum[ean][cellKey].desc = r.desc;
+    }
+    Object.keys(sapSum).forEach(function (ean) {
+      const cells = sapSum[ean];
+      if (!groups.has(ean)) {
+        const first = cells[Object.keys(cells)[0]];
+        const cs0 = maResolveCat(ean, '', '');
+        groups.set(ean, {
+          EAN_norm: ean,
+          material: (first && first.material) || '',
+          desc: (first && first.desc) || '',
+          cat: cs0.cat || MA_CAIXAS_CAT,
+          subcat: cs0.subcat || '',
+          umb: maGetUmb(ean),
+          cells: {},
+          _caixas: true,
+        });
+      }
+      const g = groups.get(ean);
+      g._caixas = true;
+      if (!g.cat) g.cat = MA_CAIXAS_CAT;
+      Object.keys(cells).forEach(function (cellKey) {
+        const s = cells[cellKey];
+        if (!g.material && s.material) g.material = s.material;
+        if (!g.desc && s.desc) g.desc = s.desc;
+        const prev = g.cells[cellKey];
+        if (prev) {
+          prev.qt_sap = s.qt; // SAP raw = source of truth for caixas
+          prev.gap = prev.qt_uni - prev.qt_sap;
+          if (!prev.material && s.material) prev.material = s.material;
+          if (!prev.desc && s.desc) prev.desc = s.desc;
+        } else {
+          g.cells[cellKey] = {
+            key: cellKey,
+            depot: s.depot,
+            depotSheet: maDepotSheet(s.depot),
+            lote: s.lote,
+            material: s.material,
+            desc: s.desc,
+            qt_sap: s.qt,
+            qt_uni: 0,
+            gap: -s.qt,
+          };
+        }
+      });
+    });
+  }
+
   function buildMapaAcertosRows(options) {
     const opts = options || {};
     /** Full scope by default. Pass testOnly:true only for legacy debug. */
@@ -426,6 +514,7 @@
             subcat: cs0.subcat,
             umb: maGetUmb(ean),
             cells: {},
+            _caixas: maIsCaixasPapelao(ean, r.desc || '', cs0.cat || r.cat),
           });
         }
         const g = groups.get(ean);
@@ -436,6 +525,7 @@
           g.cat = cs1.cat;
           g.subcat = cs1.subcat;
         }
+        if (!g._caixas) g._caixas = maIsCaixasPapelao(ean, g.desc || r.desc, g.cat || r.cat);
         const cellKey = dk + '|' + lote;
         const qt_sap = Number(r.qt_sap) || 0;
         const qt_uni = Number(r.qt_uni) || 0;
@@ -462,14 +552,21 @@
       }
     }
 
+    // Caixas no 0011 estão fora do recon — injectar SAP directo para consolidar → 0044.
+    maAugmentCaixasSapIntoGroups(groups);
+
     const out = [];
     for (const g of groups.values()) {
       const entries = Object.keys(g.cells).map(function (k) { return g.cells[k]; });
       var sapTotal = 0;
-      for (var ei = 0; ei < entries.length; ei++) sapTotal += Number(entries[ei].qt_sap) || 0;
+      for (var ei = 0; ei < entries.length; ei++) {
+        sapTotal += Number(entries[ei].qt_sap) || 0;
+      }
       if (sapTotal <= 0) continue;
 
-      // 1) Aggregate by depot — match Unilog depot totals (not lote reshuffles)
+      const isCaixas = !!(g._caixas || maIsCaixasPapelao(g.EAN_norm, g.desc, g.cat));
+
+      // 1) Aggregate by depot — match Unilog depot totals (físico desejado = WMS)
       const depotAgg = {};
       for (var ci = 0; ci < entries.length; ci++) {
         const e = entries[ci];
@@ -483,12 +580,44 @@
         const d = depotAgg[dk];
         d.gap = d.qt_uni - d.qt_sap;
       });
+
+      // Já alinhado ao físico? (SAP == Unilog por dep.; cx já só no 0044)
+      var needsAdj = false;
+      if (isCaixas) {
+        Object.keys(depotAgg).forEach(function (dk) {
+          if (dk === MAPA_ACERTOS_DEPOT_SOBRA) return;
+          if ((Number(depotAgg[dk].qt_sap) || 0) > MA_BALANCE_EPS) needsAdj = true;
+        });
+      } else {
+        Object.keys(depotAgg).forEach(function (dk) {
+          if (Math.abs(Number(depotAgg[dk].gap) || 0) > MA_BALANCE_EPS) needsAdj = true;
+        });
+      }
+      if (!needsAdj) continue;
+
       const depotEntries = Object.keys(depotAgg).map(function (dk) { return depotAgg[dk]; });
-      const adjDepot = maBalanceGaps(depotEntries);
+      // Artigos com WMS: só transferências que aproximam SAP do Unilog (sem inventar destino 0044).
+      const adjDepot = isCaixas ? {} : maBalanceGaps(depotEntries);
+      if (!isCaixas) {
+        Object.keys(depotAgg).forEach(function (dk) {
+          if (adjDepot[dk] == null) adjDepot[dk] = 0;
+        });
+      } else {
+        Object.keys(depotAgg).forEach(function (dk) { adjDepot[dk] = 0; });
+      }
       const balanceDepot = {};
       Object.keys(adjDepot).forEach(function (k) { balanceDepot[k] = adjDepot[k]; });
-      // 2) Residual SAP excess after matching Unilog → 0044
-      maMoveExcessTo0044Depot(depotAgg, adjDepot);
+      // 2) Caixas sem WMS: físico desejado = 0044 — consolidar SAP ainda fora do 0044.
+      //    NÃO despejar sobra residual de artigos com Unilog (isso inventava "Subir 0044"
+      //    mesmo quando 0044/WMS já estavam correctos).
+      if (isCaixas) {
+        maMoveExcessTo0044Depot(depotAgg, adjDepot);
+      }
+      // Sem movimento real → omitir (SAP já = físico desejado)
+      var hasMove = Object.keys(adjDepot).some(function (k) {
+        return Math.abs(Number(adjDepot[k]) || 0) > MA_BALANCE_EPS;
+      });
+      if (!hasMove) continue;
       if (!maFixAdjMapNetZero(adjDepot)) {
         try {
           console.error('[mapa-acertos] EAN ' + g.EAN_norm + ' adj depot desequilibrado — omitido', adjDepot);
@@ -511,9 +640,9 @@
         const subir = adj > 0 ? adj : 0;
         const descer = adj < 0 ? -adj : 0;
         const qt_sap_after = (Number(e.qt_sap) || 0) + subir - descer;
-        const sobra0044 = e.depot === MAPA_ACERTOS_DEPOT_SOBRA
+        const sobra0044 = isCaixas && e.depot === MAPA_ACERTOS_DEPOT_SOBRA
           ? (adjDepot[MAPA_ACERTOS_DEPOT_SOBRA] || 0) > 0
-          : ((balanceDepot[e.depot] || 0) !== (adjDepot[e.depot] || 0));
+          : false;
         out.push({
           depot: e.depot,
           depotSheet: e.depotSheet,
@@ -1120,7 +1249,7 @@
       toast(
         selCats.size || selSubs.size
           ? 'Sem acertos nos filtros actuais (categoria/subcategoria)'
-          : 'Sem acertos (sem gaps balanceáveis nem sobra SAP fora do 0044)',
+          : 'Sem acertos (sem gaps balanceáveis SAP↔Unilog; caixas já no 0044 omitidas)',
         'info'
       );
       renderMapaAcertosPage();
@@ -1246,7 +1375,7 @@
       if (msg) {
         msg.textContent = selCats.size || selSubs.size
           ? 'Nenhuma linha com os filtros activos — limpa categoria/subcategoria'
-          : 'Sem acertos (sem gaps SAP↔Unilog balanceáveis no EAN, nem sobra SAP fora do 0044 para mover).';
+          : 'Sem acertos (SAP já = físico desejado por depósito; caixas já no 0044 omitidas; sobras sem destino WMS ficam para Acerto Inventário).';
       }
     }
   }
@@ -1274,6 +1403,7 @@
   global.maBalanceGaps = maBalanceGaps;
   global.maMoveExcessTo0044 = maMoveExcessTo0044;
   global.maMoveExcessTo0044Depot = maMoveExcessTo0044Depot;
+  global.maIsCaixasPapelao = maIsCaixasPapelao;
   global.maAllocateDepotAdjToLotes = maAllocateDepotAdjToLotes;
   global.maValidateNetZero = maValidateNetZero;
   global.maEnsureFflate = maEnsureFflate;
