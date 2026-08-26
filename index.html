@@ -484,7 +484,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.50 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.52 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -6435,6 +6435,7 @@ function mergeOccRowsByEan(rows){
     m.totalConsolidavel=(m.totalConsolidavel||0)+(r.totalConsolidavel||0);
     m.nLotes=(m.nLotes||0)+(r.nLotes||0);
     m.posOtimizadas=m.posReal-m.poupanca;
+    m._poupancaRaw=(m._poupancaRaw||0)+(r._poupancaRaw!=null?r._poupancaRaw:(r.poupanca||0));
     m.underutil=!!(m.underutil||r.underutil);
     m.loteDetail=m.loteDetail.concat(r.loteDetail||[]);
     if(r.vencidosNoOptim)m.vencidosNoOptim=true;
@@ -6463,17 +6464,19 @@ function findOccConsolidationPairs(enderecos,qpp){
   if(items.length<2)return[];
   // Prefer freeing PP first; among donors prefer smaller qt; among receptors prefer PK then fuller.
   // For PK→PK, prefer same physical subtype (1 palete / ½ / scaninho).
+  // Several donors may fill the same receptor while capacity remains (do not lock receptor after 1 merge).
   const donorOrder=[...items].sort((a,b)=>{
     const ta=a.type==='PP'?0:a.type==='OTHER'?1:2;
     const tb=b.type==='PP'?0:b.type==='OTHER'?1:2;
     if(ta!==tb)return ta-tb;
     return a.qt-b.qt;
   });
-  const pairs=[];const used=new Set();
+  const pairs=[];const emptied=new Set();
+  const fill={};items.forEach(x=>{fill[x.end]=x.qt;});
   let pkEnds=items.filter(x=>x.type==='PK').map(x=>x.end);
   for(const donor of donorOrder){
-    if(used.has(donor.i))continue;
-    const receptors=items.filter(r=>!used.has(r.i)&&r.i!==donor.i&&donor.qt+r.qt<=qpp)
+    if(emptied.has(donor.i))continue;
+    const receptors=items.filter(r=>!emptied.has(r.i)&&r.i!==donor.i&&donor.qt+fill[r.end]<=qpp)
       .filter(r=>occMoveTypeAllowed(donor.end,r.end)&&occMoveKeepsPK(donor.end,pkEnds))
       .sort((a,b)=>{
         if(donor.type==='PK'&&a.type==='PK'&&b.type==='PK'){
@@ -6487,7 +6490,9 @@ function findOccConsolidationPairs(enderecos,qpp){
     const rec=receptors[0];
     if(!rec)continue;
     pairs.push({end:donor.end,qt:donor.qt,receptor:rec.end,receptorIsPK:rec.type==='PK'});
-    used.add(donor.i);used.add(rec.i);
+    emptied.add(donor.i);
+    fill[rec.end]+=donor.qt;
+    fill[donor.end]=0;
     if(donor.type==='PK')pkEnds=pkEnds.filter(e=>e!==donor.end);
   }
   return pairs;
@@ -6545,8 +6550,8 @@ function buildOccRow(ean,v){
   const loteDetail=v.lotes.map(l=>computeOccLoteDetail(l,qpp));
   const posMinimaTotal=loteDetail.reduce((s,l)=>s+l.posMinima,0);
   const posConsolidavel=loteDetail.reduce((s,l)=>s+(l.consolidacao?.posExcesso||0),0);
-  const posExcessoTeorico=Math.max(0,posReal-posMinimaTotal);
-  const poupanca=posConsolidavel>0?posConsolidavel:posExcessoTeorico;
+  // Poupança teórica (mín. ceil); Vista de Stock sobrescreve com soma Liberta acionável em applyOccVistaExclPkPk.
+  const poupanca=Math.max(0,posReal-posMinimaTotal);
   const hasConsol=loteDetail.some(l=>l.consolidacao?.doadores?.length);
   const hasDC=loteDetail.some(l=>l.qtDC>0);
   const semLoteIssue=param&&param.lote_obrigatorio===false&&v.lotes.length>1;
@@ -6557,12 +6562,20 @@ function buildOccRows(uniFiltered,descMap){
   const byKey=buildOccAgg(uniFiltered,descMap);
   return Object.values(byKey).map(v=>buildOccRow(v.ean,v));
 }
-function occExcessMoveHint(l,qpp,productPkEnds){
-  if(!l.enderecos||!l.enderecos.length||l.posReais<=l.posMinima||!qpp)return null;
-  const physicalEnds=l.enderecos.filter(e=>e&&e.end&&!isOccVirtualEnd(e.end));
-  if(physicalEnds.length<2)return null;
-  const pkEnds=productPkEnds||physicalEnds.filter(e=>isOccPKEnd(e.end)).map(e=>e.end);
-  // Prefer emptying PP/OTHER first; never PK→non-PK; never empty last PK; never virtual ends.
+/**
+ * Fallback when no full-merge consolidation pairs: suggest moves that empty a source end.
+ * Liberta = positions freed by THAT move (1 if source empties, else skip).
+ * Never attribute the whole lote theoretical excess to a single line.
+ */
+function findOccExcessMoves(l,qpp,productPkEnds){
+  if(!l.enderecos||!l.enderecos.length||l.posReais<=l.posMinima||!qpp)return[];
+  const physicalEnds=l.enderecos.filter(e=>e&&e.end&&!isOccVirtualEnd(e.end)).map(e=>({end:e.end,qt:e.qt}));
+  if(physicalEnds.length<2)return[];
+  let pkEnds=[...(productPkEnds||physicalEnds.filter(e=>isOccPKEnd(e.end)).map(e=>e.end))];
+  const fill={};physicalEnds.forEach(e=>{fill[e.end]=e.qt;});
+  const emptied=new Set();
+  const out=[];
+  const need=Math.max(0,l.posReais-l.posMinima);
   const donors=[...physicalEnds].sort((a,b)=>{
     const ta=occEndType(a.end),tb=occEndType(b.end);
     const ra=ta==='PP'?0:ta==='OTHER'?1:2;
@@ -6571,9 +6584,13 @@ function occExcessMoveHint(l,qpp,productPkEnds){
     return a.qt-b.qt;
   });
   for(const donor of donors){
+    if(out.length>=need)break;
+    if(emptied.has(donor.end))continue;
     if(!occMoveKeepsPK(donor.end,pkEnds))continue;
+    const donorQt=fill[donor.end];
+    if(donorQt<=0)continue;
     const donorSub=isOccPKEnd(donor.end)?occPkSubtype(donor.end):null;
-    const targets=physicalEnds.filter(e=>e.end!==donor.end&&e.qt<qpp&&occMoveTypeAllowed(donor.end,e.end))
+    const targets=physicalEnds.filter(e=>e.end!==donor.end&&!emptied.has(e.end)&&fill[e.end]<qpp&&donorQt+fill[e.end]<=qpp&&occMoveTypeAllowed(donor.end,e.end))
       .sort((a,b)=>{
         if(donorSub&&isOccPKEnd(a.end)&&isOccPKEnd(b.end)){
           const sa=occPkSubtype(a.end)===donorSub?0:1,sb=occPkSubtype(b.end)===donorSub?0:1;
@@ -6581,13 +6598,17 @@ function occExcessMoveHint(l,qpp,productPkEnds){
         }
         const pa=isOccPKEnd(a.end)?0:1,pb=isOccPKEnd(b.end)?0:1;
         if(pa!==pb)return pa-pb;
-        return (qpp-b.qt)-(qpp-a.qt);
+        return fill[b.end]-fill[a.end];
       });
-    const target=targets[0]||null;
+    const target=targets[0];
     if(!target)continue;
-    return{excess:l.posReais-l.posMinima,donor,target,cap:qpp-target.qt};
+    out.push({qt:donorQt,de:donor.end,para:target.end,liberta:1});
+    fill[target.end]+=donorQt;
+    fill[donor.end]=0;
+    emptied.add(donor.end);
+    if(isOccPKEnd(donor.end))pkEnds=pkEnds.filter(e=>e!==donor.end);
   }
-  return null;
+  return out;
 }
 function buildOccMoves(r){
   // Multi-dep merged row: movimentos por depósito (nunca cruzar deps no productPkEnds).
@@ -6625,43 +6646,51 @@ function buildOccMoves(r){
     if(isOccPKEnd(m.de))productPkEnds=productPkEnds.filter(e=>e!==m.de);
   };
   const consol=r.loteDetail.filter(l=>l.consolidacao&&l.consolidacao.doadores?.length);
-  consol.forEach(l=>{
-    l.consolidacao.doadores.forEach(d=>{
-      pushMove({qt:d.qt,de:d.end,para:d.receptor,liberta:'1 pos',lote:l.lote});
-    });
+  r.loteDetail.forEach(l=>{
+    if(l.consolidacao?.doadores?.length){
+      l.consolidacao.doadores.forEach(d=>{
+        pushMove({qt:d.qt,de:d.end,para:d.receptor,liberta:'1 pos',lote:l.lote});
+      });
+      return;
+    }
+    if((r._poupancaRaw??r.poupanca)>0&&l.posReais>l.posMinima){
+      findOccExcessMoves(l,qpp,productPkEnds).forEach(h=>{
+        pushMove({qt:h.qt,de:h.de,para:h.para,liberta:h.liberta+' pos',lote:l.lote});
+      });
+    }
   });
-  if((r._poupancaRaw??r.poupanca)>0&&consol.length===0){
-    r.loteDetail.forEach(l=>{
-      const hint=occExcessMoveHint(l,qpp,productPkEnds);
-      if(!hint)return;
-      const{excess,donor,target,cap}=hint;
-      if(target&&donor.qt<=cap){
-        pushMove({qt:donor.qt,de:donor.end,para:target.end,liberta:excess+' pos',lote:l.lote});
-      }else if(donor&&target){
-        pushMove({qt:donor.qt,de:donor.end,para:target.end,liberta:excess+' pos',lote:l.lote});
-      }
-    });
-  }
   r.loteDetail.filter(l=>l.qtDC>0).forEach(l=>{
     moves.push({qt:l.qtDC,de:'DOCA',para:'—',liberta:'—',lote:l.lote,doca:true});
   });
   return{moves,full:r.posReal>0&&qpp>0&&moves.length===0};
 }
-/** Vista de Stock: poupança / otimizável sem PK→PK (esses só na subaba Ajustes PK→PK). */
+/** Conta posições libertadas por um movimento (ex.: "1 pos" → 1). */
+function occMoveLibertaCount(m){
+  if(!m||m.doca)return 0;
+  const v=m.liberta;
+  if(typeof v==='number'&&Number.isFinite(v))return Math.max(0,Math.floor(v));
+  const n=parseInt(String(v||'').replace(/[^\d]/g,''),10);
+  return Number.isFinite(n)?n:0;
+}
+/**
+ * Vista de Stock: poupança = −(soma Liberta dos movimentos não-PK→PK mostrados).
+ * Sem movimentos acionáveis («Posições cheias»): poupança 0, posOpt = posReais.
+ * Cases só com PK→PK → poupança 0 na vista (vão para a subaba Ajustes PK→PK).
+ * _poupancaRaw guarda o mínimo teórico (ceil) só para tooltip / findOccExcessMoves.
+ */
 function applyOccVistaExclPkPk(r){
   if(!r||r.vencidosNoOptim||r.avariasNoOptim)return r;
-  const info=buildOccMoves(r);
-  const mainMoves=(info.moves||[]).filter(m=>!isOccPkPkMove(m)&&!m.doca);
-  let poupanca=0;
-  for(const m of mainMoves){
-    const n=parseInt(String(m.liberta||'1').replace(/\D/g,''),10);
-    poupanca+=Number.isFinite(n)&&n>0?n:1;
-  }
+  const raw=r._poupancaRaw!=null?r._poupancaRaw:(r.poupanca||0);
+  const info=buildOccMoves({...r,poupanca:raw,_poupancaRaw:raw});
+  const moves=(info.moves||[]).filter(m=>!m.doca);
+  const mainMoves=moves.filter(m=>!isOccPkPkMove(m));
+  const pkPkOnly=raw>0&&mainMoves.length===0&&moves.some(isOccPkPkMove);
   const hasDC=(info.moves||[]).some(m=>m.doca)||(r.loteDetail||[]).some(l=>l.qtDC>0);
   const semLote=info.alert==='sem-lote';
+  const actionable=mainMoves.reduce((s,m)=>s+occMoveLibertaCount(m),0);
+  const poupanca=pkPkOnly?0:actionable;
   const underutil=poupanca>0||hasDC||semLote;
-  // Keep raw poupança so buildOccMoves excess-path still sees original triggers.
-  return{...r,poupanca,posOtimizadas:r.posReal-poupanca,underutil,_poupancaRaw:r.poupanca};
+  return{...r,poupanca,posOtimizadas:r.posReal-poupanca,underutil,_poupancaRaw:raw};
 }
 function occMovesSubRowHtml(r){
   const info=buildOccMoves(r);
@@ -6775,6 +6804,8 @@ function _renderOccView(){
   for(const r of rows){
     const tr=document.createElement('tr');
     tr.className=r.underutil?'occ-product-row occ-product-row--opt':'occ-product-row';
+    const rawP=r._poupancaRaw!=null?r._poupancaRaw:r.poupanca;
+    const poupTip=rawP>0&&rawP!==(r.poupanca||0)?` title="Mín. teórico −${fmt(rawP)} (só movimentos acionáveis contam)"`:'';
     tr.innerHTML=`
       <td><span class="badge bneu">${r.ean}</span></td>
       <td style="font-size:11px;color:var(--text2)">${r.cat||'—'}</td>
@@ -6784,7 +6815,7 @@ function _renderOccView(){
       <td class="num">${r.param?fmt(r.param.qty_per_pos):'—'}</td>
       <td class="num"><strong>${fmt(r.posReal)}</strong></td>
       <td class="num">${r.posOtimizadas!==null?fmt(r.posOtimizadas):'—'}</td>
-      <td class="num">${r.poupanca>0?`<strong style="color:var(--red)">-${fmt(r.poupanca)}</strong>`:'—'}</td>
+      <td class="num"${poupTip}>${r.poupanca>0?`<strong style="color:var(--red)">-${fmt(r.poupanca)}</strong>`:'—'}</td>
     `;
     body.appendChild(tr);
     const movesHtml=occMovesSubRowHtml(r);
