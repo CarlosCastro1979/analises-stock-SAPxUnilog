@@ -484,7 +484,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.52 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.53 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1552,7 +1552,7 @@ select.cad-inp{cursor:pointer;}
         </div>
       </div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
-        Validade mínima: <strong>6 meses</strong>. Stock segurança = campo editável (sugestão = média 3 meses). Lotes por maior stock disponível.
+        Validade mínima: <strong>6 meses</strong> (vinhos isentos). Inclui artigos com <strong>B2C=Sim</strong> no cadastro e stock no dep. 0011. Stock segurança = editável (sugestão = média 3 meses / un. por CX). Lotes por maior stock disponível.
       </div>
       <div class="tb">
         <input class="inp is" id="transEcSrch" placeholder="EAN, código SAP ou descrição…" oninput="renderTrans('ecommerce')">
@@ -1582,7 +1582,7 @@ select.cad-inp{cursor:pointer;}
         </tr></thead>
         <tbody id="transEcBody"></tbody>
       </table></div>
-      <div id="transEcEmpty" class="empty" style="display:none"><div class="empty-i">🔄</div><div>Clica "Calcular" para processar as transferências</div></div>
+      <div id="transEcEmpty" class="empty" style="display:none"><div class="empty-i">🔄</div><div>Clica "Calcular" para processar as transferências.<br><span style="font-size:12px;color:var(--muted)">Inclui vendas B2C, stock no dep. 0008 e artigos com B2C=Sim no cadastro (stock 0011).</span></div></div>
     </div>
   </div>
 
@@ -8439,6 +8439,9 @@ async function buildTransData(){
       const{data:qbRec}=await db.from('logistica_stock').select('sap_data').eq('id','QB').single();
       if(qbRec)qbSapData=filterSapRowsForCompany(JSON.parse(qbRec.sap_data),'QB');
     }
+    // Cadastro params required for B2C flag (inclusion / exclusion)
+    if(!occParams||!occParams.length)await loadOccParams();
+
     // Load sales from Supabase
     const{data:vendas,error}=await db.from('logistica_vendas').select('*').order('mes',{ascending:false});
     if(error||!vendas){toast('Erro ao carregar vendas: '+(error?.message||'sem dados'),'error');return;}
@@ -8466,13 +8469,15 @@ async function buildTransData(){
       else if(r.empresa==='DFB'){if(!vDFB[r.ean])vDFB[r.ean]=[];vDFB[r.ean].push(r);}
     });
 
-    // SAP stock by EAN+depot (from DFB for source dep 0011, from QB for QB stock)
+    // SAP stock by EAN+depot (normalize depot keys — stored rows may be '8' or '0008')
     const sapStock={};
     (dfbSapData||[]).forEach(r=>{
       if(!r.EAN_norm)return;
+      const dk=sapDepotKey(r.deposito);
+      if(!dk)return;
       if(!sapStock[r.EAN_norm])sapStock[r.EAN_norm]={};
-      if(!sapStock[r.EAN_norm][r.deposito])sapStock[r.EAN_norm][r.deposito]=0;
-      sapStock[r.EAN_norm][r.deposito]+=r.qt;
+      if(!sapStock[r.EAN_norm][dk])sapStock[r.EAN_norm][dk]=0;
+      sapStock[r.EAN_norm][dk]+=r.qt;
     });
     // QB stock (dep 11 QB = target for QB transfers)
     const qbStock={};
@@ -8482,35 +8487,54 @@ async function buildTransData(){
       qbStock[r.EAN_norm]+=r.qt;
     });
 
+    // Cadastro UI: missing b2c flag defaults to Sim (true); explicit false = not B2C
+    function isCadB2cEnabled(param){return!!param&&param.b2c!==false;}
+
     function parseValidade(v){
-      if(!v||v==='0000-00-00'||v===''||v==='—')return null;
+      // Sentinel / empty → no expiry constraint (same as rest of app)
+      if(isValidadeSentinel(v))return null;
+      if(typeof parseValidadeDate==='function'){
+        const d=parseValidadeDate(v);
+        return d instanceof Date&&!isNaN(d.getTime())?d:null;
+      }
       const s=String(v).trim();
       const m=s.match(/(\d{2})\.(\d{2})\.(\d{4})/)||s.match(/(\d{4})-(\d{2})-(\d{2})/);
       if(!m)return null;
-      try{return s.includes('.')?new Date(m[3],parseInt(m[2])-1,parseInt(m[1])):new Date(m[1],parseInt(m[2])-1,parseInt(m[3]));}
-      catch{return null;}
+      try{
+        const d=s.includes('.')?new Date(+m[3],parseInt(m[2],10)-1,parseInt(m[1],10)):new Date(+m[1],parseInt(m[2],10)-1,parseInt(m[3],10));
+        return isNaN(d.getTime())?null:d;
+      }catch{return null;}
     }
 
-    function getLotes11(ean, minDate, antiFifo){
+    function getLotes11(ean, minDate, antiFifo, skipValidade){
       const lotes=[];
-      (dfbSapData||[]).filter(r=>r.EAN_norm===ean&&r.deposito==='11'&&r.qt>0).forEach(r=>{
-        const v=parseValidade(r.validade);
+      (dfbSapData||[]).forEach(r=>{
+        if(r.EAN_norm!==ean||r.qt<=0)return;
+        if(sapDepotKey(r.deposito)!=='11')return;
+        const v=skipValidade?null:parseValidade(r.validade);
         lotes.push({lote:r.Lote_norm,qt:r.qt,validade:r.validade,validadeDate:v});
       });
-      const valid=lotes.filter(l=>!l.validadeDate||l.validadeDate>=minDate);
-      const maxValidade=lotes.length?lotes.reduce((a,b)=>(!a.validadeDate||( b.validadeDate&&b.validadeDate>a.validadeDate))?b:a,lotes[0]).validade:null;
+      // Vinhos / sem validade: all lots eligible. Otherwise require ≥ minDate (or no date).
+      const valid=skipValidade?lotes.slice():lotes.filter(l=>!l.validadeDate||l.validadeDate>=minDate);
+      const maxValidade=lotes.length?lotes.reduce((a,b)=>(!a.validadeDate||(b.validadeDate&&b.validadeDate>a.validadeDate))?b:a,lotes[0]).validade:null;
       if(!valid.length)return{lotes:[],maxValidade};
       if(antiFifo)valid.sort((a,b)=>{if(!a.validadeDate&&!b.validadeDate)return 0;if(!a.validadeDate)return 1;if(!b.validadeDate)return-1;return b.validadeDate-a.validadeDate;});
       else valid.sort((a,b)=>b.qt-a.qt);
-      return{lotes:valid,maxValidade:null};
+      return{lotes:valid,maxValidade:skipValidade?null:maxValidade};
     }
 
     function buildRows(vendaMap, stockKey, minDate, antiFifo){
-      // Include EANs with sales AND EANs with actual stock in the destination depot
+      // Include: B2C sales, stock already in dest depot, AND cadastro B2C=Sim with stock in 0011
       const eans=new Set([
         ...Object.keys(vendaMap),
         ...Object.keys(sapStock).filter(ean=>sapStock[ean][stockKey]>0)
       ]);
+      if(stockKey==='8'){
+        (occParams||[]).forEach(p=>{
+          if(!p?.ean||p.descontinuado===true||p.b2c===false)return;
+          if((sapStock[p.ean]?.['11']||0)>0)eans.add(p.ean);
+        });
+      }
       const rows=[];
       eans.forEach(ean=>{
         const param=occParams.find(p=>p.ean===ean);
@@ -8521,16 +8545,20 @@ async function buildTransData(){
         if(notB2C&&!(sapStock[ean]&&sapStock[ean]['8']>0))return;
         const v3=calcAvgMonths(vendaMap[ean]||[],3);
         const v6=calcAvgMonths(vendaMap[ean]||[],6);
-        // Only skip if no sales AND no stock in destination depot
-        if(v3<=0&&v6<=0&&!(sapStock[ean]&&sapStock[ean][stockKey]>0))return;
+        const hasDestStock=!!(sapStock[ean]&&sapStock[ean][stockKey]>0);
+        const hasSrc11=!!(sapStock[ean]&&sapStock[ean]['11']>0);
+        const cadB2c=stockKey==='8'&&isCadB2cEnabled(param)&&hasSrc11;
+        // Skip if no sales, no dest stock, and not a B2C cadastro product with stock in 0011
+        if(v3<=0&&v6<=0&&!hasDestStock&&!cadB2c)return;
         const overKey=stockKey+'|'+ean;
         const cxMin=param?.unidades_cx||null;
         const segSugest=stockKey==='8'&&cxMin?Math.max(Math.ceil(v3),cxMin):Math.ceil(v3)||1;
         const seguranca=transSegOverride[overKey]!==undefined?transSegOverride[overKey]:segSugest;
         const stockDest=(sapStock[ean]&&sapStock[ean][stockKey])||0;
         const necessidade=Math.max(0,seguranca-stockDest);
-        const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||'';
-        const{lotes,maxValidade}=getLotes11(ean,minDate,antiFifo);
+        const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||param?.descricao||'';
+        const skipVal=isVinhoProduct(ean,desc,param?.cat);
+        const{lotes,maxValidade}=getLotes11(ean,minDate,antiFifo,skipVal);
         const cx=param?.unidades_cx||null;
         // Round necessidade up to CX multiple
         const necessidadeCX=cx&&cx>1?Math.ceil(necessidade/cx)*cx:necessidade;
@@ -8550,7 +8578,9 @@ async function buildTransData(){
         const stockDisp11=lotes.reduce((s,l)=>s+l.qt,0);
         // Lotes already in destination depot (for excess return logic)
         const lotesDest=[];
-        (dfbSapData||[]).filter(r=>r.EAN_norm===ean&&r.deposito===stockKey&&r.qt>0).forEach(r=>{
+        (dfbSapData||[]).forEach(r=>{
+          if(r.EAN_norm!==ean||r.qt<=0)return;
+          if(sapDepotKey(r.deposito)!==stockKey)return;
           lotesDest.push({lote:r.Lote_norm,qt:r.qt,validade:r.validade});
         });
         rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,lotesDest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0,notB2C:notB2C||false});
@@ -8575,8 +8605,9 @@ async function buildTransData(){
         const seguranca=transSegOverride[overKey]!==undefined?transSegOverride[overKey]:segSugestQb;
         const stockDest=qbStock[ean]||0;
         const necessidade=Math.max(0,seguranca-stockDest);
-        const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||'';
-        const{lotes,maxValidade}=getLotes11(ean,minDate,true);
+        const desc=(dfbSapData||[]).find(r=>r.EAN_norm===ean)?.desc||param?.descricao||'';
+        const skipVal=isVinhoProduct(ean,desc,param?.cat);
+        const{lotes,maxValidade}=getLotes11(ean,minDate,true,skipVal);
         const cx=param?.unidades_cx||null;
         // Round necessidade up to CX multiple
         const necessidadeCX=cx&&cx>1?Math.ceil(necessidade/cx)*cx:necessidade;
@@ -8595,7 +8626,9 @@ async function buildTransData(){
         }
         const stockDisp11=lotes.reduce((s,l)=>s+l.qt,0);
         const lotesDest=[];
-        (qbSapData||dfbSapData||[]).filter(r=>r.EAN_norm===ean&&r.deposito==='11'&&r.qt>0).forEach(r=>{
+        (qbSapData||dfbSapData||[]).forEach(r=>{
+          if(r.EAN_norm!==ean||r.qt<=0)return;
+          if(sapDepotKey(r.deposito)!=='11')return;
           lotesDest.push({lote:r.Lote_norm,qt:r.qt,validade:r.validade});
         });
         rows.push({ean,desc,cat:param?.cat||'',media3:Math.round(v3),media6:Math.round(v6),seguranca,stockDest,necessidade:necessidadeCX,lotes:loteSugest,lotesDest,stockDisp11,maxValidade,semValidade:!lotes.length&&necessidade>0,notB2C:false});
@@ -8610,13 +8643,14 @@ async function buildTransData(){
       const data=i===0?transData.ecommerce:transData.qbrasil;
       const cats=[...new Set(data.map(r=>r.cat).filter(Boolean))].sort();
       const sel=document.getElementById(`trans${t}Cat`);
-      sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+      if(sel)sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
     });
 
     renderTrans('ecommerce');
     renderTrans('qbrasil');
     dfbSapDataCache=dfbSapData;
-    toast('Transferências calculadas ✓','success');
+    const nEc=transData.ecommerce.length,nNeed=transData.ecommerce.filter(r=>r.necessidade>0&&!r.semValidade).length;
+    toast(`Transferências calculadas ✓ — Ecommerce: ${nEc} EANs (${nNeed} com necessidade)`,'success');
   }catch(e){toast('Erro: '+e.message,'error');}
 }
 
