@@ -1,5 +1,5 @@
-// fretes.js v1.7.21
-const FRETES_JS_VERSION = '1.7.21';
+// fretes.js v1.7.22
+const FRETES_JS_VERSION = '1.7.22';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -5124,7 +5124,10 @@ function initFretes() {
     });
   });
 
-  loadSavedFretesFiles(true).catch(() => {});
+  // Only fetch if empty — boot may already have loaded; avoid double download
+  if (fteNeedsCloudReload()) {
+    loadSavedFretesFiles(true).catch(() => {});
+  }
 }
 
 /** True when this company has no fretes data in memory yet (needs silent cloud load). */

@@ -1,5 +1,5 @@
-// armazem.js v1.0.37
-const ARMAZEM_JS_VERSION = '1.0.37';
+// armazem.js v1.0.38
+const ARMAZEM_JS_VERSION = '1.0.38';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
