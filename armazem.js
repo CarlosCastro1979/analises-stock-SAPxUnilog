@@ -1,5 +1,5 @@
-// armazem.js v1.0.35
-const ARMAZEM_JS_VERSION = '1.0.35';
+// armazem.js v1.0.36
+const ARMAZEM_JS_VERSION = '1.0.36';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -22,6 +22,8 @@ let armVendasCache = null;
 let armVendasCacheTs = 0;
 let armLancamentoDraft = null;
 let armLancamentoSummaryTimer = null;
+let armLancamentoAutosaveTimer = null;
+let armLancamentoSaving = false;
 let armNfUploadRows = [];
 const ARM_VENDAS_CACHE_MS = 60_000;
 let armCatalogOverrides = {};
@@ -751,6 +753,7 @@ function armLancamentoRowPreview(idx) {
   if (valCell) valCell.textContent = armFmtMoney(s.valor || 0);
   clearTimeout(armLancamentoSummaryTimer);
   armLancamentoSummaryTimer = setTimeout(armRefreshLancamentoSummary, 120);
+  armScheduleLancamentoAutosave();
 }
 
 /** Parse row on blur — format inputs, refresh summary; no full table re-render. */
@@ -769,6 +772,7 @@ function armLancamentoRowCommit(idx) {
   const valCell = vals.row.querySelector('.arm-val-calc');
   if (valCell) valCell.textContent = armFmtMoney(s.valor || 0);
   armRefreshLancamentoSummary();
+  armScheduleLancamentoAutosave();
 }
 
 /** Serviço change may toggle NF unit readonly — re-render that row only. */
@@ -793,6 +797,7 @@ function armLancamentoAddRow() {
   if (!armLancamentoDraft) armLoadLancamentoDraft();
   armLancamentoDraft.servicos.push(armBuildServicoFromEntry(ARM_NORM_HORA_EXTRA, 0, 0));
   renderArmLancamentoForm();
+  armScheduleLancamentoAutosave();
 }
 
 function armLancamentoRemoveRow(idx) {
@@ -803,6 +808,7 @@ function armLancamentoRemoveRow(idx) {
   }
   armLancamentoDraft.servicos.splice(idx, 1);
   renderArmLancamentoForm();
+  armScheduleLancamentoAutosave();
 }
 
 function armLancamentoAddCustomService() {
@@ -823,6 +829,7 @@ function armLancamentoAddCustomService() {
   if (inp) inp.value = '';
   renderArmLancamentoForm();
   armToast(`Serviço «${norm}» adicionado ao catálogo.`, 'success');
+  armScheduleLancamentoAutosave();
 }
 
 function armLancamentoCommitAllRows() {
@@ -836,16 +843,28 @@ function armLancamentoCommitAllRows() {
   });
 }
 
-async function armSaveLancamento() {
+function armScheduleLancamentoAutosave() {
+  clearTimeout(armLancamentoAutosaveTimer);
+  armLancamentoAutosaveTimer = setTimeout(() => {
+    armSaveLancamento({ silent: true }).catch(e => console.warn('[armazem] autosave', e));
+  }, 1200);
+}
+
+async function armSaveLancamento(opts = {}) {
+  const silent = !!opts.silent;
+  if (armLancamentoSaving) {
+    if (silent) armScheduleLancamentoAutosave();
+    return;
+  }
   if (armCompany() !== 'DFB') {
-    armToast('Avaliação Armazém disponível apenas para DFB.', 'error');
+    if (!silent) armToast('Avaliação Armazém disponível apenas para DFB.', 'error');
     return;
   }
   if (!armLancamentoDraft) armLoadLancamentoDraft();
   armLancamentoCommitAllRows();
   const draft = armLancamentoDraft;
   if (!draft?.mesKey) {
-    armToast('Seleciona mês de referência.', 'error');
+    if (!silent) armToast('Seleciona mês de referência.', 'error');
     return;
   }
   const impInp = $arm('lancImpostos');
@@ -853,9 +872,9 @@ async function armSaveLancamento() {
   if (!draft.impostosManual) {
     draft.impostos = armCalcImpostos(armServiceSubtotal(draft.servicos));
   }
-  draft.servicos = (draft.servicos || []).filter(s => (s.valor || 0) > 0 || (s.qtde || 0) > 0);
-  if (!draft.servicos.length) {
-    armToast('Adiciona pelo menos uma linha com quantidade ou valor.', 'error');
+  const servicosToSave = (draft.servicos || []).filter(s => (s.valor || 0) > 0 || (s.qtde || 0) > 0);
+  if (!servicosToSave.length) {
+    if (!silent) armToast('Adiciona pelo menos uma linha com quantidade ou valor.', 'error');
     return;
   }
 
@@ -872,7 +891,7 @@ async function armSaveLancamento() {
     impostos: draft.impostos,
     impostosManual: !!draft.impostosManual,
     valorMinimo: ARM_MINIMO_CONTRATUAL,
-    servicos: draft.servicos.map(s => ({ ...s })),
+    servicos: servicosToSave.map(s => ({ ...s })),
     nfRows: nfSource.map(r => applySapToArmNf({ ...r, mesKey: draft.mesKey }))
   }));
 
@@ -899,11 +918,25 @@ async function armSaveLancamento() {
   const others = (armPack.months || []).filter(m => m.mesKey !== month.mesKey);
   armPack.months = [...others, month].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
   refreshAllSapOnNfs();
-  const saved = await persistArmPack(armPack);
-  updateArmFileZone();
-  armToast(`${armMesLabel(month)} guardado${saved ? ' na cloud' : ''}.`, 'success');
-  armRefreshLancamentoMonthOptions();
-  renderArmLancamentoForm();
+  armLancamentoSaving = true;
+  try {
+    const saved = await persistArmPack(armPack);
+    updateArmFileZone();
+    armRefreshLancamentoMonthOptions();
+    if (silent) {
+      const note = $arm('lancSaveNote');
+      if (note) note.textContent = `Guardado automaticamente — ${armMesLabel(month)}`;
+      if (typeof showSaveIndicator === 'function') showSaveIndicator();
+    } else {
+      armLancamentoDraft.servicos = month.servicos.map(s => ({ ...s }));
+      armLancamentoDraft.impostos = month.impostos;
+      armLancamentoDraft.impostosManual = !!month.impostosManual;
+      armToast(`${armMesLabel(month)} guardado${saved ? ' na cloud' : ''}.`, 'success');
+      renderArmLancamentoForm();
+    }
+  } finally {
+    armLancamentoSaving = false;
+  }
 }
 
 function parseNfListFromWorkbook(wb, fileName, mesKey) {
@@ -976,7 +1009,8 @@ async function armProcessNfUpload(file) {
       return;
     }
     renderArmNfUploadTable();
-    armToast(`${armNfUploadRows.length} NF(s) importada(s) — guarda o mês para persistir.`, 'success');
+    armToast(`${armNfUploadRows.length} NF(s) importada(s) — a guardar automaticamente…`, 'success');
+    armScheduleLancamentoAutosave();
   } catch (e) {
     console.error('[armazem] nf upload', e);
     armToast('Erro ao ler Excel: ' + (e.message || e), 'error');
@@ -1062,6 +1096,7 @@ function armLancamentoResetImpostosAuto() {
   armLancamentoDraft.impostosManual = false;
   armLancamentoDraft.impostos = armCalcImpostos(armServiceSubtotal(armLancamentoDraft.servicos));
   renderArmLancamentoForm();
+  armScheduleLancamentoAutosave();
 }
 
 function armCleanFileBase(fileName) {
@@ -3225,6 +3260,7 @@ function initArmazem() {
       armLancamentoDraft.impostosManual = true;
       armLancamentoDraft.impostos = armNum($arm('lancImpostos')?.value);
       armRefreshLancamentoSummary();
+      armScheduleLancamentoAutosave();
     }
   });
   $arm('lancImpostosAutoBtn')?.addEventListener('click', () => armLancamentoResetImpostosAuto());

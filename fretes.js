@@ -1,5 +1,5 @@
-// fretes.js v1.7.19
-const FRETES_JS_VERSION = '1.7.19';
+// fretes.js v1.7.20
+const FRETES_JS_VERSION = '1.7.20';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -63,6 +63,7 @@ function setSapZoneLoaded(name) {
   const zone = $('sapZone');
   if (fn) fn.textContent = name ? '✓ ' + name : '';
   zone?.classList.toggle('loaded', !!name);
+  checkFteBtn();
 }
 
 function fteSetProcessing(active, label) {
@@ -85,13 +86,13 @@ function fteSetProcessing(active, label) {
       note.style.display = 'none';
     }
   }
-  if (btn) btn.disabled = active || !(fteCteBuffer || fteQzPendingFiles.length || quinzenalPack?.files?.length);
+  if (btn) btn.disabled = active || !(fteCteBuffer || fteSapBuffer || fteQzPendingFiles.length || quinzenalPack?.files?.length);
   if (loadBtn) loadBtn.disabled = !!active;
 }
 
 function checkFteBtn() {
   const btn = $('procBtn');
-  if (btn) btn.disabled = !(fteCteBuffer || fteQzPendingFiles.length || quinzenalPack?.files?.length);
+  if (btn) btn.disabled = !(fteCteBuffer || fteSapBuffer || fteQzPendingFiles.length || quinzenalPack?.files?.length);
 }
 
 const FTE_TAB_IDS = ['carregamento', 'analise-cte', 'analise-b2c', 'cte-vs-qz', 'resumo-total'];
@@ -1738,16 +1739,18 @@ async function processQuinzenalPending() {
 
 async function processAndSaveFretes() {
   const hasCte = !!(fteCteBuffer && fteCteFileName);
+  const hasSap = !!(fteSapBuffer && fteSapFileName);
   const hasQzPending = fteQzPendingFiles.length > 0;
   const hasQzInMem = !!(quinzenalPack?.files?.length);
-  if (!hasCte && !hasQzPending && !hasQzInMem) {
-    fteToastError('Selecciona pelo menos um ficheiro (CT-e/NF ou quinzenais).');
+  if (!hasCte && !hasSap && !hasQzPending && !hasQzInMem) {
+    fteToastError('Selecciona pelo menos um ficheiro (CT-e/NF, SAP NF/ZFACT ou quinzenais).');
     return;
   }
   fteSetProcessing(true, 'A processar…');
 
   const errors = [];
   let cteProcessed = false;
+  let sapProcessed = false;
   let qzProcessed = false;
 
   try {
@@ -1764,15 +1767,20 @@ async function processAndSaveFretes() {
       sapNfMap = {};
       const ok = processArrayBufferCte(fteCteBuffer, fteCteFileName);
       if (!ok) return;
-      if (fteSapBuffer && fteSapFileName) {
-        processArrayBufferSap(fteSapBuffer, fteSapFileName);
+      if (hasSap) {
+        sapProcessed = !!processArrayBufferSap(fteSapBuffer, fteSapFileName);
       }
       cteProcessed = true;
+    } else if (hasSap) {
+      // ZFACT / SAP NF alone — required for Fretes anomalies + Armazém NF 5,5% validation
+      fteSetProcessing(true, 'A processar SAP NF (ZFACT)…');
+      sapProcessed = !!processArrayBufferSap(fteSapBuffer, fteSapFileName);
+      if (!sapProcessed) return;
     }
 
     fteSetProcessing(true, 'A guardar na cloud…');
 
-    // Persist independently — quinzenais must not be skipped when CT-e save fails
+    // Persist independently — quinzenais / SAP must not be skipped when CT-e save fails
     let qzSaved = true;
     let cteSaved = true;
     let sapSaved = true;
@@ -1785,11 +1793,12 @@ async function processAndSaveFretes() {
     if (cteProcessed) {
       cteSaved = await persistFretesFile(fteCteSlot(), fteCteFileName, fteCteBuffer);
       if (!cteSaved) errors.push('CT-e');
-      if (fteSapBuffer && fteSapFileName) {
-        sapSaved = await persistFretesFile(fteSapSlot(), fteSapFileName, fteSapBuffer);
-        if (!sapSaved) errors.push('SAP');
-      }
       if (cteSaved) _fteLoadedCompany = fteCompany();
+    }
+
+    if (hasSap && (sapProcessed || cteProcessed)) {
+      sapSaved = await persistFretesFile(fteSapSlot(), fteSapFileName, fteSapBuffer);
+      if (!sapSaved) errors.push('SAP');
     }
 
     syncQzUploadZone();
@@ -1802,7 +1811,8 @@ async function processAndSaveFretes() {
     }
 
     const parts = [];
-    if (cteProcessed) parts.push('CT-e' + (fteSapBuffer ? ' + SAP' : ''));
+    if (cteProcessed) parts.push('CT-e' + (sapProcessed ? ' + SAP' : ''));
+    else if (sapProcessed) parts.push('SAP NF (ZFACT)');
     if (qzProcessed || quinzenalPack?.files?.length) {
       const c = qzFileCounts();
       parts.push(`quinzenais (${c.b2c} B2C · ${c.b2b} B2B)`);
