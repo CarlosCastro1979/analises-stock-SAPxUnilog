@@ -1,5 +1,5 @@
-// armazem.js v1.0.36
-const ARMAZEM_JS_VERSION = '1.0.36';
+// armazem.js v1.0.37
+const ARMAZEM_JS_VERSION = '1.0.37';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -24,6 +24,7 @@ let armLancamentoDraft = null;
 let armLancamentoSummaryTimer = null;
 let armLancamentoAutosaveTimer = null;
 let armLancamentoSaving = false;
+let armLastPersistedJson = '';
 let armNfUploadRows = [];
 const ARM_VENDAS_CACHE_MS = 60_000;
 let armCatalogOverrides = {};
@@ -917,16 +918,17 @@ async function armSaveLancamento(opts = {}) {
   armPack.updatedAt = new Date().toISOString();
   const others = (armPack.months || []).filter(m => m.mesKey !== month.mesKey);
   armPack.months = [...others, month].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
-  refreshAllSapOnNfs();
+  // Silent autosave: skip NF SAP rewalk (unchanged by typing) — keeps UI responsive
+  if (!silent) refreshAllSapOnNfs();
   armLancamentoSaving = true;
   try {
-    const saved = await persistArmPack(armPack);
+    const saved = await persistArmPack(armPack, { skipIfUnchanged: silent });
     updateArmFileZone();
     armRefreshLancamentoMonthOptions();
     if (silent) {
       const note = $arm('lancSaveNote');
-      if (note) note.textContent = `Guardado automaticamente — ${armMesLabel(month)}`;
-      if (typeof showSaveIndicator === 'function') showSaveIndicator();
+      if (note && saved) note.textContent = `Guardado automaticamente — ${armMesLabel(month)}`;
+      if (saved && typeof showSaveIndicator === 'function') showSaveIndicator();
     } else {
       armLancamentoDraft.servicos = month.servicos.map(s => ({ ...s }));
       armLancamentoDraft.impostos = month.impostos;
@@ -2204,10 +2206,14 @@ function slimArmPackForPersist(pack) {
   };
 }
 
-async function persistArmPack(pack) {
+async function persistArmPack(pack, opts = {}) {
   if (!pack?.months?.length || typeof upsertExcelBinary !== 'function') return false;
   const slim = slimArmPackForPersist(pack);
+  // Strip volatile timestamp so identical content doesn't re-upload every keystroke
+  const forHash = { ...slim, updatedAt: '' };
   const json = JSON.stringify(slim);
+  const hashJson = JSON.stringify(forHash);
+  if (opts.skipIfUnchanged && hashJson === armLastPersistedJson) return false;
   const bytes = new TextEncoder().encode(json);
   if (bytes.length > ARM_PERSIST_MAX_JSON_BYTES) {
     armToast('Dados demasiado grandes para guardar na cloud — reduz ficheiros ou meses com muitas NFs.', 'error');
@@ -2216,6 +2222,7 @@ async function persistArmPack(pack) {
   const label = `${pack.months.length} mês(es) armazém`;
   try {
     await upsertExcelBinary(armSlot(), label, bytes.buffer);
+    armLastPersistedJson = hashJson;
     return true;
   } catch (e) {
     console.error('[armazem] persist', e);
@@ -2330,7 +2337,16 @@ function switchArmTab(tab) {
     const el = $arm('tab-' + id);
     if (el) el.style.display = id === tab ? 'block' : 'none';
   });
-  armRefreshWithSap().catch(e => console.warn('[armazem] refresh sap', e));
+  // Cheap tab switch — don't re-fetch SAP / rewalk NFs on every click
+  renderArmActiveTab();
+  if (!sapApi()?.isSapLoaded?.()) {
+    armEnsureSapLoaded().then(ok => {
+      if (ok) {
+        refreshAllSapOnNfs();
+        if (armActiveTab === tab) renderArmActiveTab();
+      }
+    }).catch(e => console.warn('[armazem] refresh sap', e));
+  }
 }
 
 function renderArmActiveTab() {
@@ -3133,6 +3149,10 @@ async function loadSavedArmazem(silent) {
     if (pack?.months?.length) {
       armPack = armNormalizePackMonths(pack);
       refreshAllSapOnNfs();
+      try {
+        const slim = slimArmPackForPersist(armPack);
+        armLastPersistedJson = JSON.stringify({ ...slim, updatedAt: '' });
+      } catch (_) { armLastPersistedJson = ''; }
       armLogPackMonths('loaded from cloud');
       updateArmFileZone();
       if (armInited) renderArmActiveTab();
@@ -3221,6 +3241,7 @@ async function reloadArmazemForCompany() {
   armPendingFiles = [];
   armLancamentoDraft = null;
   armNfUploadRows = [];
+  armLastPersistedJson = '';
   armInvalidateVendasCache();
   loadCatalogOverrides();
   await loadSavedArmazem(true);
@@ -3235,9 +3256,18 @@ function initArmazem() {
   if (initErr) initErr.style.display = 'none';
 
   if (armInited) {
+    // Revisit page: paint immediately — no cloud roundtrip / full SAP refresh
     renderArmDfbGate();
     updateArmFileZone();
-    armRefreshWithSap().catch(e => console.warn('[armazem] refresh sap', e));
+    renderArmActiveTab();
+    if (!sapApi()?.isSapLoaded?.()) {
+      armEnsureSapLoaded().then(ok => {
+        if (ok) {
+          refreshAllSapOnNfs();
+          renderArmActiveTab();
+        }
+      }).catch(e => console.warn('[armazem] refresh sap', e));
+    }
     return;
   }
   armInited = true;

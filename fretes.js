@@ -1,5 +1,5 @@
-// fretes.js v1.7.20
-const FRETES_JS_VERSION = '1.7.20';
+// fretes.js v1.7.21
+const FRETES_JS_VERSION = '1.7.21';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -5127,6 +5127,15 @@ function initFretes() {
   loadSavedFretesFiles(true).catch(() => {});
 }
 
+/** True when this company has no fretes data in memory yet (needs silent cloud load). */
+function fteNeedsCloudReload() {
+  const co = fteCompany();
+  if (_fteLoadedCompany === co && (currentNFs.length || isSapLoaded() || quinzenalPack?.files?.length)) {
+    return false;
+  }
+  return true;
+}
+
 /** Shared SAP NF map for Fretes + Armazém modules. */
 window.FretesSAP = {
   getMap: () => sapNfMap,
@@ -5140,3 +5149,4 @@ window.FretesSAP = {
   ensureLoaded: (silent = true) => loadSavedFretesFiles(silent).then(() => isSapLoaded()),
   restoreSapFromRec
 };
+window.fteNeedsCloudReload = fteNeedsCloudReload;
