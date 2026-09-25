@@ -44,7 +44,7 @@ header{background:var(--navy);border-bottom:none;padding:0 24px;display:flex;ali
 .db-dot.ok{background:#22c55e;box-shadow:0 0 6px #22c55e;}
 
 /* NAV */
-.nav{background:var(--navy);border-bottom:2px solid var(--navy2);padding:0 24px;display:flex;gap:0;overflow-x:auto;}
+.nav{background:var(--navy);border-bottom:2px solid var(--navy2);padding:0 24px;display:flex;gap:0;flex-wrap:wrap;overflow:visible;align-items:stretch;}
 .nt{padding:10px 18px;font-size:12px;font-weight:500;color:#94a3b8;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;}
 .nt:hover{color:#e2e8f0;}
 .nt.active{color:#fff;border-bottom-color:var(--red);}
@@ -376,6 +376,28 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-armazem .arm-resumo-tbl{max-height:none;}
 #page-armazem tr.arm-resumo-subtotal td{background:#f8fafc;border-top:1px solid var(--border);font-weight:600;}
 #page-armazem .empty{text-align:center;padding:40px 16px;color:var(--muted);}
+#page-custoUnilog .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0;}
+@media(min-width:1200px){#page-custoUnilog .kpis{grid-template-columns:repeat(6,1fr);}}
+@media(max-width:640px){#page-custoUnilog .kpis{grid-template-columns:repeat(2,1fr);}}
+#page-custoUnilog .kpi{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;}
+#page-custoUnilog .kpi .label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;font-weight:600;}
+#page-custoUnilog .kpi .value{font-size:20px;font-weight:700;font-family:var(--mono);}
+#page-custoUnilog .kpi .sub{font-size:11px;color:var(--muted);margin-top:2px;}
+#page-custoUnilog .kpi.flag .value{color:var(--red);}
+#page-custoUnilog .filters{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
+#page-custoUnilog .filters select{padding:7px 10px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:#fff;}
+#page-custoUnilog .tbl-wrap{max-height:520px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
+#page-custoUnilog .tbl-wrap table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;}
+#page-custoUnilog .tbl-wrap th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;position:sticky;top:0;background:#fff;z-index:1;}
+#page-custoUnilog .tbl-wrap th.right,#page-custoUnilog .tbl-wrap td.right{text-align:right;}
+#page-custoUnilog .tbl-wrap td{padding:8px 10px;border-bottom:1px solid var(--bg4);vertical-align:top;}
+#page-custoUnilog th.sortable{cursor:pointer;user-select:none;}
+#page-custoUnilog th.sortable .sort-ind{font-size:9px;margin-left:3px;opacity:.35;}
+#page-custoUnilog th.sortable.sorted-asc .sort-ind,#page-custoUnilog th.sortable.sorted-desc .sort-ind{opacity:1;color:var(--red);}
+#page-custoUnilog tr.cu-total-row td{background:var(--bg3);font-weight:700;border-top:2px solid var(--border2);}
+#page-custoUnilog .empty{text-align:center;padding:40px 16px;color:var(--muted);}
+#page-custoUnilog .data-warn{background:#fffbeb;border:1px solid #fcd34d;color:#92400e;border-radius:6px;padding:10px 12px;margin:0 0 12px;font-size:12px;}
+#page-custoUnilog .cu-note{font-size:11px;color:var(--muted);margin:0 0 12px;line-height:1.5;}
 #page-armazem .arm-file-list{font-size:11px;color:var(--muted);max-height:120px;overflow-y:auto;margin-top:8px;text-align:left;}
 #page-armazem .arm-file-list div{padding:2px 0;font-family:var(--mono);}
 #page-armazem .uz.drag{border-color:var(--red);background:#fff5f5;}
@@ -484,7 +506,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.57 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.65 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -504,8 +526,7 @@ select.cad-inp{cursor:pointer;}
   <div class="nt" data-page="reclamacoes">🚨 Reclamações<span id="recBadge" class="bc" style="display:none;background:#f59e0b;color:#fff"></span></div>
   <div class="nt" data-page="transferencias">🔄 Transferências</div>
   <div class="nt" data-page="pecas">🔧 Peças AT</div>
-  <div class="nt" data-page="fretes">🚚 Fretes CT-e</div>
-  <div class="nt" data-page="armazem">🏭 Avaliação Armazém</div>
+  <div class="nt" data-page="cobrancas" id="navCobrancas">💰 Cobranças UNILOG</div>
   <div class="nt" data-page="history">📋 Histórico</div>
 </div>
 
@@ -1686,8 +1707,13 @@ select.cad-inp{cursor:pointer;}
 
 <!-- ══ FRETES CT-e × NF ══ -->
 <div class="page" id="page-fretes">
+  <div class="its cob-its">
+    <div class="it active" data-cob="fretes" onclick="cobTab('fretes',this)">Fretes CT-e</div>
+    <div class="it" data-cob="armazem" onclick="cobTab('armazem',this)">Avaliação Armazém</div>
+    <div class="it" data-cob="custoUnilog" onclick="cobTab('custoUnilog',this)">Total Custo Unilog</div>
+  </div>
   <div class="card">
-    <div class="ch"><div class="ct">Conciliação CT-e × Nota Fiscal</div></div>
+    <div class="ch"><div class="ct">Fretes CT-e · Unilog × SAP</div></div>
 
     <div class="fte-tabs">
       <div class="fte-tab active" data-tab="carregamento">Carregamento de dados</div>
@@ -1699,38 +1725,28 @@ select.cad-inp{cursor:pointer;}
 
     <!-- Tab 1: Carregamento de dados -->
     <div id="fte-tab-carregamento">
-      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega todos os ficheiros aqui — Excel CT-e/NF (Unilog), SAP NF / ZFACT (opcional, pode processar sozinho para validação de NFs) e relatórios quinzenais B2B/B2C. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud.</p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud.</p>
       <div class="upload-grid">
         <div>
-          <div class="sl">Excel CT-e / NF (Unilog)</div>
-          <div class="uz" id="fte-cteZone">
-            <div style="font-size:26px;margin-bottom:8px">📊</div>
-            <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel CT-e × NF</div>
-            <div style="font-size:11px;color:var(--muted)">Folha Export — col. E = qtd. CT-e por cobrança/NF</div>
-            <div id="fte-cteFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
-            <input type="file" id="fte-fileInput" accept=".xlsx,.xls">
+          <div class="sl">Relatórios quinzenais Unilog (B2B + B2C)</div>
+          <div class="uz" id="fte-qzZone" style="padding:20px;">
+            <div style="font-size:26px;margin-bottom:8px">📅</div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta os Excels quinzenais (multi-selecção)</div>
+            <div style="font-size:11px;color:var(--muted)">Gestão de Frete DELTA B2B/B2C — 1ªQ/2ªQ · B2B alimenta Análise CT-e (pago, devolução, Num. CTE, Dt CTE)</div>
+            <div id="fte-qzFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+            <div id="fte-qzFileList" class="qz-file-list" style="display:none"></div>
+            <input type="file" id="fte-qzFileInput" accept=".xlsx,.xls" multiple>
           </div>
         </div>
         <div>
-          <div class="sl">Excel SAP NF / ZFACT (opcional)</div>
+          <div class="sl">Excel SAP NF / ZFACT</div>
           <div class="uz" id="fte-sapZone">
             <div style="font-size:26px;margin-bottom:8px">🗄️</div>
             <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel SAP (ZFACT)</div>
-            <div style="font-size:11px;color:var(--muted)">NF · data emissão · cliente · valor — partilhado com Armazém</div>
+            <div style="font-size:11px;color:var(--muted)">NF · data emissão · cliente · valor — anomalias SAP / Δ valor · partilhado com Armazém</div>
             <div id="fte-sapFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
             <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
           </div>
-        </div>
-      </div>
-      <div style="margin-top:20px;">
-        <div class="sl">Relatórios quinzenais Unilog (B2B + B2C)</div>
-        <div class="uz" id="fte-qzZone" style="padding:20px;">
-          <div style="font-size:26px;margin-bottom:8px">📅</div>
-          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta os Excels quinzenais (multi-selecção)</div>
-          <div style="font-size:11px;color:var(--muted)">Gestão de Frete DELTA B2B/B2C — 1ªQ/2ªQ</div>
-          <div id="fte-qzFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
-          <div id="fte-qzFileList" class="qz-file-list" style="display:none"></div>
-          <input type="file" id="fte-qzFileInput" accept=".xlsx,.xls" multiple>
         </div>
       </div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
@@ -1745,7 +1761,7 @@ select.cad-inp{cursor:pointer;}
 
     <!-- Tab 2: Análise CT-e -->
     <div id="fte-tab-analise-cte" style="display:none;">
-      <div id="fte-cteEmpty" class="empty"><div class="empty-i">📊</div><div>Carrega o Excel CT-e/NF na aba <strong>Carregamento de dados</strong></div></div>
+      <div id="fte-cteEmpty" class="empty"><div class="empty-i">📊</div><div>Carrega <strong>quinzenais B2B</strong> + <strong>ZFACT</strong> na aba <strong>Carregamento de dados</strong></div></div>
       <div id="fte-cteContent" style="display:none;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 8px;flex-wrap:wrap;gap:8px;">
           <div id="fte-periodoLabel" style="font-size:12px;color:var(--muted);"></div>
@@ -1868,7 +1884,7 @@ select.cad-inp{cursor:pointer;}
         <button class="btn bg bs" id="fte-exportQzBtn" type="button">Exportar Excel comparação</button>
       </div>
       <div id="fte-qzWarn" class="data-warn" style="display:none;"></div>
-      <div id="fte-b2bEmpty" class="empty"><div class="empty-i">📅</div><div>Carrega quinzenais B2B e Excel CT-e/NF para comparar</div></div>
+      <div id="fte-b2bEmpty" class="empty"><div class="empty-i">📅</div><div>Carrega quinzenais B2B (+ ZFACT) na aba <strong>Carregamento de dados</strong></div></div>
       <p id="fte-qzFileNote" style="display:none;font-size:11px;color:var(--muted);margin:0 0 12px;"></p>
       <div id="fte-b2bContent" style="display:none;">
         <div id="fte-qzB2bKpis"></div>
@@ -1941,7 +1957,7 @@ select.cad-inp{cursor:pointer;}
     <!-- Tab 5: Resumo total -->
     <div id="fte-tab-resumo-total" style="display:none;">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Visão consolidada B2B (CT-e) + B2C (quinzenal) — faturação, custo de frete e comparação com o débito Unilog.</p>
-      <div id="fte-resumoEmpty" class="empty"><div class="empty-i">📈</div><div>Carrega CT-e e/ou quinzenais na aba <strong>Carregamento de dados</strong></div></div>
+      <div id="fte-resumoEmpty" class="empty"><div class="empty-i">📈</div><div>Carrega quinzenais (+ ZFACT) na aba <strong>Carregamento de dados</strong></div></div>
       <div id="fte-resumoContent" style="display:none;">
         <div class="kpis fte-kpis" id="fte-resumoKpis"></div>
         <div id="fte-resumoReconcile" class="reconcile" style="margin-bottom:16px;"></div>
@@ -1963,6 +1979,11 @@ select.cad-inp{cursor:pointer;}
 
 <!-- ══ AVALIAÇÃO ARMAZÉM ══ -->
 <div class="page" id="page-armazem">
+  <div class="its cob-its">
+    <div class="it" data-cob="fretes" onclick="cobTab('fretes',this)">Fretes CT-e</div>
+    <div class="it active" data-cob="armazem" onclick="cobTab('armazem',this)">Avaliação Armazém</div>
+    <div class="it" data-cob="custoUnilog" onclick="cobTab('custoUnilog',this)">Total Custo Unilog</div>
+  </div>
   <div class="card">
     <div class="ch"><div class="ct">Avaliação Cobrança Armazém Unilog</div></div>
 
@@ -2146,6 +2167,63 @@ select.cad-inp{cursor:pointer;}
       <p style="font-size:11px;color:var(--muted);margin:0 0 12px;">Mapeamento dos nomes Unilog para categorias do catálogo. Serviços não reconhecidos ficam marcados para validação — alterações guardadas no browser.</p>
       <div class="tbl-wrap">
         <table><thead><tr id="arm-catalogHead"></tr></thead><tbody id="arm-catalogBody"></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TOTAL CUSTO UNILOG ══ -->
+<div class="page" id="page-custoUnilog">
+  <div class="its cob-its">
+    <div class="it" data-cob="fretes" onclick="cobTab('fretes',this)">Fretes CT-e</div>
+    <div class="it" data-cob="armazem" onclick="cobTab('armazem',this)">Avaliação Armazém</div>
+    <div class="it active" data-cob="custoUnilog" onclick="cobTab('custoUnilog',this)">Total Custo Unilog</div>
+  </div>
+  <div class="card">
+    <div class="ch"><div class="ct">Total Custo Unilog</div></div>
+    <p class="cu-note">
+      Custo total Unilog sobre <strong>Vendas Líquidas</strong>:
+      <strong>Armazenagem</strong> (c/ impostos) + <strong>Fretes B2B</strong> (quinzenais B2B) = Total Unilog;
+      depois <strong>Fretes B2C</strong> (quinzenais B2C) e um segundo total c/ B2C.
+      Valores de frete vêm dos <strong>relatórios quinzenais</strong> Unilog (Gestão de Frete DELTA B2B/B2C).
+    </p>
+    <div id="cu-dfbGate" class="data-warn" style="display:none;">
+      Este ecrã está disponível apenas para <strong>DFB — Delta Foods Brasil</strong>. Muda o seletor de empresa no topo.
+    </div>
+    <div id="cu-content">
+      <div class="filters">
+        <label style="font-size:11px;font-weight:600;color:var(--muted);">Ano</label>
+        <select id="cu-yearFilter" onchange="renderCustoUnilog()"></select>
+        <span style="font-size:11px;color:var(--muted);">Usa os meses já carregados em Armazém e Fretes.</span>
+      </div>
+      <div id="cu-empty" class="empty" style="display:none;">
+        <div style="font-size:28px;margin-bottom:8px;">📊</div>
+        <div data-cu-empty-title style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Total Custo Unilog — sem dados ainda</div>
+        <div data-cu-empty-detail style="max-width:420px;margin:0 auto;line-height:1.5;">Este ecrã junta <strong>Armazenagem</strong> + <strong>Fretes</strong> mensais. Ainda não há meses carregados para a empresa actual.</div>
+        <div style="font-size:12px;margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+          <button type="button" class="btn" onclick="showPage('armazem')">Abrir Avaliação Armazém</button>
+          <button type="button" class="btn" onclick="showPage('fretes')">Abrir Fretes CT-e</button>
+        </div>
+        <div style="font-size:11px;margin-top:12px;color:var(--muted);">Separador: <strong>Cobranças UNILOG</strong> → Total Custo Unilog</div>
+      </div>
+      <div id="cu-dash" style="display:none;">
+        <div class="kpis" id="cu-kpis"></div>
+        <div class="tbl-wrap">
+          <table id="cuTable">
+            <thead><tr>
+              <th class="sortable">Mês</th>
+              <th class="sortable right">Vendas Liq</th>
+              <th class="sortable right" title="Armazenagem total pago c/ impostos">Armazenagem</th>
+              <th class="sortable right" title="Fretes B2B — quinzenal totalPagoQz">Fretes B2B</th>
+              <th class="sortable right" title="Armazenagem + Fretes B2B">Total (Arm+B2B)</th>
+              <th class="sortable right" title="Total (Arm+B2B) ÷ Vendas Líquidas">% s/ Vendas</th>
+              <th class="sortable right" title="Fretes B2C — quinzenal">Fretes B2C</th>
+              <th class="sortable right" title="Total Unilog + Fretes B2C">Total c/ B2C</th>
+              <th class="sortable right" title="Total c/ B2C ÷ Vendas Líquidas">% c/ B2C</th>
+            </tr></thead>
+            <tbody id="cu-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -2440,13 +2518,267 @@ function markPageRendered(key){
   _pageRenderCache[key]=company;
 }
 
+/** Cobranças UNILOG: parent nav + secondary tabs (fretes / armazem / custoUnilog). */
+const COB_PAGES={fretes:1,armazem:1,custoUnilog:1};
+const COB_LS_KEY='cobrancasLastTab';
+
+function getCobrancasLastTab(){
+  try{
+    const v=localStorage.getItem(COB_LS_KEY);
+    if(v&&COB_PAGES[v])return v;
+  }catch(_){}
+  return 'fretes';
+}
+function setCobrancasLastTab(page){
+  try{localStorage.setItem(COB_LS_KEY,page);}catch(_){}
+}
+function syncCobrancasTabs(page){
+  document.querySelectorAll('.cob-its .it').forEach(it=>{
+    it.classList.toggle('active',it.dataset.cob===page);
+  });
+}
+function activateCobrancasPage(page){
+  if(!COB_PAGES[page])page='fretes';
+  setCobrancasLastTab(page);
+  document.querySelectorAll('.nt[data-page]').forEach(x=>x.classList.remove('active'));
+  document.getElementById('navCobrancas')?.classList.add('active');
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+  document.getElementById('page-'+page)?.classList.add('active');
+  syncCobrancasTabs(page);
+  if(page==='fretes'){
+    if(typeof initFretes==='function')initFretes();
+    if(typeof applyFretesFileLabelsFromMeta==='function')applyFretesFileLabelsFromMeta();
+    if(typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload()&&typeof loadSavedFretesFiles==='function'){
+      loadSavedFretesFiles(true);
+    }
+  }
+  if(page==='armazem'&&typeof initArmazem==='function')initArmazem();
+  if(page==='custoUnilog'){
+    renderCustoUnilog();
+    // Ensure quinzenais (+ CT-e if present) are in memory — B2B/B2C costs come from quinzenais.
+    if(typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload()&&typeof loadSavedFretesFiles==='function'){
+      loadSavedFretesFiles(true).then(()=>renderCustoUnilog()).catch(()=>{});
+    }
+    if(typeof initArmazem==='function'&&typeof getArmMonthlyCustoRows==='function'&&!getArmMonthlyCustoRows().length){
+      initArmazem();
+    }
+  }
+  scheduleColResize();
+}
+function cobTab(page){
+  activateCobrancasPage(page);
+}
+window.cobTab=cobTab;
+
+/** Navigate to a page by id (fretes / armazem / custoUnilog / …). Preserves deep links. */
+function showPage(page){
+  if(page==='cobrancas'){
+    activateCobrancasPage(getCobrancasLastTab());
+    return;
+  }
+  if(COB_PAGES[page]){
+    activateCobrancasPage(page);
+    return;
+  }
+  const el=document.querySelector(`.nt[data-page="${page}"]`);
+  if(el){el.click();return;}
+  // Fallback if nav node missing
+  document.querySelectorAll('.nt[data-page]').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+  const pageEl=document.getElementById('page-'+page);
+  if(pageEl)pageEl.classList.add('active');
+}
+window.showPage=showPage;
+
+function cuFmtMoney(v){
+  if(typeof armFmtMoney==='function')return armFmtMoney(v);
+  if(typeof fmtMoney==='function')return fmtMoney(v);
+  return 'R$ '+(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function cuFmtPct(num,den){
+  if(!(den>0)||!Number.isFinite(num))return '—';
+  if(typeof armFmtPctGasto==='function')return armFmtPctGasto(num,den);
+  return ((num/den)*100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+}
+function cuMesLabel(mesKey){
+  if(typeof armMesLabel==='function')return armMesLabel(mesKey);
+  const m=String(mesKey||'').match(/^(\d{4})-(\d{2})$/);
+  if(!m)return mesKey||'—';
+  const names=['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  return `${names[+m[2]]||m[2]}/${m[1]}`;
+}
+
+function buildCustoUnilogRows(){
+  const armRows=typeof getArmMonthlyCustoRows==='function'?getArmMonthlyCustoRows():[];
+  const fteRows=typeof getFretesMonthlyCustoRows==='function'?getFretesMonthlyCustoRows():[];
+  const empty={mesKey:'',mesLabel:'',vendasLiq:0,armComImp:0,freteB2b:0,freteB2c:0,fretePago:0};
+  const byMes={};
+  armRows.forEach(r=>{
+    if(!r.mesKey||r.mesKey==='sem-mes')return;
+    byMes[r.mesKey]=byMes[r.mesKey]||{...empty,mesKey:r.mesKey,mesLabel:r.mesLabel||cuMesLabel(r.mesKey)};
+    byMes[r.mesKey].vendasLiq=r.vendasLiq||0;
+    byMes[r.mesKey].armComImp=r.armComImp||0;
+    if(r.mesLabel)byMes[r.mesKey].mesLabel=r.mesLabel;
+  });
+  fteRows.forEach(r=>{
+    if(!r.mesKey||r.mesKey==='sem-mes')return;
+    byMes[r.mesKey]=byMes[r.mesKey]||{...empty,mesKey:r.mesKey,mesLabel:r.mesLabel||cuMesLabel(r.mesKey)};
+    const b2b=r.freteB2b!=null?r.freteB2b:(r.freteCte||r.fretePago||0);
+    const b2c=r.freteB2c||0;
+    byMes[r.mesKey].freteB2b=b2b;
+    byMes[r.mesKey].freteB2c=b2c;
+    byMes[r.mesKey].fretePago=b2b;
+    if(r.mesLabel&&!byMes[r.mesKey].mesLabel)byMes[r.mesKey].mesLabel=r.mesLabel;
+  });
+  return Object.values(byMes).map(r=>{
+    const arm=r.armComImp||0;
+    const b2b=r.freteB2b||0;
+    const b2c=r.freteB2c||0;
+    const total=arm+b2b;
+    const totalComB2c=total+b2c;
+    const vl=r.vendasLiq||0;
+    return{
+      ...r,
+      fretePago:b2b,
+      total,
+      pct:vl>0?total/vl:null,
+      totalComB2c,
+      pctComB2c:vl>0?totalComB2c/vl:null
+    };
+  }).sort((a,b)=>String(a.mesKey).localeCompare(String(b.mesKey)));
+}
+
+function renderCustoUnilog(){
+  const gate=document.getElementById('cu-dfbGate');
+  const content=document.getElementById('cu-content');
+  const isDfb=company==='DFB';
+  if(gate)gate.style.display=isDfb?'none':'block';
+  if(content)content.style.display=isDfb?'':'none';
+  if(!isDfb)return;
+
+  const allRows=buildCustoUnilogRows();
+  const yearSel=document.getElementById('cu-yearFilter');
+  const years=[...new Set(allRows.map(r=>String(r.mesKey).slice(0,4)).filter(y=>/^\d{4}$/.test(y)))].sort();
+  const prevYear=yearSel?.value||'';
+  if(yearSel){
+    const opts=['<option value="">Todos os anos</option>'].concat(years.map(y=>`<option value="${y}">${y}</option>`));
+    yearSel.innerHTML=opts.join('');
+    if(prevYear&&(prevYear===''||years.includes(prevYear)))yearSel.value=prevYear;
+    else if(years.length)yearSel.value=years[years.length-1];
+  }
+  const yearFilter=yearSel?.value||'';
+  let rows=yearFilter?allRows.filter(r=>String(r.mesKey).startsWith(yearFilter)):allRows;
+
+  if(sorts['custoUnilog'])applySort('custoUnilog',rows);
+  else rows.sort((a,b)=>String(a.mesKey).localeCompare(String(b.mesKey)));
+
+  const empty=document.getElementById('cu-empty');
+  const dash=document.getElementById('cu-dash');
+  const rowHas=r=>r.vendasLiq||r.armComImp||r.freteB2b||r.freteB2c;
+  const hasData=rows.some(rowHas);
+  if(empty){
+    empty.style.display=hasData?'none':'block';
+    if(!hasData){
+      const hasAny=allRows.some(rowHas);
+      const title=empty.querySelector('[data-cu-empty-title]')||empty.children[1];
+      const detail=empty.querySelector('[data-cu-empty-detail]')||empty.children[2];
+      if(title)title.textContent=hasAny
+        ?'Nenhum mês neste filtro de ano'
+        :'Total Custo Unilog — sem dados ainda';
+      if(detail)detail.innerHTML=hasAny
+        ?'Há dados noutros anos. Escolhe <strong>Todos os anos</strong> ou outro ano no filtro acima.'
+        :'Este ecrã junta <strong>Armazenagem</strong> + <strong>Fretes B2B</strong> (+ B2C após o total). Ainda não há meses carregados para a empresa actual.';
+    }
+  }
+  if(dash)dash.style.display=hasData?'block':'none';
+  if(!hasData)return;
+
+  const tot={vendasLiq:0,armComImp:0,freteB2b:0,freteB2c:0,total:0,totalComB2c:0};
+  rows.forEach(r=>{
+    tot.vendasLiq+=r.vendasLiq||0;
+    tot.armComImp+=r.armComImp||0;
+    tot.freteB2b+=r.freteB2b||0;
+    tot.freteB2c+=r.freteB2c||0;
+    tot.total+=r.total||0;
+    tot.totalComB2c+=r.totalComB2c||0;
+  });
+  const pctTot=tot.vendasLiq>0?tot.total/tot.vendasLiq:null;
+  const pctTotB2c=tot.vendasLiq>0?tot.totalComB2c/tot.vendasLiq:null;
+  const kpis=document.getElementById('cu-kpis');
+  if(kpis){
+    kpis.innerHTML=`
+      <div class="kpi"><div class="label">Vendas Líquidas</div><div class="value">${cuFmtMoney(tot.vendasLiq)}</div><div class="sub">Visão mensal Armazém</div></div>
+      <div class="kpi"><div class="label">Custo Armazenagem</div><div class="value">${cuFmtMoney(tot.armComImp)}</div><div class="sub">Total pago c/ impostos</div></div>
+      <div class="kpi"><div class="label">Custo Fretes B2B</div><div class="value">${cuFmtMoney(tot.freteB2b)}</div><div class="sub">Quinzenal B2B (totalPagoQz)</div></div>
+      <div class="kpi flag"><div class="label">Custo Total Unilog</div><div class="value">${cuFmtMoney(tot.total)}</div><div class="sub">Arm + B2B · ${pctTot!=null?cuFmtPct(tot.total,tot.vendasLiq):'—'} s/ vendas</div></div>
+      <div class="kpi"><div class="label">Custo Fretes B2C</div><div class="value">${cuFmtMoney(tot.freteB2c)}</div><div class="sub">Quinzenal B2C (após total)</div></div>
+      <div class="kpi flag"><div class="label">Total c/ B2C</div><div class="value">${cuFmtMoney(tot.totalComB2c)}</div><div class="sub">Unilog + B2C · ${pctTotB2c!=null?cuFmtPct(tot.totalComB2c,tot.vendasLiq):'—'} s/ vendas</div></div>`;
+  }
+  const body=document.getElementById('cu-body');
+  if(body){
+    const sortTh=(col,label,cls,title)=>{
+      const s=sorts['custoUnilog'];
+      const active=s&&s.col===col;
+      const ind=active?(s.dir===1?'▲':'▼'):'↕';
+      const sc=active?(s.dir===1?' sorted-asc':' sorted-desc'):'';
+      const tip=title?` title="${title}"`:'';
+      return `<th class="sortable${sc}${cls?' '+cls:''}"${tip} onclick="doSort('custoUnilog','${col}')">${label}<span class="sort-ind">${ind}</span></th>`;
+    };
+    const thead=document.querySelector('#cuTable thead tr');
+    if(thead){
+      thead.innerHTML=
+        sortTh('mesKey','Mês','')+
+        sortTh('vendasLiq','Vendas Liq','right')+
+        sortTh('armComImp','Armazenagem','right','Armazenagem total pago c/ impostos')+
+        sortTh('freteB2b','Fretes B2B','right','Fretes B2B — quinzenal totalPagoQz')+
+        sortTh('total','Total (Arm+B2B)','right','Armazenagem + Fretes B2B')+
+        sortTh('pct','% s/ Vendas','right','Total (Arm+B2B) ÷ Vendas Líquidas')+
+        sortTh('freteB2c','Fretes B2C','right','Fretes B2C — quinzenal')+
+        sortTh('totalComB2c','Total c/ B2C','right','Total Unilog + Fretes B2C')+
+        sortTh('pctComB2c','% c/ B2C','right','Total c/ B2C ÷ Vendas Líquidas');
+    }
+    const moneyCell=(v,title)=>`<td class="right"${title?` title="${title}"`:''}>${v>0?cuFmtMoney(v):'—'}</td>`;
+    body.innerHTML=rows.map(r=>`<tr>
+      <td>${cuEsc(r.mesLabel||cuMesLabel(r.mesKey))}</td>
+      ${moneyCell(r.vendasLiq)}
+      ${moneyCell(r.armComImp)}
+      ${moneyCell(r.freteB2b,'Fretes B2B (quinzenal)')}
+      ${moneyCell(r.total)}
+      <td class="right">${r.pct!=null?cuFmtPct(r.total,r.vendasLiq):'—'}</td>
+      ${moneyCell(r.freteB2c,'Fretes B2C (quinzenal)')}
+      ${moneyCell(r.totalComB2c)}
+      <td class="right">${r.pctComB2c!=null?cuFmtPct(r.totalComB2c,r.vendasLiq):'—'}</td>
+    </tr>`).join('')+`<tr class="cu-total-row">
+      <td>Total${yearFilter?' '+yearFilter:''}</td>
+      ${moneyCell(tot.vendasLiq)}
+      ${moneyCell(tot.armComImp)}
+      ${moneyCell(tot.freteB2b)}
+      ${moneyCell(tot.total)}
+      <td class="right">${pctTot!=null?cuFmtPct(tot.total,tot.vendasLiq):'—'}</td>
+      ${moneyCell(tot.freteB2c)}
+      ${moneyCell(tot.totalComB2c)}
+      <td class="right">${pctTotB2c!=null?cuFmtPct(tot.totalComB2c,tot.vendasLiq):'—'}</td>
+    </tr>`;
+  }
+  scheduleTableSort();
+  scheduleColResize();
+}
+function cuEsc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+window.renderCustoUnilog=renderCustoUnilog;
+
 async function init(){
-  document.querySelectorAll('.nt').forEach(t=>{
+  document.querySelectorAll('.nt[data-page]').forEach(t=>{
     t.onclick=()=>{
-      document.querySelectorAll('.nt').forEach(x=>x.classList.remove('active'));
+      if(t.dataset.page==='cobrancas'){
+        activateCobrancasPage(getCobrancasLastTab());
+        return;
+      }
+      document.querySelectorAll('.nt[data-page]').forEach(x=>x.classList.remove('active'));
       document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
       t.classList.add('active');
-      document.getElementById('page-'+t.dataset.page).classList.add('active');
+      const pageEl=document.getElementById('page-'+t.dataset.page);
+      if(pageEl)pageEl.classList.add('active');
+
       if(t.dataset.page==='recon'){
         if(pageNeedsRender('recon')){renderReconPage();markPageRendered('recon');}
         if(typeof renderMapaAcertosPage==='function'&&document.getElementById('recon-acerto')?.style.display!=='none')renderMapaAcertosPage();
@@ -2462,7 +2794,6 @@ async function init(){
         if(pageNeedsRender('occupation')){renderOccView();renderOccPkPk();renderOccBase();markPageRendered('occupation');}
       }
       if(t.dataset.page==='reclamacoes'){
-        // Cloud only when empty / company changed — never block nav with full reload every click
         if(pageNeedsRender('reclamacoes')||!reclamacoes.length){
           loadReclamacoes().then(()=>markPageRendered('reclamacoes'));
         }else{
@@ -2474,7 +2805,6 @@ async function init(){
         else renderPecas();
       }
       if(t.dataset.page==='transferencias'){
-        // Show/hide tabs based on company
         const itEc=document.getElementById('transItEc');
         const itQb=document.getElementById('transItQb');
         const itAudit=document.getElementById('transItAudit');
@@ -2485,7 +2815,6 @@ async function init(){
           if(itAudit)itAudit.style.display='none';
           const divAudit=document.getElementById('trans-auditoria');if(divAudit)divAudit.style.display='none';
           if(divEc)divEc.style.display='none';
-          // Activate Qbrasil tab
           document.querySelectorAll('#transIts .it').forEach(x=>x.classList.remove('active'));
           if(itQb){itQb.style.display='';itQb.classList.add('active');}
           if(divQb)divQb.style.display='';
@@ -2500,15 +2829,6 @@ async function init(){
         }
       }
       if(t.dataset.page==='history')renderHistory();
-      // Fretes: never show "A carregar…" on tab switch — boot/company already loads silently
-      if(t.dataset.page==='fretes'){
-        initFretes();
-        if(typeof applyFretesFileLabelsFromMeta==='function')applyFretesFileLabelsFromMeta();
-        if(typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload()&&typeof loadSavedFretesFiles==='function'){
-          loadSavedFretesFiles(true);
-        }
-      }
-      if(t.dataset.page==='armazem'){if(typeof initArmazem==='function')initArmazem();}
       scheduleColResize();
     };
   });
@@ -5283,6 +5603,7 @@ function switchCompany(){
   if(typeof syncInventarioAcertoNav==='function')syncInventarioAcertoNav();
   if(typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
   if(typeof renderMapaAcertosPage==='function')renderMapaAcertosPage();
+  if(document.getElementById('page-custoUnilog')?.classList.contains('active'))renderCustoUnilog();
   toast('Empresa: '+company,'info');
 }
 
@@ -7742,6 +8063,7 @@ function doSort(table,col){
   else if(table==='hist')renderHistory();
   else if(table==='ean')renderEanView();
   else if(table==='pecas')renderPecas();
+  else if(table==='custoUnilog')renderCustoUnilog();
   else if(table==='ia'&&typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
   else if(table==='ma'&&typeof renderMapaAcertosPage==='function')renderMapaAcertosPage();
 }
@@ -9280,9 +9602,9 @@ function applyResizable(){scheduleColResize();}
       load('inventario-acerto.js', 'v=1.0.10');
     });
   }
-  load('fretes.js', 'v=1.7.22', function () {
+  load('fretes.js', 'v=1.8.65', function () {
     loadInventarioAcerto();
-    load('armazem.js', 'v=1.0.38', bootApp, function () {
+    load('armazem.js', 'v=1.0.39', bootApp, function () {
       var e = document.getElementById('arm-initErr');
       if (e) e.style.display = 'block';
       bootApp();

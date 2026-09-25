@@ -1,5 +1,5 @@
-// armazem.js v1.0.38
-const ARMAZEM_JS_VERSION = '1.0.38';
+// armazem.js v1.0.39
+const ARMAZEM_JS_VERSION = '1.0.39';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -2021,7 +2021,8 @@ async function armEnsureSapLoaded() {
 
 function armGotoFretesPage(ev) {
   ev?.preventDefault?.();
-  document.querySelector('.nt[data-page="fretes"]')?.click();
+  if (typeof showPage === 'function') showPage('fretes');
+  else document.querySelector('.nt[data-page="fretes"]')?.click();
 }
 
 function armSapStatusHtml() {
@@ -3355,6 +3356,24 @@ function initArmazem() {
   }).catch(e => console.warn('[armazem] load saved', e));
 }
 
+/** Monthly rows for Total Custo Unilog — Vendas Liq + armazenagem c/ impostos. */
+function getArmMonthlyCustoRows() {
+  return (armPack?.months || [])
+    .filter(m => m.mesKey && /^\d{4}-\d{2}$/.test(String(m.mesKey)))
+    .map(m => {
+      const armComImp = armGetMonthPagoComImp(m) || 0;
+      return {
+        mesKey: m.mesKey,
+        mesLabel: armMesLabel(m),
+        vendasLiq: armGetVendasLiq(m) || 0,
+        armComImp,
+        hasData: !!(m.servicos?.length || m.nfRows?.length || armComImp > 0 || armGetVendasLiq(m))
+      };
+    })
+    .sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
+}
+
+window.getArmMonthlyCustoRows = getArmMonthlyCustoRows;
 window.initArmazem = initArmazem;
 window.refreshArmazemSapValidation = refreshArmazemSapValidation;
 window.armSetVendasLiq = armSetVendasLiq;

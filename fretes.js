@@ -1,5 +1,5 @@
-// fretes.js v1.7.22
-const FRETES_JS_VERSION = '1.7.22';
+// fretes.js v1.8.65 — Análise CT-e from quinzenais B2B (+ ZFACT); Conciliacao CT-e×NF upload removed from UI
+const FRETES_JS_VERSION = '1.8.65';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -33,6 +33,16 @@ let fteQzPendingFiles = [];
 let quinzenalPack = null;
 let _fteLoadSavedPromise = null;
 let qzExpandedMonths = new Set();
+/** 'conciliacao' | 'quinzenal' | null — drives Análise CT-e source + CT-e vs QZ confronto behaviour */
+let cteAnalysisSource = null;
+
+function hasConciliacaoCte() {
+  return cteAnalysisSource === 'conciliacao' && currentNFs.length > 0;
+}
+
+function hasCteAnalysisData() {
+  return currentNFs.length > 0;
+}
 
 function fteCompany() {
   return typeof company !== 'undefined' ? company : 'DFB';
@@ -124,7 +134,12 @@ function renderCteSubPanels() {
   const hasData = currentNFs.length > 0;
   const empty = $('cteEmpty');
   const content = $('cteContent');
-  if (empty) empty.style.display = hasData ? 'none' : 'block';
+  if (empty) {
+    empty.style.display = hasData ? 'none' : 'block';
+    if (!hasData) {
+      empty.innerHTML = '<div class="empty-i">📊</div><div>Carrega <strong>quinzenais B2B</strong> + <strong>ZFACT</strong> na aba <strong>Carregamento de dados</strong></div>';
+    }
+  }
   if (content) content.style.display = hasData ? 'block' : 'none';
   if (!hasData) return;
   ['resumo', 'detalhe', 'anomalias', 'mensal'].forEach(sub => {
@@ -194,9 +209,15 @@ function slimB2bRowForPersist(r) {
   return {
     nf: r.nf, nfKey: r.nfKey, valorNF: r.valorNF, pago: r.pago, nCte: r.nCte,
     transportador: r.transportador, destinatario: r.destinatario,
+    modalidade: r.modalidade || '',
     mesKey: r.mesKey, mesLabel: r.mesLabel,
     quinzenaKey: r.quinzenaKey, quinzenaLabel: r.quinzenaLabel, fileName: r.fileName,
-    dtNF: r.dtNF
+    dtNF: r.dtNF,
+    temDevolucao: !!r.temDevolucao,
+    ctes: Array.isArray(r.ctes) ? r.ctes.map(c => ({
+      numCte: c.numCte, dtCte: c.dtCte, pago: num(c.pago),
+      devolucao: !!c.devolucao, tipoOp: c.tipoOp || '', peso: num(c.peso)
+    })) : undefined
   };
 }
 
@@ -515,7 +536,8 @@ function updateSaveStatus(msg, ok) {
 }
 
 function showResultsView(opts = {}) {
-  $('loadbar').style.display = 'none';
+  const lb = $('loadbar');
+  if (lb) lb.style.display = 'none';
   renderCteSubPanels();
   const shouldSwitch = opts.switchTab !== false && !_fteSkipAutosave && currentNFs.length;
   if (shouldSwitch) switchFteTab('analise-cte');
@@ -1604,7 +1626,7 @@ function processArrayBufferCte(arrayBuffer, fileName, opts = {}) {
       return false;
     }
     if (!opts.silent) setLoadbar('A ler ' + fileName + ' ...', false);
-    processRows(rows, fileName, sheetName, headers);
+    processRows(rows, fileName, sheetName, headers, { source: 'conciliacao' });
     return true;
   } catch (err) {
     console.error(err);
@@ -1743,7 +1765,7 @@ async function processAndSaveFretes() {
   const hasQzPending = fteQzPendingFiles.length > 0;
   const hasQzInMem = !!(quinzenalPack?.files?.length);
   if (!hasCte && !hasSap && !hasQzPending && !hasQzInMem) {
-    fteToastError('Selecciona pelo menos um ficheiro (CT-e/NF, SAP NF/ZFACT ou quinzenais).');
+    fteToastError('Selecciona pelo menos um ficheiro (quinzenais ou SAP NF/ZFACT).');
     return;
   }
   fteSetProcessing(true, 'A processar…');
@@ -1778,6 +1800,14 @@ async function processAndSaveFretes() {
       if (!sapProcessed) return;
     }
 
+    // Sem Conciliacao CT-e×NF: montar Análise CT-e a partir dos quinzenais B2B
+    let qzCteBuilt = false;
+    if (!cteProcessed && !hasConciliacaoCte() && quinzenalPack?.b2bRows?.length) {
+      fteSetProcessing(true, 'A montar Análise CT-e a partir dos quinzenais…');
+      qzCteBuilt = processCteAnalysisFromQuinzenal({ switchTab: false });
+      if (qzCteBuilt && isSapLoaded()) reEnrichAfterSapLoad();
+    }
+
     fteSetProcessing(true, 'A guardar na cloud…');
 
     // Persist independently — quinzenais / SAP must not be skipped when CT-e save fails
@@ -1796,7 +1826,7 @@ async function processAndSaveFretes() {
       if (cteSaved) _fteLoadedCompany = fteCompany();
     }
 
-    if (hasSap && (sapProcessed || cteProcessed)) {
+    if (hasSap && (sapProcessed || cteProcessed || qzCteBuilt)) {
       sapSaved = await persistFretesFile(fteSapSlot(), fteSapFileName, fteSapBuffer);
       if (!sapSaved) errors.push('SAP');
     }
@@ -1817,9 +1847,10 @@ async function processAndSaveFretes() {
       const c = qzFileCounts();
       parts.push(`quinzenais (${c.b2c} B2C · ${c.b2b} B2B)`);
     }
+    if (qzCteBuilt) parts.push('Análise CT-e via QZ');
     fteToast('Processado e guardado na cloud: ' + parts.join(', ') + '.');
     const hasQz = !!(quinzenalPack?.files?.length);
-    if (cteProcessed && hasQz) switchFteTab('analise-cte');
+    if (cteProcessed || qzCteBuilt) switchFteTab('analise-cte');
     else if (hasQz && !cteProcessed) switchFteTab(quinzenalPack?.b2cRows?.length ? 'analise-b2c' : 'cte-vs-qz');
   } catch (err) {
     console.error('[fretes] processAndSave', err);
@@ -1831,7 +1862,11 @@ async function processAndSaveFretes() {
 
 function reEnrichAfterSapLoad() {
   if (lastCtePack) {
-    processRows(lastCtePack.rows, lastCtePack.fileName, lastCtePack.sheetName, lastCtePack.headers);
+    processRows(lastCtePack.rows, lastCtePack.fileName, lastCtePack.sheetName, lastCtePack.headers, {
+      source: lastCtePack.source || 'conciliacao',
+      switchTab: false,
+      autosave: false
+    });
     return;
   }
   if (!currentNFs.length) return;
@@ -1845,6 +1880,16 @@ function reEnrichAfterSapLoad() {
 }
 
 function num(v) { return (v === null || v === undefined || v === '') ? 0 : Number(v); }
+
+/** Sim/Não (and common variants) → boolean — used by Conciliacao + quinzenal B2B. */
+function isDevolucaoFlag(v) {
+  if (v === true || v === 1) return true;
+  if (v === false || v === 0 || v == null || v === '') return false;
+  const s = String(v).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!s) return false;
+  if (s === 'nao' || s === 'n' || s === 'no' || s === 'false' || s === '0') return false;
+  return s === 'sim' || s === 's' || s === 'yes' || s === 'true' || s === '1' || s === 'x';
+}
 
 const CTE_PCT_TARGET = 0.06;
 const CTE_PCT_LOW = 0.059;
@@ -2016,11 +2061,11 @@ function reopenNfDetail(nfStr) {
   }
 }
 
-function processRows(rows, fileName, sheetName, headers) {
-  lastCtePack = { rows, fileName, sheetName, headers };
+function processRows(rows, fileName, sheetName, headers, opts = {}) {
+  lastCtePack = { rows, fileName, sheetName, headers, source: opts.source || 'conciliacao' };
+  cteAnalysisSource = opts.source || 'conciliacao';
 
-  $('loadbar').textContent =
-    'A processar ' + rows.length + ' linhas (folha "' + sheetName + '")...';
+  setLoadbar('A processar ' + rows.length + ' linhas (folha "' + sheetName + '")...');
 
   const byNF = {};
   rows.forEach(r => {
@@ -2039,12 +2084,13 @@ function processRows(rows, fileName, sheetName, headers) {
     if (r.transportador && g.transportador === '-') g.transportador = r.transportador;
     if (r.modalidade && g.modalidade === '-') g.modalidade = r.modalidade;
     if (r.dtNF && !g.dtNF) g.dtNF = r.dtNF;
+    const isDev = isDevolucaoFlag(r.devolucao);
     g.ctes.push({
       numCte: r.numCte, dtCte: r.dtCte, pago: num(r.pago),
-      devolucao: (r.devolucao || '').toString().toLowerCase() === 'sim',
+      devolucao: isDev,
       tipoOp: r.tipoOp, peso: num(r.peso)
     });
-    if ((r.devolucao || '').toString().toLowerCase() === 'sim') g.temDevolucao = true;
+    if (isDev) g.temDevolucao = true;
   });
 
   let nfList = Object.values(byNF).map(buildNfRecord);
@@ -2058,17 +2104,15 @@ function processRows(rows, fileName, sheetName, headers) {
 
   if (!nfList.length) {
     const cols = (headers && headers.length) ? headers.join(', ') : '(não detetadas)';
-    $('loadbar').style.display = 'block';
-    $('loadbar').textContent =
-      '0 notas fiscais encontradas na folha "' + sheetName + '". Colunas: ' + cols;
+    setLoadbar('0 notas fiscais encontradas na folha "' + sheetName + '". Colunas: ' + cols, true);
     switchFteTab('carregamento');
     fteToast('Não foi possível ler notas fiscais — verifica se o ficheiro tem a coluna "Nota Fiscal".');
     return;
   }
 
   renderAll();
-  showResultsView();
-  if (!_fteSkipAutosave) autosaveToCloud();
+  showResultsView(opts);
+  if (!_fteSkipAutosave && opts.autosave !== false) autosaveToCloud();
 }
 
 function computeSummary(list, fileName) {
@@ -2652,14 +2696,22 @@ function renderAll() {
   const sapNote = s.sapLoaded ? ` · SAP: ${s.nSapMatched}/${s.totalNF} NFs cruzadas` : '';
   const mismatchNote = s.nValorMismatch ? ` · <span style="color:#b3261e;font-weight:600">${s.nValorMismatch} Δ valor SAP≠Unilog</span>` : '';
   const sapMissingNote = s.nSapMissing ? ` · <span style="color:#b3261e;font-weight:600">${s.nSapMissing} NF sem SAP</span>` : '';
+  const srcNote = cteAnalysisSource === 'quinzenal'
+    ? ' · <span style="color:var(--muted)">fonte: quinzenais B2B</span>'
+    : (cteAnalysisSource === 'conciliacao' ? ' · <span style="color:var(--muted)">fonte: CT-e×NF</span>' : '');
   $('periodoLabel').innerHTML =
-    `Ficheiro: ${s.fileName} · Período CT-e: ${fmtDate(s.periodoInicio)} a ${fmtDate(s.periodoFim)} · ${s.totalNF} notas fiscais · ${s.nUnicoCte} com CT-e único · ${s.nMultiplosCte} com múltiplos CT-e${sapNote}${mismatchNote}${sapMissingNote}`;
+    `Ficheiro: ${s.fileName} · Período CT-e: ${fmtDate(s.periodoInicio)} a ${fmtDate(s.periodoFim)} · ${s.totalNF} notas fiscais · ${s.nUnicoCte} com CT-e único · ${s.nMultiplosCte} com múltiplos CT-e${sapNote}${mismatchNote}${sapMissingNote}${srcNote}`;
 
   const warnEl = $('dataWarning');
   if (s.loadWarning) {
     warnEl.style.display = 'block';
     warnEl.className = 'data-warn';
     warnEl.innerHTML = s.loadWarning;
+  } else if (cteAnalysisSource === 'quinzenal') {
+    warnEl.style.display = 'block';
+    warnEl.className = 'data-warn';
+    warnEl.innerHTML = '<strong>Análise a partir dos quinzenais B2B:</strong> 6% / R$165 / multi-CT-e usam linhas do relatório quinzenal (pago, Devolução, Num. CTE, Dt CTE). '
+      + 'ZFACT continua a alimentar anomalias SAP.';
   } else {
     warnEl.style.display = 'none';
     warnEl.innerHTML = '';
@@ -2739,6 +2791,7 @@ function renderAll() {
     if ($('tab-cte-vs-qz')?.style.display === 'block') renderB2bCompareTab();
     if ($('tab-resumo-total')?.style.display === 'block') renderResumoTotal();
   }
+  refreshCustoUnilogIfVisible();
 }
 
 function renderAnomaliesPanel() {
@@ -3160,6 +3213,7 @@ async function loadUploadById(id, uploadMeta) {
   currentSummary.loadWarning = loadWarning;
 
   currentUploadId = upload.id;
+  cteAnalysisSource = 'conciliacao';
   activeSubPanel = null;
   selectedMonth = '';
   renderAll();
@@ -3323,6 +3377,14 @@ async function _loadSavedFretesFilesImpl(silent = false) {
 
   const qzLoaded = await loadSavedQuinzenalPack(silent, meta, { deferCompare: true, skipRender: true });
   if (qzLoaded) console.log('[fretes] restore quinzenal', co, quinzenalPack?.files?.length || 0, 'files');
+
+  // Sem Conciliacao: montar Análise CT-e a partir dos quinzenais B2B restaurados
+  let qzCteBuilt = false;
+  if (!cteOk && !hasConciliacaoCte() && quinzenalPack?.b2bRows?.length) {
+    qzCteBuilt = processCteAnalysisFromQuinzenal({ switchTab: false });
+    console.log('[fretes] restore cte-from-qz', co, 'ok', qzCteBuilt, 'nfs', currentNFs.length);
+  }
+
   refreshQuinzenalCompare();
   syncQzUploadZone();
   updateQzFileNote();
@@ -3331,25 +3393,29 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   if (!isSapLoaded() && sapRec?.file_data) {
     const sapOnlyOk = restoreSapFromRec(sapRec, silent);
     console.log('[fretes] restore sap-only', co, sapRec.file_name, 'ok', sapOnlyOk, 'mapSize', Object.keys(sapNfMap).length);
+    if (sapOnlyOk && (qzCteBuilt || cteAnalysisSource === 'quinzenal')) reEnrichAfterSapLoad();
   }
 
   const freshCte = !!(cteRec?.file_data && cteOk && !hadCteInMem);
   const freshQz = !!(qzLoaded && !hadQzInMem);
 
-  if (!cteOk && !silent && !qzLoaded && !cteRec) {
+  if (!cteOk && !qzCteBuilt && !silent && !qzLoaded && !cteRec) {
     fteToastError('Sem ficheiros CT-e guardados para ' + co + '.');
-  } else   if ((freshCte || freshQz) && !silent) {
+  } else   if ((freshCte || freshQz || qzCteBuilt) && !silent) {
     const parts = [];
     if (freshCte) parts.push('CT-e' + (sapRec?.file_data ? ' + SAP' : ''));
     if (freshQz) parts.push('quinzenais');
+    if (qzCteBuilt && !freshCte) parts.push('Análise CT-e via QZ');
     fteToast('Ficheiros fretes restaurados: ' + parts.join(', ') + ' (' + co + ').');
   }
 
   const activeTab = document.querySelector('.fte-tab.active')?.dataset?.tab;
-  if (activeTab === 'analise-b2c') renderB2cAnalysisTab();
+  if (activeTab === 'analise-cte') renderCteSubPanels();
+  else if (activeTab === 'analise-b2c') renderB2cAnalysisTab();
   else if (activeTab === 'cte-vs-qz') renderB2bCompareTab();
   else if (activeTab === 'resumo-total') renderResumoTotal();
-  return cteOk || qzLoaded || currentNFs.length > 0 || isSapLoaded();
+  refreshCustoUnilogIfVisible();
+  return cteOk || qzLoaded || qzCteBuilt || currentNFs.length > 0 || isSapLoaded();
 }
 
 // ── QUINZENAL UNILOG (B2B diff vs CT-e · B2C vendas/fretes) ──
@@ -3362,10 +3428,15 @@ const QZ_MESES = {
 const QZ_B2B_ALIASES = {
   nf: ['nota fiscal', 'nf', 'n nota fiscal'],
   valorNF: ['valor nf', 'valor da nf', 'vl nf'],
-  numCte: ['num. cte', 'num cte', 'numero cte', 'numeros cte', 'n cte'],
+  numCte: ['num. cte', 'num cte', 'numero cte', 'numeros cte', 'n cte', 'numero do cte', 'nº cte'],
   pago: ['total fatura rev.', 'total fatura rev', 'total fatura', 'valor fatura'],
   transportador: ['transportador', 'transportadora'],
   dtNF: ['dt nf', 'data nf', 'data nota fiscal'],
+  dtCte: ['dt cte', 'data cte', 'dt cte-e', 'data cte-e', 'data do cte'],
+  devolucao: ['devolucao', 'devolução', 'e devolucao', 'retorno'],
+  modalidade: ['modalidade', 'modal', 'mod'],
+  tipoOp: ['tipo operacao', 'tipo operação', 'tipo op', 'operacao'],
+  peso: ['peso', 'peso kg', 'peso (kg)'],
   destinatario: ['destinatario', 'destinatário']
 };
 
@@ -3518,6 +3589,11 @@ function normalizeQzB2BRow(row) {
     pago: findQzField(row, 'pago', QZ_B2B_ALIASES),
     transportador: findQzField(row, 'transportador', QZ_B2B_ALIASES),
     dtNF: findQzField(row, 'dtNF', QZ_B2B_ALIASES),
+    dtCte: findQzField(row, 'dtCte', QZ_B2B_ALIASES),
+    devolucao: findQzField(row, 'devolucao', QZ_B2B_ALIASES),
+    modalidade: findQzField(row, 'modalidade', QZ_B2B_ALIASES),
+    tipoOp: findQzField(row, 'tipoOp', QZ_B2B_ALIASES),
+    peso: findQzField(row, 'peso', QZ_B2B_ALIASES),
     destinatario: findQzField(row, 'destinatario', QZ_B2B_ALIASES)
   };
 }
@@ -3591,6 +3667,8 @@ function aggregateQzB2BRows(rows, fileMeta) {
       byNf[key] = {
         nf: String(r.nf).trim(), nfKey: key, valorNF: 0, pago: 0, nCteSet: new Set(),
         transportador: r.transportador || '', destinatario: r.destinatario || '',
+        modalidade: r.modalidade || '',
+        temDevolucao: false, ctes: [],
         mesKey: fileMeta.mesKey || mesKeyFromQuinzenaKey(fileMeta.quinzenaKey),
         mesLabel: fileMeta.mesLabel || (fileMeta.mesKey ? fmtMesLabel(fileMeta.mesKey) : ''),
         quinzenaKey: fileMeta.quinzenaKey, quinzenaLabel: fileMeta.quinzenaLabel, fileName: fileMeta.fileName
@@ -3601,13 +3679,96 @@ function aggregateQzB2BRows(rows, fileMeta) {
     g.pago += num(r.pago);
     if (r.numCte) g.nCteSet.add(String(r.numCte).trim());
     if (r.transportador && g.transportador === '') g.transportador = r.transportador;
+    if (r.modalidade && !g.modalidade) g.modalidade = r.modalidade;
     if (r.dtNF && !g.dtNF) g.dtNF = r.dtNF;
+    const isDev = isDevolucaoFlag(r.devolucao);
+    g.ctes.push({
+      numCte: r.numCte != null && String(r.numCte).trim() !== '' ? String(r.numCte).trim() : null,
+      dtCte: r.dtCte || null,
+      pago: num(r.pago),
+      devolucao: isDev,
+      tipoOp: r.tipoOp || '',
+      peso: num(r.peso)
+    });
+    if (isDev) g.temDevolucao = true;
   });
-  return Object.values(byNf).map(g => ({ ...g, nCte: g.nCteSet.size || 1, nCteSet: undefined }));
+  return Object.values(byNf).map(g => {
+    const nCte = g.nCteSet.size || g.ctes.length || 1;
+    return { ...g, nCte, nCteSet: undefined };
+  });
+}
+
+function expandQzB2bToCteLines(b2bRows) {
+  const lines = [];
+  (b2bRows || []).forEach(nf => {
+    const ctes = Array.isArray(nf.ctes) ? nf.ctes : [];
+    if (ctes.length) {
+      ctes.forEach(c => {
+        lines.push({
+          nf: nf.nf,
+          valorNF: nf.valorNF,
+          transportador: nf.transportador || '-',
+          modalidade: nf.modalidade || '-',
+          dtNF: nf.dtNF || null,
+          numCte: c.numCte,
+          qtdCte: nf.nCte || ctes.length,
+          dtCte: c.dtCte || null,
+          pago: num(c.pago),
+          devolucao: c.devolucao ? 'sim' : 'nao',
+          tipoOp: c.tipoOp || '',
+          peso: num(c.peso)
+        });
+      });
+      return;
+    }
+    // Legacy pack without per-CT-e lines — one synthetic row per NF
+    lines.push({
+      nf: nf.nf,
+      valorNF: nf.valorNF,
+      transportador: nf.transportador || '-',
+      modalidade: nf.modalidade || '-',
+      dtNF: nf.dtNF || null,
+      numCte: null,
+      qtdCte: nf.nCte || 1,
+      dtCte: null,
+      pago: num(nf.pago),
+      devolucao: nf.temDevolucao ? 'sim' : 'nao',
+      tipoOp: '',
+      peso: 0
+    });
+  });
+  return lines;
+}
+
+/**
+ * Build Análise CT-e boards from quinzenal B2B when Conciliacao CT-e×NF is absent.
+ * One QZ line ≈ one CT-e (pago / devolução / Num. CTE / Dt CTE).
+ */
+function processCteAnalysisFromQuinzenal(opts = {}) {
+  const b2b = quinzenalPack?.b2bRows || [];
+  if (!b2b.length) return false;
+  const lines = expandQzB2bToCteLines(b2b);
+  if (!lines.length) return false;
+  const nFiles = quinzenalPack?.files?.filter(f => f.canal === 'B2B').length || 0;
+  const label = nFiles
+    ? `Quinzenais B2B (${nFiles} ficheiro${nFiles !== 1 ? 's' : ''})`
+    : 'Quinzenais B2B';
+  const headers = ['Nota Fiscal', 'Valor NF', 'Num. CTE', 'Dt CTE', 'Total Fatura Rev.', 'Devolução', 'Transportador'];
+  _fteSkipAutosave = true;
+  try {
+    processRows(lines, label, 'B2B QZ', headers, {
+      source: 'quinzenal',
+      switchTab: opts.switchTab !== false,
+      autosave: false
+    });
+  } finally {
+    _fteSkipAutosave = false;
+  }
+  return currentNFs.length > 0;
 }
 
 function cteNfsInQuinzena(range) {
-  if (!range || !currentNFs.length) return [];
+  if (!range || !hasConciliacaoCte()) return [];
   return currentNFs.filter(nf => {
     enrichNF(nf);
     const d = nf.dtRef || (nf.dtNF ? (parseSapBrDate(nf.dtNF) || (nf.dtNF instanceof Date ? nf.dtNF : null)) : null);
@@ -3627,6 +3788,7 @@ function cteMesKeyFromNf(nf) {
 
 function buildCteMonthTotalsMap() {
   const byMes = {};
+  if (!hasConciliacaoCte()) return byMes;
   currentNFs.forEach(nf => {
     const k = cteMesKeyFromNf(nf);
     if (!byMes[k]) byMes[k] = { nfCount: 0, totalValorNF: 0, totalPago: 0, totalCte: 0 };
@@ -3640,6 +3802,9 @@ function buildCteMonthTotalsMap() {
 }
 
 function cteGrandTotalsFromNFs() {
+  if (!hasConciliacaoCte()) {
+    return { nfCount: 0, totalValorNF: 0, totalPago: 0, totalCte: 0 };
+  }
   if (currentSummary) {
     return {
       nfCount: currentSummary.totalNF,
@@ -3661,6 +3826,11 @@ function mergeQzB2BNf(into, r) {
   into.pago += r.pago;
   into.nCte += r.nCte;
   if (r.dtNF && !into.dtNF) into.dtNF = r.dtNF;
+  if (r.temDevolucao) into.temDevolucao = true;
+  if (Array.isArray(r.ctes) && r.ctes.length) {
+    if (!Array.isArray(into.ctes)) into.ctes = [];
+    into.ctes.push(...r.ctes);
+  }
 }
 
 function quinzenaFromKey(qk) {
@@ -3962,6 +4132,18 @@ function renderB2cKpiBlock(label, stats) {
 
 function renderB2bCompareKpis(monthTotals, cteGrand, compareRows) {
   const t = aggregateB2bMonthGroup(monthTotals || []);
+  const hasCteSide = hasConciliacaoCte();
+  if (!hasCteSide) {
+    return `<div class="qz-year-kpi-block">
+      <div class="qz-year-kpi-label">Quinzenal B2B (vista só QZ)</div>
+      <div class="kpis">
+        <div class="kpi"><div class="label">NFs</div><div class="value">${t.nfCountQz}</div></div>
+        <div class="kpi"><div class="label">Faturação QZ</div><div class="value">${fmtMoney(t.totalValorNFQz)}</div></div>
+        <div class="kpi"><div class="label">Frete QZ</div><div class="value">${fmtMoney(t.totalPagoQz)}</div></div>
+        <div class="kpi"><div class="label">CT-e (distintos)</div><div class="value">${t.totalCteQz}</div></div>
+      </div>
+    </div>`;
+  }
   const fatCte = cteGrand?.totalValorNF ?? t.totalValorNFCte;
   const freteCte = cteGrand?.totalPago ?? t.totalPagoCte;
   const s = qzCompareSummary(compareRows || []);
@@ -4057,7 +4239,10 @@ function buildB2BCompare(b2bRows) {
     else mergeQzB2BNf(qzMap[k], r);
   });
   const cteMap = {};
-  currentNFs.forEach(nf => { const k = normNFKey(nf.nf); if (k) cteMap[k] = nf; });
+  // Only Conciliacao CT-e×NF counts as the CT-e side — QZ-derived currentNFs must not self-compare
+  if (hasConciliacaoCte()) {
+    currentNFs.forEach(nf => { const k = normNFKey(nf.nf); if (k) cteMap[k] = nf; });
+  }
   const keys = new Set([...Object.keys(qzMap), ...Object.keys(cteMap)]);
   const rows = [];
   keys.forEach(k => {
@@ -4081,7 +4266,10 @@ function buildB2BCompare(b2bRows) {
       mesLabelCte = mesKeyCte ? fmtMesLabel(mesKeyCte) : '';
     }
     let status = 'match';
-    if (qz && !cte) status = 'onlyQz';
+    if (!cte && Object.keys(cteMap).length === 0) {
+      // No Conciliacao loaded — QZ inventory view, not a mismatch
+      status = 'qzView';
+    } else if (qz && !cte) status = 'onlyQz';
     else if (!qz && cte) status = 'onlyCte';
     else if (Math.abs(valorNFQz - valorNFCte) > 1 || Math.abs(pagoQz - pagoCte) > 0.5 || nCteQz !== nCteCte) status = 'diff';
     rows.push({
@@ -4425,7 +4613,8 @@ function bindQzExpandClicks(bodyEl, panel) {
 
 function fmtQzStatus(s) {
   return { match: '<span style="color:var(--green)">OK</span>', diff: '<span style="color:#b3261e">Diferença</span>',
-    onlyQz: '<span style="color:#b3261e">Só quinzenal</span>', onlyCte: '<span style="color:#b3261e">Só CT-e</span>' }[s] || s;
+    onlyQz: '<span style="color:#b3261e">Só quinzenal</span>', onlyCte: '<span style="color:#b3261e">Só CT-e</span>',
+    qzView: '<span style="color:var(--muted)">Quinzenal</span>' }[s] || s;
 }
 
 function populateQzMonthFilters() {
@@ -4456,13 +4645,14 @@ async function renderB2bCompareTab() {
   const empty = $('b2bEmpty');
   const content = $('b2bContent');
   const warn = $('qzWarn');
-  if (quinzenalPack?.b2bRows?.length && !currentNFs.length) {
+  if (quinzenalPack?.b2bRows?.length && !hasConciliacaoCte()) {
     await ensureCteLoadedForQz(true);
   }
   if (warn) {
-    if (quinzenalPack?.b2bRows?.length && !currentNFs.length) {
+    if (quinzenalPack?.b2bRows?.length && !hasConciliacaoCte()) {
       warn.style.display = 'block';
-      warn.innerHTML = '<strong>Export Unilog indisponível:</strong> processa o Excel CT-e/NF em <strong>Carregamento de dados</strong> para comparar B2B quinzenal vs export original.';
+      warn.innerHTML = '<strong>Vista quinzenal:</strong> a <strong>Análise CT-e</strong> e este confronto usam os quinzenais B2B (pago, devolução, Num. CTE). '
+        + 'Carrega também o <strong>ZFACT</strong> para anomalias SAP.';
     } else warn.style.display = 'none';
   }
   const hasB2b = !!(quinzenalPack?.b2bRows?.length);
@@ -4473,6 +4663,15 @@ async function renderB2bCompareTab() {
   populateQzMonthFilters();
   refreshQuinzenalCompare();
   renderQzB2b();
+  // Soften mismatch panels when QZ-only (no Conciliacao side)
+  const missingPanels = document.querySelector('.qz-missing-panels');
+  if (missingPanels) missingPanels.style.display = hasConciliacaoCte() ? '' : 'none';
+  const mismatchTitle = missingPanels?.previousElementSibling;
+  // section-title for mismatch is before the panels; hide its following description too via parent query
+  const mismatchSection = $('exportB2bMismatchBtn')?.closest('.section-title');
+  if (mismatchSection) mismatchSection.style.display = hasConciliacaoCte() ? '' : 'none';
+  const mismatchHint = mismatchSection?.nextElementSibling;
+  if (mismatchHint && mismatchHint.tagName === 'P') mismatchHint.style.display = hasConciliacaoCte() ? '' : 'none';
 }
 
 async function renderB2cAnalysisTab() {
@@ -4842,12 +5041,16 @@ function renderQzB2b() {
         <td class="right">${fmtQzDiff(r.diffPago, 0.5)}</td>
         <td class="right">${r.nCteQz || '-'}</td><td class="right">${r.nCteCte || '-'}</td><td class="right">${r.diffCte || 0}</td>
         <td>${fmtQzStatus(r.status)}</td><td class="right">${pctNote}</td></tr>`;
-    }).join('') || '<tr><td colspan="14" class="empty">Sem dados B2B — carrega quinzenais B2B e análise CT-e</td></tr>';
+    }).join('') || '<tr><td colspan="14" class="empty">Sem dados B2B — carrega quinzenais B2B</td></tr>';
   }
   fteEnableDomSort(qzBody);
   fteEnableDomSort(qzMissBody);
   fteEnableDomSort(cteMissBody);
   fteEnableDomSort(detBody);
+
+  // Soften CT-e columns emphasis when QZ-only
+  const b2bContent = $('b2bContent');
+  if (b2bContent) b2bContent.classList.toggle('qz-only-view', !hasConciliacaoCte());
 }
 
 function renderQzB2c() {
@@ -4960,6 +5163,7 @@ function reloadFretesForCompany() {
   currentUploadId = null;
   sapNfMap = {};
   lastCtePack = null;
+  cteAnalysisSource = null;
   activeSubPanel = null;
   activeCteSub = 'resumo';
   selectedMonth = '';
@@ -5140,6 +5344,52 @@ function fteNeedsCloudReload() {
 }
 
 /** Shared SAP NF map for Fretes + Armazém modules. */
+/**
+ * Monthly frete rows for Total Custo Unilog.
+ * Source of truth for costs = quinzenais Unilog:
+ *   B2B = b2bMonthTotals.totalPagoQz (Gestão de Frete DELTA B2B)
+ *   B2C = b2cMonthTotals.totalFrete  (Gestão de Frete DELTA B2C)
+ * CT-e totalPago is kept for reference / Δ only — not used as primary cost.
+ * Fallback to CT-e freteCte only when quinzenal B2B is empty for that month.
+ */
+function getFretesMonthlyCustoRows() {
+  try {
+    return (typeof buildResumoMonthlyRows === 'function' ? buildResumoMonthlyRows() : []).map(m => {
+      const freteCte = m.freteCte || 0;
+      const freteQzB2b = m.freteQzB2b || 0;
+      const freteB2b = freteQzB2b > 0 ? freteQzB2b : freteCte;
+      const freteB2c = m.freteB2c || 0;
+      return {
+        mesKey: m.mesKey,
+        mesLabel: m.mesLabel,
+        freteB2b,
+        freteCte,
+        freteQzB2b,
+        freteB2c,
+        fretePago: freteB2b,
+        label: freteQzB2b > 0
+          ? 'Fretes B2B (quinzenal) + B2C (quinzenal)'
+          : 'Fretes B2B (CT-e fallback) + B2C (quinzenal)'
+      };
+    });
+  } catch (e) {
+    console.warn('[fretes] getFretesMonthlyCustoRows', e);
+    return [];
+  }
+}
+
+function refreshCustoUnilogIfVisible() {
+  try {
+    if (document.getElementById('page-custoUnilog')?.classList.contains('active')
+      && typeof window.renderCustoUnilog === 'function') {
+      window.renderCustoUnilog();
+    }
+  } catch (e) {
+    console.warn('[fretes] refreshCustoUnilogIfVisible', e);
+  }
+}
+
+window.getFretesMonthlyCustoRows = getFretesMonthlyCustoRows;
 window.FretesSAP = {
   getMap: () => sapNfMap,
   normNFKey,
