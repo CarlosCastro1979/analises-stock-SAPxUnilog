@@ -1,5 +1,5 @@
-// fretes.js v1.8.66 — Análise CT-e from quinzenais B2B (+ ZFACT); Conciliacao CT-e×NF upload removed from UI
-const FRETES_JS_VERSION = '1.8.66';
+// fretes.js v1.8.67 — Análise CT-e from quinzenais B2B (+ ZFACT); Conciliacao CT-e×NF upload removed from UI
+const FRETES_JS_VERSION = '1.8.67';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -42,6 +42,24 @@ function hasConciliacaoCte() {
 
 function hasCteAnalysisData() {
   return currentNFs.length > 0;
+}
+
+/** Yield to the browser so menus stay responsive during heavy Fretes restore. */
+function fteYield(label) {
+  if (label) {
+    try { fteSetProcessing(true, label); } catch (_) {}
+  }
+  return new Promise(resolve => {
+    try {
+      requestAnimationFrame(() => setTimeout(resolve, 0));
+    } catch (_) {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
+function fteMarkCompanyLoaded() {
+  _fteLoadedCompany = fteCompany();
 }
 
 function fteCompany() {
@@ -150,18 +168,18 @@ function renderCteSubPanels() {
 }
 
 async function applyFretesFileLabelsFromMeta() {
-  if (typeof fetchExcelFiles !== 'function') return;
+  // Metadata only — never select file_data (QZ packs are multi-MB and freeze the UI).
+  const fetchMeta = typeof fetchExcelFileMeta === 'function' ? fetchExcelFileMeta : fetchExcelFiles;
+  if (typeof fetchMeta !== 'function') return;
   try {
     if (typeof syncCompanyDepotMap === 'function') syncCompanyDepotMap();
-    const m = await fetchExcelFiles([fteCteSlot(), fteSapSlot(), fteQuinzenalSlot()]);
+    const m = await fetchMeta([fteCteSlot(), fteSapSlot(), fteQuinzenalSlot()]);
     const cte = m[fteCteSlot()];
     const sap = m[fteSapSlot()];
-    if (cte?.file_data || fteCteBuffer) setCteZoneLoaded(cte?.file_name || fteCteFileName);
-    else if (cte?.file_name) setCteZoneLoaded('');
-    if (sap?.file_data || fteSapBuffer) setSapZoneLoaded(sap?.file_name || fteSapFileName);
-    else if (sap?.file_name) setSapZoneLoaded('');
-    // Labels only — do NOT parse quinzenal / refresh compare here (freezes UI on tab click).
-    // Full restore belongs to loadSavedFretesFiles.
+    if (fteCteBuffer || cte?.file_name) setCteZoneLoaded(fteCteFileName || cte?.file_name || '');
+    else setCteZoneLoaded('');
+    if (fteSapBuffer || sap?.file_name) setSapZoneLoaded(fteSapFileName || sap?.file_name || '');
+    else setSapZoneLoaded('');
     syncQzUploadZone();
     updateQzFileNote();
     updateFretesFileStatus(m);
@@ -178,13 +196,13 @@ function quinzenalPackCounts(pack) {
 }
 
 function quinzenalExcelStatusPart(rec) {
-  const pack = (quinzenalPack?.files?.length ? quinzenalPack : null) ||
-    parseQuinzenalPackFromRec(rec);
-  const counts = quinzenalPackCounts(pack);
-  if (!counts && !rec?.file_name) return '';
-  const n = counts?.total || 0;
+  // NEVER parseQuinzenalPackFromRec here — that JSON.parse of multi-MB packs freezes menus.
+  const counts = quinzenalPackCounts(quinzenalPack);
   const dt = typeof fmtExcelFileDate === 'function' ? fmtExcelFileDate(rec?.uploaded_at) : '';
-  if (n) return `Quinzenais: ${n} ficheiro${n !== 1 ? 's' : ''}${dt ? ' (' + dt + ')' : ''}`;
+  if (counts?.total) {
+    const n = counts.total;
+    return `Quinzenais: ${n} ficheiro${n !== 1 ? 's' : ''}${dt ? ' (' + dt + ')' : ''}`;
+  }
   if (rec?.file_name) return `Quinzenais: ${rec.file_name}${dt ? ' (' + dt + ')' : ''}`;
   return '';
 }
@@ -312,8 +330,9 @@ function updateFretesFileStatus(meta) {
     apply(meta);
     return;
   }
-  if (typeof fetchExcelFiles !== 'function') return;
-  fetchExcelFiles([fteCteSlot(), fteSapSlot(), fteQuinzenalSlot()]).then(apply).catch(() => {
+  const fetchMeta = typeof fetchExcelFileMeta === 'function' ? fetchExcelFileMeta : fetchExcelFiles;
+  if (typeof fetchMeta !== 'function') return;
+  fetchMeta([fteCteSlot(), fteSapSlot(), fteQuinzenalSlot()]).then(apply).catch(() => {
     el.style.display = 'none';
   });
 }
@@ -2112,6 +2131,71 @@ function processRows(rows, fileName, sheetName, headers, opts = {}) {
   if (!_fteSkipAutosave && opts.autosave !== false) autosaveToCloud();
 }
 
+/** Chunked processRows — yields every ~800 lines so the main thread stays responsive. */
+async function processRowsAsync(rows, fileName, sheetName, headers, opts = {}) {
+  lastCtePack = { rows, fileName, sheetName, headers, source: opts.source || 'conciliacao' };
+  cteAnalysisSource = opts.source || 'conciliacao';
+
+  setLoadbar('A processar ' + rows.length + ' linhas (folha "' + sheetName + '")...');
+  fteSetProcessing(true, 'A processar ' + rows.length + ' linhas…');
+
+  const byNF = {};
+  const CHUNK = 800;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const end = Math.min(i + CHUNK, rows.length);
+    for (let j = i; j < end; j++) {
+      const r = rows[j];
+      const nf = r.nf;
+      if (nf === null || nf === undefined || String(nf).trim() === '') continue;
+      const nfKey = normNFKey(nf);
+      if (!byNF[nfKey]) byNF[nfKey] = {
+        nf: String(nf).trim(), valorNF: num(r.valorNF), transportador: r.transportador || '-',
+        modalidade: r.modalidade || '-', ctes: [], temDevolucao: false, dtNF: r.dtNF,
+        cliente: '', qtdCteFromSource: 0
+      };
+      const g = byNF[nfKey];
+      const qtdRow = num(r.qtdCte);
+      if (qtdRow > g.qtdCteFromSource) g.qtdCteFromSource = qtdRow;
+      if (num(r.valorNF) > g.valorNF) g.valorNF = num(r.valorNF);
+      if (r.transportador && g.transportador === '-') g.transportador = r.transportador;
+      if (r.modalidade && g.modalidade === '-') g.modalidade = r.modalidade;
+      if (r.dtNF && !g.dtNF) g.dtNF = r.dtNF;
+      const isDev = isDevolucaoFlag(r.devolucao);
+      g.ctes.push({
+        numCte: r.numCte, dtCte: r.dtCte, pago: num(r.pago),
+        devolucao: isDev,
+        tipoOp: r.tipoOp, peso: num(r.peso)
+      });
+      if (isDev) g.temDevolucao = true;
+    }
+    if (end < rows.length) {
+      await fteYield(`A processar ${end}/${rows.length} linhas…`);
+    }
+  }
+
+  await fteYield('A classificar NFs…');
+  let nfList = Object.values(byNF).map(buildNfRecord);
+  nfList = applySapToList(nfList);
+  nfList.sort((a, b) => b.diff - a.diff);
+  currentNFs = nfList;
+  currentSummary = computeSummary(nfList, fileName);
+  tableSort = { col: 'diff', dir: -1 };
+  selectedMonth = '';
+
+  if (!nfList.length) {
+    const cols = (headers && headers.length) ? headers.join(', ') : '(não detetadas)';
+    setLoadbar('0 notas fiscais encontradas na folha "' + sheetName + '". Colunas: ' + cols, true);
+    switchFteTab('carregamento');
+    fteToast('Não foi possível ler notas fiscais — verifica se o ficheiro tem a coluna "Nota Fiscal".');
+    return;
+  }
+
+  await fteYield('A desenhar Análise CT-e…');
+  renderAll();
+  showResultsView(opts);
+  if (!_fteSkipAutosave && opts.autosave !== false) autosaveToCloud();
+}
+
 function computeSummary(list, fileName) {
   const totalPago = list.reduce((s, x) => s + x.pago, 0);
   const totalValorNF = list.reduce((s, x) => s + x.valorNF, 0);
@@ -3331,9 +3415,10 @@ async function ensureCteLoadedForQz(silent = true) {
 
 async function loadSavedFretesFiles(silent = false) {
   if (_fteLoadSavedPromise) return _fteLoadSavedPromise;
-  if (!silent) fteSetProcessing(true, 'A carregar da cloud…');
+  // Always show spinner — silent only suppresses success toasts (menus must not look "dead").
+  fteSetProcessing(true, 'A carregar Fretes da cloud…');
   _fteLoadSavedPromise = _loadSavedFretesFilesImpl(silent).finally(() => {
-    if (!silent) fteSetProcessing(false);
+    fteSetProcessing(false);
     _fteLoadSavedPromise = null;
   });
   return _fteLoadSavedPromise;
@@ -3347,15 +3432,26 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   if (typeof syncCompanyDepotMap === 'function') syncCompanyDepotMap();
   const co = fteCompany();
   console.log('[fretes] load saved', co);
+
+  // Instant path: already restored for this company — paint from RAM, no re-parse.
+  if (_fteLoadedCompany === co && (currentNFs.length || quinzenalPack?.files?.length || isSapLoaded())) {
+    syncQzUploadZone();
+    updateQzFileNote();
+    updateFretesFileStatus();
+    const activeTab = document.querySelector('.fte-tab.active')?.dataset?.tab;
+    if (activeTab === 'analise-cte') renderCteSubPanels();
+    else if (activeTab === 'analise-b2c') renderB2cAnalysisTab();
+    else if (activeTab === 'cte-vs-qz') renderB2bCompareTab();
+    else if (activeTab === 'resumo-total') renderResumoTotal();
+    refreshCustoUnilogIfVisible();
+    return true;
+  }
+
   let meta;
   try {
-    meta = await fetchExcelFiles([fteCteSlot(), fteSapSlot()]);
-    try {
-      const qzOnly = await fetchExcelFiles([fteQuinzenalSlot()]);
-      meta[fteQuinzenalSlot()] = qzOnly[fteQuinzenalSlot()];
-    } catch (qzErr) {
-      console.warn('[fretes] load quinzenal slot fetch', co, qzErr);
-    }
+    await fteYield('A descarregar Fretes…');
+    // QZ + SAP first (structured path). CTE Excel is legacy Conciliacao only.
+    meta = await fetchExcelFiles([fteQuinzenalSlot(), fteSapSlot(), fteCteSlot()]);
   } catch (err) {
     console.error('[fretes] load saved', co, err);
     if (!silent) {
@@ -3373,49 +3469,61 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   const hadCteInMem = _fteLoadedCompany === co && currentNFs.length;
   const hadQzInMem = !!quinzenalPack?.files?.length;
 
-  let cteOk = false;
-  if (cteRec?.file_data) {
-    cteOk = await restoreCteFromRec(cteRec, sapRec, silent);
+  // 1) Restore quinzenais (structured JSON) — preferred source of truth
+  await fteYield('A restaurar quinzenais…');
+  const qzLoaded = await loadSavedQuinzenalPack(silent, meta, { deferCompare: true, skipRender: true });
+  if (qzLoaded) console.log('[fretes] restore quinzenal', co, quinzenalPack?.files?.length || 0, 'files');
+
+  // 2) Build Análise CT-e from QZ B2B (Conciliacao removed) — yield before heavy sync
+  let qzCteBuilt = false;
+  if (!hadCteInMem && !hasConciliacaoCte() && quinzenalPack?.b2bRows?.length) {
+    await fteYield('A montar Análise CT-e…');
+    qzCteBuilt = await processCteAnalysisFromQuinzenalAsync({ switchTab: false });
+    console.log('[fretes] restore cte-from-qz', co, 'ok', qzCteBuilt, 'nfs', currentNFs.length);
+  }
+
+  // 3) Legacy CTE Excel only if QZ path did not produce analysis
+  let cteOk = !!(qzCteBuilt || currentNFs.length);
+  if (!cteOk && cteRec?.file_data) {
+    await fteYield('A processar CT-e Excel…');
+    cteOk = await restoreCteFromRec(cteRec, null, silent);
     console.log('[fretes] restore cte', co, cteRec.file_name, 'dataLen', cteRec.file_data.length, 'ok', cteOk);
-  } else if (hadCteInMem) {
+  } else if (!cteOk && hadCteInMem) {
     cteOk = true;
     console.log('[fretes] restore cte from memory', co, currentNFs.length, 'NFs');
-  } else if (cteRec?.file_name) {
+  } else if (!cteOk && cteRec?.file_name && !cteRec?.file_data) {
     console.warn('[fretes] cte metadata only', co, cteRec.file_name);
     if (!silent) {
       fteToastError('CT-e guardado só com nome — clica Processar e Guardar para persistir o ficheiro.');
     }
   }
 
-  const qzLoaded = await loadSavedQuinzenalPack(silent, meta, { deferCompare: true, skipRender: true });
-  if (qzLoaded) console.log('[fretes] restore quinzenal', co, quinzenalPack?.files?.length || 0, 'files');
-
-  // Sem Conciliacao: montar Análise CT-e a partir dos quinzenais B2B restaurados
-  let qzCteBuilt = false;
-  if (!cteOk && !hasConciliacaoCte() && quinzenalPack?.b2bRows?.length) {
-    // Yield so the browser can paint / handle clicks before the heavy sync rebuild
-    await new Promise(r => setTimeout(r, 0));
-    qzCteBuilt = processCteAnalysisFromQuinzenal({ switchTab: false });
-    console.log('[fretes] restore cte-from-qz', co, 'ok', qzCteBuilt, 'nfs', currentNFs.length);
+  // 4) ZFACT / SAP NF map
+  if (!isSapLoaded() && sapRec?.file_data) {
+    await fteYield('A processar ZFACT…');
+    const sapOnlyOk = restoreSapFromRec(sapRec, silent);
+    console.log('[fretes] restore sap-only', co, sapRec.file_name, 'ok', sapOnlyOk, 'mapSize', Object.keys(sapNfMap).length);
+    if (sapOnlyOk && (qzCteBuilt || cteAnalysisSource === 'quinzenal' || currentNFs.length)) {
+      await fteYield('A cruzar SAP…');
+      reEnrichAfterSapLoad();
+    }
+  } else if (cteOk && sapRec?.file_data && !isSapLoaded()) {
+    await fteYield('A processar ZFACT…');
+    restoreSapFromRec(sapRec, silent);
   }
 
+  await fteYield('A calcular confrontos…');
   refreshQuinzenalCompare();
   syncQzUploadZone();
   updateQzFileNote();
   updateFretesFileStatus(meta);
 
-  if (!isSapLoaded() && sapRec?.file_data) {
-    const sapOnlyOk = restoreSapFromRec(sapRec, silent);
-    console.log('[fretes] restore sap-only', co, sapRec.file_name, 'ok', sapOnlyOk, 'mapSize', Object.keys(sapNfMap).length);
-    if (sapOnlyOk && (qzCteBuilt || cteAnalysisSource === 'quinzenal')) reEnrichAfterSapLoad();
-  }
-
-  const freshCte = !!(cteRec?.file_data && cteOk && !hadCteInMem);
+  const freshCte = !!(cteRec?.file_data && cteOk && !hadCteInMem && !qzCteBuilt);
   const freshQz = !!(qzLoaded && !hadQzInMem);
 
   if (!cteOk && !qzCteBuilt && !silent && !qzLoaded && !cteRec) {
     fteToastError('Sem ficheiros CT-e guardados para ' + co + '.');
-  } else   if ((freshCte || freshQz || qzCteBuilt) && !silent) {
+  } else if ((freshCte || freshQz || qzCteBuilt) && !silent) {
     const parts = [];
     if (freshCte) parts.push('CT-e' + (sapRec?.file_data ? ' + SAP' : ''));
     if (freshQz) parts.push('quinzenais');
@@ -3423,6 +3531,11 @@ async function _loadSavedFretesFilesImpl(silent = false) {
     fteToast('Ficheiros fretes restaurados: ' + parts.join(', ') + ' (' + co + ').');
   }
 
+  if (qzLoaded || cteOk || qzCteBuilt || isSapLoaded() || currentNFs.length) {
+    fteMarkCompanyLoaded();
+  }
+
+  await fteYield('A desenhar tabelas…');
   const activeTab = document.querySelector('.fte-tab.active')?.dataset?.tab;
   if (activeTab === 'analise-cte') renderCteSubPanels();
   else if (activeTab === 'analise-b2c') renderB2cAnalysisTab();
@@ -3778,6 +3891,33 @@ function processCteAnalysisFromQuinzenal(opts = {}) {
   } finally {
     _fteSkipAutosave = false;
   }
+  if (currentNFs.length) fteMarkCompanyLoaded();
+  return currentNFs.length > 0;
+}
+
+/** Async variant — yields so the UI can paint a spinner during large QZ→CT-e rebuilds. */
+async function processCteAnalysisFromQuinzenalAsync(opts = {}) {
+  const b2b = quinzenalPack?.b2bRows || [];
+  if (!b2b.length) return false;
+  await fteYield('A expandir linhas QZ…');
+  const lines = expandQzB2bToCteLines(b2b);
+  if (!lines.length) return false;
+  const nFiles = quinzenalPack?.files?.filter(f => f.canal === 'B2B').length || 0;
+  const label = nFiles
+    ? `Quinzenais B2B (${nFiles} ficheiro${nFiles !== 1 ? 's' : ''})`
+    : 'Quinzenais B2B';
+  const headers = ['Nota Fiscal', 'Valor NF', 'Num. CTE', 'Dt CTE', 'Total Fatura Rev.', 'Devolução', 'Transportador'];
+  _fteSkipAutosave = true;
+  try {
+    await processRowsAsync(lines, label, 'B2B QZ', headers, {
+      source: 'quinzenal',
+      switchTab: opts.switchTab !== false,
+      autosave: false
+    });
+  } finally {
+    _fteSkipAutosave = false;
+  }
+  if (currentNFs.length) fteMarkCompanyLoaded();
   return currentNFs.length > 0;
 }
 
@@ -4515,6 +4655,16 @@ async function loadSavedQuinzenalPack(silent, meta, opts = {}) {
       }
       return false;
     }
+    // Already have this pack in RAM — skip multi-MB base64→JSON parse
+    if (quinzenalPack?.files?.length && _fteLoadedCompany === fteCompany()) {
+      console.log('[fretes] quinzenal cache hit', fteCompany(), quinzenalPack.files.length, 'files');
+      if (!opts?.deferCompare) refreshQuinzenalCompare();
+      syncQzUploadZone();
+      updateQzFileNote();
+      updateQzProcessStatus();
+      return true;
+    }
+    await fteYield('A descodificar quinzenais…');
     const parsed = parseQuinzenalPackFromRec(rec);
     if (!parsed?.files?.length) {
       console.warn('[fretes] quinzenal parse empty', fteCompany(), rec.file_name, 'dataLen', rec.file_data?.length || 0);
@@ -4524,7 +4674,10 @@ async function loadSavedQuinzenalPack(silent, meta, opts = {}) {
     quinzenalPack = parsed;
     const c = quinzenalPackCounts(quinzenalPack);
     console.log('[fretes] load quinzenal', fteCompany(), rec.file_name, 'dataLen', rec.file_data.length, 'files', c.total, c.b2c, 'B2C', c.b2b, 'B2B');
-    if (!opts?.deferCompare) refreshQuinzenalCompare();
+    if (!opts?.deferCompare) {
+      await fteYield('A calcular confrontos QZ…');
+      refreshQuinzenalCompare();
+    }
     syncQzUploadZone();
     updateQzFileNote();
     updateQzProcessStatus();
@@ -5348,11 +5501,18 @@ function initFretes() {
   }
 }
 
-/** True when this company has no fretes data in memory yet (needs silent cloud load). */
+/** True when this company has no fretes data in memory yet (needs cloud load). */
 function fteNeedsCloudReload() {
   const co = fteCompany();
   if (_fteLoadedCompany === co && (currentNFs.length || isSapLoaded() || quinzenalPack?.files?.length)) {
     return false;
+  }
+  // Also trust in-memory QZ/CTE even if mark was missed (pre-1.8.67 bug)
+  if (quinzenalPack?.files?.length || currentNFs.length || isSapLoaded()) {
+    if (_fteLoadedCompany === co || _fteLoadedCompany == null) {
+      fteMarkCompanyLoaded();
+      return false;
+    }
   }
   return true;
 }

@@ -506,7 +506,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.66 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.67 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -2338,6 +2338,18 @@ async function fetchExcelFiles(slots){
   });
   return map;
 }
+/** Metadata only (no file_data) — safe for labels/status without downloading multi-MB packs. */
+async function fetchExcelFileMeta(slots){
+  syncCompanyDepotMap();
+  let q=db.from('logistica_excel_files').select('slot,file_name,uploaded_at').eq('company',company);
+  if(slots?.length)q=q.in('slot',slots);
+  const{data,error}=await q;
+  if(error){console.error('[excel] meta error',company,slots,error);throw error;}
+  const map={};
+  (data||[]).forEach(r=>{map[r.slot]=r;});
+  return map;
+}
+window.fetchExcelFileMeta=fetchExcelFileMeta;
 function excelStatusPart(rec,label){
   if(!rec?.file_name)return'';
   const dt=fmtExcelFileDate(rec.uploaded_at);
@@ -2347,7 +2359,8 @@ async function updateStockFileStatus(){
   const el=document.getElementById('stockFileStatus');
   if(!el)return;
   try{
-    const m=await fetchExcelFiles([EXCEL_SLOTS.STOCK_SAP,EXCEL_SLOTS.STOCK_UNILOG]);
+    const fetchMeta=typeof fetchExcelFileMeta==='function'?fetchExcelFileMeta:fetchExcelFiles;
+    const m=await fetchMeta([EXCEL_SLOTS.STOCK_SAP,EXCEL_SLOTS.STOCK_UNILOG]);
     const parts=[excelStatusPart(m[EXCEL_SLOTS.STOCK_SAP],'SAP:'),excelStatusPart(m[EXCEL_SLOTS.STOCK_UNILOG],'Unilog:')].filter(Boolean);
     if(parts.length){el.textContent='Último ficheiro: '+parts.join(' · ');el.style.display='block';}
     else el.style.display='none';
@@ -2355,7 +2368,8 @@ async function updateStockFileStatus(){
 }
 async function applyStockFileLabelsFromMeta(){
   try{
-    const m=await fetchExcelFiles([EXCEL_SLOTS.STOCK_SAP,EXCEL_SLOTS.STOCK_UNILOG]);
+    const fetchMeta=typeof fetchExcelFileMeta==='function'?fetchExcelFileMeta:fetchExcelFiles;
+    const m=await fetchMeta([EXCEL_SLOTS.STOCK_SAP,EXCEL_SLOTS.STOCK_UNILOG]);
     const sapEl=document.getElementById('sapFn'),uniEl=document.getElementById('uniFn');
     const sapZ=document.getElementById('sapZone'),uniZ=document.getElementById('uniZone');
     if(m[EXCEL_SLOTS.STOCK_SAP]?.file_name){sapEl.textContent='✓ '+m[EXCEL_SLOTS.STOCK_SAP].file_name;sapZ?.classList.add('loaded');}
@@ -2551,14 +2565,21 @@ function activateCobrancasPage(page){
     catch(_){setTimeout(fn,0);}
   };
   if(page==='fretes'){
+    // Spinner immediately (before rAF) so user sees progress instead of empty freeze
+    try{if(typeof fteSetProcessing==='function'&&typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload())fteSetProcessing(true,'A carregar Fretes…');}catch(_){}
     runAfterPaint(()=>{
       try{
         if(typeof initFretes==='function')initFretes();
-        if(typeof applyFretesFileLabelsFromMeta==='function')applyFretesFileLabelsFromMeta();
         if(typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload()&&typeof loadSavedFretesFiles==='function'){
+          // Full restore (shows spinner, yields between steps). Skip label-only fetch — it used to
+          // pull+parse multi-MB QZ packs and freeze the menu.
           loadSavedFretesFiles(true).catch(e=>console.warn('[cobrancas] fretes load',e));
+        }else{
+          // Already in RAM — labels only (metadata, no file_data)
+          if(typeof applyFretesFileLabelsFromMeta==='function')applyFretesFileLabelsFromMeta();
+          try{if(typeof fteSetProcessing==='function')fteSetProcessing(false);}catch(_){}
         }
-      }catch(e){console.warn('[cobrancas] fretes',e);}
+      }catch(e){console.warn('[cobrancas] fretes',e);try{if(typeof fteSetProcessing==='function')fteSetProcessing(false);}catch(_){}}
     });
   }
   if(page==='armazem'){
@@ -2863,10 +2884,13 @@ async function init(){
         loadReconNotas().catch(e=>console.warn('[boot] notas',e)),
         loadPecasData().catch(e=>console.warn('[boot] pecas',e))
       ]);
-      await autoLoadLastExcelFiles();
+      // Do NOT await stock Excel parse — it blocks the main thread and freezes all menus.
+      // Fire-and-forget with progress; nav stays clickable while SAP/Unilog restore.
+      autoLoadLastExcelFiles().then(()=>{
+        if(typeof refreshArmazemSapValidation==='function')refreshArmazemSapValidation();
+      }).catch(e=>console.warn('[boot] stock',e));
       // Do NOT silent-load Fretes on boot — QZ→CT-e rebuild freezes the main thread
       // (clicks appear dead). Cobranças / Fretes tabs load on demand via fteNeedsCloudReload.
-      if(typeof refreshArmazemSapValidation==='function')refreshArmazemSapValidation();
     }
   }catch(e){console.warn('[boot]',e);setDB(false);}
   scheduleColResize();
@@ -9619,7 +9643,7 @@ function applyResizable(){scheduleColResize();}
       load('inventario-acerto.js', 'v=1.0.10');
     });
   }
-  load('fretes.js', 'v=1.8.66', function () {
+  load('fretes.js', 'v=1.8.67', function () {
     loadInventarioAcerto();
     load('armazem.js', 'v=1.0.39', bootApp, function () {
       var e = document.getElementById('arm-initErr');
