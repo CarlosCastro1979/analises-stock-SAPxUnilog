@@ -1,5 +1,5 @@
-// fretes.js v1.8.65 — Análise CT-e from quinzenais B2B (+ ZFACT); Conciliacao CT-e×NF upload removed from UI
-const FRETES_JS_VERSION = '1.8.65';
+// fretes.js v1.8.66 — Análise CT-e from quinzenais B2B (+ ZFACT); Conciliacao CT-e×NF upload removed from UI
+const FRETES_JS_VERSION = '1.8.66';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -160,11 +160,8 @@ async function applyFretesFileLabelsFromMeta() {
     else if (cte?.file_name) setCteZoneLoaded('');
     if (sap?.file_data || fteSapBuffer) setSapZoneLoaded(sap?.file_name || fteSapFileName);
     else if (sap?.file_name) setSapZoneLoaded('');
-    const qzRec = m[fteQuinzenalSlot()];
-    if (qzRec?.file_data && !quinzenalPack?.files?.length) {
-      quinzenalPack = parseQuinzenalPackFromRec(qzRec);
-      if (quinzenalPack?.files?.length) refreshQuinzenalCompare();
-    }
+    // Labels only — do NOT parse quinzenal / refresh compare here (freezes UI on tab click).
+    // Full restore belongs to loadSavedFretesFiles.
     syncQzUploadZone();
     updateQzFileNote();
     updateFretesFileStatus(m);
@@ -2693,35 +2690,42 @@ function renderMonthlyTable() {
 
 function renderAll() {
   const s = currentSummary;
+  if (!s) return;
   const sapNote = s.sapLoaded ? ` · SAP: ${s.nSapMatched}/${s.totalNF} NFs cruzadas` : '';
   const mismatchNote = s.nValorMismatch ? ` · <span style="color:#b3261e;font-weight:600">${s.nValorMismatch} Δ valor SAP≠Unilog</span>` : '';
   const sapMissingNote = s.nSapMissing ? ` · <span style="color:#b3261e;font-weight:600">${s.nSapMissing} NF sem SAP</span>` : '';
   const srcNote = cteAnalysisSource === 'quinzenal'
     ? ' · <span style="color:var(--muted)">fonte: quinzenais B2B</span>'
     : (cteAnalysisSource === 'conciliacao' ? ' · <span style="color:var(--muted)">fonte: CT-e×NF</span>' : '');
-  $('periodoLabel').innerHTML =
-    `Ficheiro: ${s.fileName} · Período CT-e: ${fmtDate(s.periodoInicio)} a ${fmtDate(s.periodoFim)} · ${s.totalNF} notas fiscais · ${s.nUnicoCte} com CT-e único · ${s.nMultiplosCte} com múltiplos CT-e${sapNote}${mismatchNote}${sapMissingNote}${srcNote}`;
+  const periodoLabel = $('periodoLabel');
+  if (periodoLabel) {
+    periodoLabel.innerHTML =
+      `Ficheiro: ${s.fileName} · Período CT-e: ${fmtDate(s.periodoInicio)} a ${fmtDate(s.periodoFim)} · ${s.totalNF} notas fiscais · ${s.nUnicoCte} com CT-e único · ${s.nMultiplosCte} com múltiplos CT-e${sapNote}${mismatchNote}${sapMissingNote}${srcNote}`;
+  }
 
   const warnEl = $('dataWarning');
-  if (s.loadWarning) {
-    warnEl.style.display = 'block';
-    warnEl.className = 'data-warn';
-    warnEl.innerHTML = s.loadWarning;
-  } else if (cteAnalysisSource === 'quinzenal') {
-    warnEl.style.display = 'block';
-    warnEl.className = 'data-warn';
-    warnEl.innerHTML = '<strong>Análise a partir dos quinzenais B2B:</strong> 6% / R$165 / multi-CT-e usam linhas do relatório quinzenal (pago, Devolução, Num. CTE, Dt CTE). '
-      + 'ZFACT continua a alimentar anomalias SAP.';
-  } else {
-    warnEl.style.display = 'none';
-    warnEl.innerHTML = '';
+  if (warnEl) {
+    if (s.loadWarning) {
+      warnEl.style.display = 'block';
+      warnEl.className = 'data-warn';
+      warnEl.innerHTML = s.loadWarning;
+    } else if (cteAnalysisSource === 'quinzenal') {
+      warnEl.style.display = 'block';
+      warnEl.className = 'data-warn';
+      warnEl.innerHTML = '<strong>Análise a partir dos quinzenais B2B:</strong> 6% / R$165 / multi-CT-e usam linhas do relatório quinzenal (pago, Devolução, Num. CTE, Dt CTE). '
+        + 'ZFACT continua a alimentar anomalias SAP.';
+    } else {
+      warnEl.style.display = 'none';
+      warnEl.innerHTML = '';
+    }
   }
 
   const sapKpi = s.sapLoaded ? `
     <div class="kpi${s.nValorMismatch ? ' flag' : ''}"><div class="label">Δ valor SAP ≠ Unilog</div><div class="value">${s.nValorMismatch}</div><div class="sub">${s.nSapMatched} NFs cruzadas com SAP</div></div>
     <div class="kpi${s.nSapMissing ? ' flag' : ''}"><div class="label">NF sem SAP</div><div class="value">${s.nSapMissing}</div><div class="sub">anomalias para investigar</div></div>` : '';
 
-  $('kpis').innerHTML = `
+  const kpisEl = $('kpis');
+  if (kpisEl) kpisEl.innerHTML = `
     <div class="kpi"><div class="label">Faturação (valor NFs)</div><div class="value">${fmtMoney(s.totalValorNF)}</div><div class="sub">${s.totalNF} notas fiscais</div></div>
     <div class="kpi"><div class="label">Total pago (frete)</div><div class="value">${fmtMoney(s.totalPago)}</div><div class="sub">${fmtPct(s.pctPagoSobreNF)} sobre faturação (meta: 6%)</div></div>
     <div class="kpi"><div class="label">Esperado (6%)</div><div class="value">${fmtMoney(s.totalEsperado)}</div></div>
@@ -2732,7 +2736,8 @@ function renderAll() {
     ${sapKpi}
   `;
 
-  $('reconcileBox').innerHTML = `
+  const reconcileBox = $('reconcileBox');
+  if (reconcileBox) reconcileBox.innerHTML = `
     <div class="reconcile">
       <strong>Reconciliação:</strong> Faturação ${fmtMoney(s.totalValorNF)} · Pago ${fmtMoney(s.totalPago)} (${fmtPct(s.pctPagoSobreNF)}) = Esperado ${fmtMoney(s.totalEsperado)} + Excesso ${fmtMoney(s.excessoPositivo)} + Déficit ${fmtMoney(s.deficit)}
       <div class="eq">
@@ -2755,7 +2760,9 @@ function renderAll() {
     { key: 'flag', cls: 'bd-flag', title: '⚠️ Sem devolução — investigar', desc: 'Múltiplos CT-e sem devolução — cada um pode cobrar % sobre a NF inteira.' },
     { key: 'low', cls: 'bd-low', title: 'Abaixo do esperado', desc: '1 CT-e abaixo de 5,9% — pagou menos que os 6%.' },
   ];
-  $('breakdown').innerHTML = bd.filter(b => (b.key !== 'low' && b.key !== 'fix165') || s.byStatus[b.key]).map(b => `
+  const breakdownEl = $('breakdown');
+  if (breakdownEl) {
+    breakdownEl.innerHTML = bd.filter(b => (b.key !== 'low' && b.key !== 'fix165') || s.byStatus[b.key]).map(b => `
     <div class="bd-card ${b.cls}${activeSubPanel === b.key ? ' active' : ''}" data-status="${b.key}" role="button" tabindex="0">
       <div class="n">${s.byStatus[b.key]} NF · dif. ${fmtMoney(s.excessoByStatus[b.key])}</div>
       <div class="t"><strong>${b.title}</strong><br>${b.desc}</div>
@@ -2763,22 +2770,27 @@ function renderAll() {
     </div>
   `).join('');
 
-  document.querySelectorAll('.bd-card').forEach(card => {
-    card.addEventListener('click', () => toggleSubPanel(card.dataset.status));
-    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubPanel(card.dataset.status); } });
-  });
+    document.querySelectorAll('.bd-card').forEach(card => {
+      card.addEventListener('click', () => toggleSubPanel(card.dataset.status));
+      card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubPanel(card.dataset.status); } });
+    });
+  }
 
   renderSubPanels();
 
   const transpSet = [...new Set(currentNFs.map(x => x.transportador))].sort();
   const tSel = $('filterTransp');
-  tSel.innerHTML = '<option value="">Todos os transportadores</option>' + transpSet.map(t => `<option value="${t}">${t}</option>`).join('');
+  if (tSel) {
+    tSel.innerHTML = '<option value="">Todos os transportadores</option>' + transpSet.map(t => `<option value="${t}">${t}</option>`).join('');
+  }
 
   monthlyRows = computeMonthly(currentNFs);
   const mSel = $('filterMes');
-  mSel.innerHTML = '<option value="">Todos os meses</option>' + monthlyRows.map(m =>
-    `<option value="${m.mesRef}"${selectedMonth === m.mesRef ? ' selected' : ''}>${m.mesLabel} (${m.totalNF} NF)</option>`
-  ).join('');
+  if (mSel) {
+    mSel.innerHTML = '<option value="">Todos os meses</option>' + monthlyRows.map(m =>
+      `<option value="${m.mesRef}"${selectedMonth === m.mesRef ? ' selected' : ''}>${m.mesLabel} (${m.totalNF} NF)</option>`
+    ).join('');
+  }
 
   initMainTableHead();
   renderAnomaliesPanel();
@@ -3381,6 +3393,8 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   // Sem Conciliacao: montar Análise CT-e a partir dos quinzenais B2B restaurados
   let qzCteBuilt = false;
   if (!cteOk && !hasConciliacaoCte() && quinzenalPack?.b2bRows?.length) {
+    // Yield so the browser can paint / handle clicks before the heavy sync rebuild
+    await new Promise(r => setTimeout(r, 0));
     qzCteBuilt = processCteAnalysisFromQuinzenal({ switchTab: false });
     console.log('[fretes] restore cte-from-qz', co, 'ok', qzCteBuilt, 'nfs', currentNFs.length);
   }
@@ -5390,6 +5404,8 @@ function refreshCustoUnilogIfVisible() {
 }
 
 window.getFretesMonthlyCustoRows = getFretesMonthlyCustoRows;
+window.initFretes = initFretes;
+window.loadSavedFretesFiles = loadSavedFretesFiles;
 window.FretesSAP = {
   getMap: () => sapNfMap,
   normNFKey,

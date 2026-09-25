@@ -506,7 +506,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.65 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.66 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -2545,23 +2545,40 @@ function activateCobrancasPage(page){
   document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
   document.getElementById('page-'+page)?.classList.add('active');
   syncCobrancasTabs(page);
+  // Paint the tab first, then run heavy Fretes/Armazém work so clicks never feel "dead".
+  const runAfterPaint=(fn)=>{
+    try{requestAnimationFrame(()=>setTimeout(fn,0));}
+    catch(_){setTimeout(fn,0);}
+  };
   if(page==='fretes'){
-    if(typeof initFretes==='function')initFretes();
-    if(typeof applyFretesFileLabelsFromMeta==='function')applyFretesFileLabelsFromMeta();
-    if(typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload()&&typeof loadSavedFretesFiles==='function'){
-      loadSavedFretesFiles(true);
-    }
+    runAfterPaint(()=>{
+      try{
+        if(typeof initFretes==='function')initFretes();
+        if(typeof applyFretesFileLabelsFromMeta==='function')applyFretesFileLabelsFromMeta();
+        if(typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload()&&typeof loadSavedFretesFiles==='function'){
+          loadSavedFretesFiles(true).catch(e=>console.warn('[cobrancas] fretes load',e));
+        }
+      }catch(e){console.warn('[cobrancas] fretes',e);}
+    });
   }
-  if(page==='armazem'&&typeof initArmazem==='function')initArmazem();
+  if(page==='armazem'){
+    runAfterPaint(()=>{
+      try{if(typeof initArmazem==='function')initArmazem();}
+      catch(e){console.warn('[cobrancas] armazem',e);}
+    });
+  }
   if(page==='custoUnilog'){
-    renderCustoUnilog();
-    // Ensure quinzenais (+ CT-e if present) are in memory — B2B/B2C costs come from quinzenais.
-    if(typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload()&&typeof loadSavedFretesFiles==='function'){
-      loadSavedFretesFiles(true).then(()=>renderCustoUnilog()).catch(()=>{});
-    }
-    if(typeof initArmazem==='function'&&typeof getArmMonthlyCustoRows==='function'&&!getArmMonthlyCustoRows().length){
-      initArmazem();
-    }
+    try{renderCustoUnilog();}catch(e){console.warn('[cobrancas] custo render',e);}
+    runAfterPaint(()=>{
+      try{
+        if(typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload()&&typeof loadSavedFretesFiles==='function'){
+          loadSavedFretesFiles(true).then(()=>renderCustoUnilog()).catch(()=>{});
+        }
+        if(typeof initArmazem==='function'&&typeof getArmMonthlyCustoRows==='function'&&!getArmMonthlyCustoRows().length){
+          initArmazem();
+        }
+      }catch(e){console.warn('[cobrancas] custo load',e);}
+    });
   }
   scheduleColResize();
 }
@@ -2769,6 +2786,7 @@ window.renderCustoUnilog=renderCustoUnilog;
 async function init(){
   document.querySelectorAll('.nt[data-page]').forEach(t=>{
     t.onclick=()=>{
+      try{
       if(t.dataset.page==='cobrancas'){
         activateCobrancasPage(getCobrancasLastTab());
         return;
@@ -2830,6 +2848,7 @@ async function init(){
       }
       if(t.dataset.page==='history')renderHistory();
       scheduleColResize();
+      }catch(e){console.warn('[nav]',t.dataset.page,e);}
     };
   });
   try{
@@ -2845,10 +2864,8 @@ async function init(){
         loadPecasData().catch(e=>console.warn('[boot] pecas',e))
       ]);
       await autoLoadLastExcelFiles();
-      // Fretes after stock — lower peak memory; tab switch still silent-loads if needed
-      if(typeof loadSavedFretesFiles==='function'){
-        loadSavedFretesFiles(true).catch(e=>console.warn('[boot] fretes',e));
-      }
+      // Do NOT silent-load Fretes on boot — QZ→CT-e rebuild freezes the main thread
+      // (clicks appear dead). Cobranças / Fretes tabs load on demand via fteNeedsCloudReload.
       if(typeof refreshArmazemSapValidation==='function')refreshArmazemSapValidation();
     }
   }catch(e){console.warn('[boot]',e);setDB(false);}
@@ -9602,7 +9619,7 @@ function applyResizable(){scheduleColResize();}
       load('inventario-acerto.js', 'v=1.0.10');
     });
   }
-  load('fretes.js', 'v=1.8.65', function () {
+  load('fretes.js', 'v=1.8.66', function () {
     loadInventarioAcerto();
     load('armazem.js', 'v=1.0.39', bootApp, function () {
       var e = document.getElementById('arm-initErr');
