@@ -1,5 +1,5 @@
-// fretes.js v1.8.73 — ZFACT: parse "N BRL" doc totals; don't treat zero cols as Valor SAP
-const FRETES_JS_VERSION = '1.8.73';
+// fretes.js v1.8.74 — SAP vs Unilog: prefer NF doc total once; ignore ≤R$0.05 Δ
+const FRETES_JS_VERSION = '1.8.74';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -419,7 +419,7 @@ const NF_COLUMNS = [
   { key: 'nCte', label: 'Qtd CT-e', type: 'number', right: true, title: 'Quantidade de CT-e para esta NF/cobrança (col. E do Excel Unilog)' },
   { key: 'pago', label: 'Pago', type: 'number', right: true },
   { key: 'esperado', label: 'Esperado (6%)', type: 'number', right: true },
-  { key: 'diff', label: 'Diferença', type: 'number', right: true },
+  { key: 'diff', label: 'Δ frete', type: 'number', right: true, title: 'Pago − esperado 6% (não é Δ SAP vs Unilog)' },
   { key: 'pct', label: '% pago', type: 'number', right: true },
   { key: 'status', label: 'Estado', type: 'status' }
 ];
@@ -435,7 +435,7 @@ const SUB_COLUMNS = [
   { key: 'valorDiff', label: 'Δ SAP', type: 'number', right: true },
   { key: 'pago', label: 'Pago', type: 'number', right: true },
   { key: 'esperado', label: 'Esperado', type: 'number', right: true },
-  { key: 'diff', label: 'Diferença', type: 'number', right: true },
+  { key: 'diff', label: 'Δ frete', type: 'number', right: true, title: 'Pago − esperado 6% (não é Δ SAP vs Unilog)' },
   { key: 'pct', label: '% pago', type: 'number', right: true }
 ];
 
@@ -1427,11 +1427,21 @@ function finalizeSapNfValor(acc) {
   const doc = acc.docVal > 0 ? acc.docVal : 0;
 
   // User spec: GROUP BY NF, SUM valor bruto — every billable line counts.
+  // But Unilog "Valor NF" is the document total: when a reliable doc total exists
+  // (e.g. repeating "4 992,26 BRL") and line nets diverge, prefer doc once — never
+  // treat partial líquido lines (354,45…) as the NF value for SAP↔Unilog.
   if (vals.length > 0) {
     const allIdentical = vals.every(v => sapValoresClose(v, vals[0]));
 
     // Doc total repeated as line bruto on every row.
     if (allIdentical && doc > 0 && sapValoresClose(vals[0], doc)) return doc;
+
+    if (doc > 0) {
+      if (sapValoresClose(lineSum, doc, 0.05)) return doc;
+      const ref = Math.max(Math.abs(doc), Math.abs(lineSum), 1);
+      // Large gap ⇒ lines are partial nets / wrong column; doc is the NF total.
+      if (Math.abs(lineSum - doc) / ref > 0.02) return doc;
+    }
 
     // ZFACT with material/item lines: SUM every billable line (even equal bruto / same SKU).
     if (acc.hasMaterialCol) return lineSum;
@@ -1670,6 +1680,11 @@ function _debugBuildSapNfMapAggregation() {
     { nf: '100796', _hasMaterialCol: true, material: 'B', valorLine: '620,29', valorDoc: '4 992,26 BRL' },
     { nf: '100796', _hasMaterialCol: true, material: 'C', valorLine: '4017,52', valorDoc: '4 992,26 BRL' }
   ]);
+  // Partial líquido lines (≠ NF total) + BRL doc → must use doc once, not 354+620.
+  const map100796partial = buildSapNfMap([
+    { nf: '100796', _hasMaterialCol: true, material: 'DELTA Q', valorLine: '354,45', valorDoc: '4 992,26 BRL' },
+    { nf: '100796', _hasMaterialCol: true, material: 'DELTA QH', valorLine: '620,29', valorDoc: '4 992,26 BRL' }
+  ]);
   const ok97723 = Math.abs((map['97723']?.valorNF || 0) - 3500.5) < 0.01;
   const ok88888 = Math.abs((map['88888']?.valorNF || 0) - 500) < 0.01;
   const ok99999 = map['99999']?.valorNF === 0;
@@ -1692,10 +1707,11 @@ function _debugBuildSapNfMapAggregation() {
   const ok18596multi = Math.abs((map18596multi['18596']?.valorNF || 0) - 24346) < 0.01;
   const ok100796brl = Math.abs((map100796brl['100796']?.valorNF || 0) - 4992.26) < 0.01;
   const ok100796lines = Math.abs((map100796lines['100796']?.valorNF || 0) - 4992.26) < 0.01;
+  const ok100796partial = Math.abs((map100796partial['100796']?.valorNF || 0) - 4992.26) < 0.01;
   if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat || !ok99635dupPos
       || !ok99635lineDoc || !ok99635inflate || !ok99635brutoZfact || !ok99635feeLines || !ok99636bruto
       || !ok99636lineDoc || !ok2223 || !ok18591 || !ok99641 || !ok99641sameMat || !ok99642
-      || !ok18596 || !ok18596multi || !ok100796brl || !ok100796lines) {
+      || !ok18596 || !ok18596multi || !ok100796brl || !ok100796lines || !ok100796partial) {
     console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
       ok97723, got97723: map['97723']?.valorNF,
       ok88888, got88888: map['88888']?.valorNF,
@@ -1718,7 +1734,8 @@ function _debugBuildSapNfMapAggregation() {
       ok18596, got18596: map18596['18596']?.valorNF,
       ok18596multi, got18596multi: map18596multi['18596']?.valorNF,
       ok100796brl, got100796brl: map100796brl['100796']?.valorNF,
-      ok100796lines, got100796lines: map100796lines['100796']?.valorNF
+      ok100796lines, got100796lines: map100796lines['100796']?.valorNF,
+      ok100796partial, got100796partial: map100796partial['100796']?.valorNF
     });
   } else {
     console.debug('[SAP NF] buildSapNfMap aggregation OK');
@@ -1726,6 +1743,8 @@ function _debugBuildSapNfMapAggregation() {
 }
 _debugBuildSapNfMapAggregation();
 
+/** Near-equal Unilog vs SAP (cent rounding) — do not show / flag as Δ. */
+const SAP_VALOR_NEAR_EPS = 0.05;
 /** Relevant SAP vs Unilog NF value gap: abs diff > R$1 AND > 0.5% of the larger value. */
 const SAP_VALOR_DIFF_MIN_ABS = 1.0;
 const SAP_VALOR_DIFF_MIN_PCT = 0.005;
@@ -1734,6 +1753,7 @@ function isRelevantValorDiff(unilogVal, sapVal) {
   const u = num(unilogVal);
   const s = num(sapVal);
   const diff = Math.abs(s - u);
+  if (diff <= SAP_VALOR_NEAR_EPS) return false;
   if (diff <= SAP_VALOR_DIFF_MIN_ABS) return false;
   const ref = Math.max(Math.abs(s), Math.abs(u), 1);
   return (diff / ref) > SAP_VALOR_DIFF_MIN_PCT;
@@ -1804,8 +1824,15 @@ function applySapToNf(nf) {
     nf.pct = nf.valorNF > 0 ? nf.pago / nf.valorNF : 0;
   }
 
-  nf.valorDiff = sap.valorNF - unilogVal;
-  nf.sapValorMismatch = isRelevantValorDiff(unilogVal, sap.valorNF);
+  const rawDiff = sap.valorNF - unilogVal;
+  // Cent-level rounding (4.992,25 vs 4.992,26) is not a SAP↔Unilog difference.
+  if (Math.abs(rawDiff) <= SAP_VALOR_NEAR_EPS) {
+    nf.valorDiff = 0;
+    nf.sapValorMismatch = false;
+  } else {
+    nf.valorDiff = rawDiff;
+    nf.sapValorMismatch = isRelevantValorDiff(unilogVal, sap.valorNF);
+  }
 
   return nf;
 }
@@ -2649,6 +2676,7 @@ function fmtDate(d) {
 
 function fmtValorDiff(v, mismatch) {
   if (v === null || v === undefined) return '-';
+  if (Math.abs(num(v)) <= SAP_VALOR_NEAR_EPS) return fmtMoney(0);
   const color = mismatch ? '#b3261e' : 'inherit';
   const sign = v > 0 ? '+' : '';
   return `<span style="color:${color}">${sign}${fmtMoney(v)}</span>`;
@@ -3578,7 +3606,7 @@ function toggleDetail(tr, x) {
       <strong>Anomalia SAP:</strong> ${x.sapAnomalyType || SAP_ANOMALY_TYPE} — ${x.sapAnomalyReason || buildSapMissingReason(x)}
     </p>`
     : (x.sapFound ? `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">
-    <strong>SAP:</strong> ${fmtDate(x.dtNF)} · ${x.cliente || '-'} · Unilog ${fmtMoney(x.valorUnilog ?? x.valorNF)} vs SAP ${fmtMoney(x.valorSAP)}${x.sapValorMismatch ? ` — <span style="color:#b3261e;font-weight:600">Δ relevante ${fmtMoney(x.valorDiff)}</span>` : (x.valorDiff != null ? ` (Δ ${fmtMoney(x.valorDiff)})` : '')}
+    <strong>SAP:</strong> ${fmtDate(x.dtNF)} · ${x.cliente || '-'} · Unilog ${fmtMoney(x.valorUnilog ?? x.valorNF)} vs SAP ${fmtMoney(x.valorSAP)}${x.sapValorMismatch ? ` — <span style="color:#b3261e;font-weight:600">Δ relevante ${fmtMoney(x.valorDiff)}</span>` : (x.valorDiff != null && Math.abs(num(x.valorDiff)) > SAP_VALOR_NEAR_EPS ? ` (Δ ${fmtMoney(x.valorDiff)})` : ' — valores alinhados')}
   </p>` : '');
   dr.innerHTML = `<td colspan="${nfColCount()}"><div class="detail-inner">
     <p style="margin:0 0 6px;"><strong>Análise:</strong> ${x.motivo}</p>
