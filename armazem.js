@@ -1,5 +1,5 @@
-// armazem.js v1.0.39
-const ARMAZEM_JS_VERSION = '1.0.39';
+// armazem.js v1.0.40
+const ARMAZEM_JS_VERSION = '1.0.40';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -1379,6 +1379,15 @@ function armGetNfBase(month) {
   return fromServico > 0 ? fromServico : nfSum > 0 ? nfSum : 0;
 }
 
+/** Base NF / faturação bruta Unilog usada para a taxa 5,5%. Prefer parsed base; else fee ÷ 0,055. */
+function armGetVendasBrutas(month) {
+  const base = armGetNfBase(month);
+  if (base > 0) return base;
+  const fee = armGetArmazenagemRubricaValor(month);
+  if (fee > 0) return fee / ARM_NF_RATE;
+  return 0;
+}
+
 /** Taxa 5,5% NF — valor (R$) da linha PERCENTUAL SOBRE NF EXPEDIDA, nunca a base NF. */
 function armGetNfFee(month) {
   const row = armFindNfServico(month);
@@ -2314,7 +2323,7 @@ function sortTh(tableId, col, label, cls) {
   return `<th class="sortable ${cls || ''} ${sorted}" onclick="armDoSort('${tableId}','${col}')">${label}<span class="sort-ind">${ind}</span></th>`;
 }
 
-const ARM_MENSAL_COLS = 11;
+const ARM_MENSAL_COLS = 13;
 
 function armEnsureTableCols(table, nCols) {
   if (!table || !nCols) return;
@@ -2428,8 +2437,9 @@ function updateArmFileZone() {
 }
 
 function armAggregateMensalTotals(monthRows) {
-  const t = { vendasLiq: 0, armazenagem: 0, adicionais: 0, pago: 0, impostos: 0, pagoComImp: 0 };
+  const t = { vendasBrutas: 0, vendasLiq: 0, armazenagem: 0, adicionais: 0, pago: 0, impostos: 0, pagoComImp: 0 };
   monthRows.forEach(m => {
+    t.vendasBrutas += armGetVendasBrutas(m);
     const vl = armGetVendasLiq(m);
     if (vl > 0) t.vendasLiq += vl;
     t.armazenagem += armGetNfFee(m);
@@ -2479,8 +2489,10 @@ function armMensalTotalsRowHtml(label, t, trCls) {
   const pctAdic = armFmtPctGasto(t.adicionais, t.vendasLiq);
   const pctVl = armFmtPctGasto(t.pago, t.vendasLiq);
   const pctVlCom = armFmtPctGasto(t.pagoComImp, t.vendasLiq);
+  const pctVbCom = armFmtPctGasto(t.pagoComImp, t.vendasBrutas);
   return `<tr class="${trCls}">
     <td><strong>${armEsc(label)}</strong></td>
+    <td class="right">${t.vendasBrutas > 0 ? armFmtMoney(t.vendasBrutas) : '—'}</td>
     <td class="right">${t.vendasLiq > 0 ? armFmtMoney(t.vendasLiq) : '—'}</td>
     <td class="right">${t.armazenagem > 0 ? armFmtMoney(t.armazenagem) : '—'}</td>
     <td class="right" title="Armazenagem ÷ Vendas Liq">${pctArm}</td>
@@ -2491,6 +2503,7 @@ function armMensalTotalsRowHtml(label, t, trCls) {
     <td class="right">${t.impostos > 0 ? armFmtMoney(t.impostos) : '—'}</td>
     <td class="right">${t.pagoComImp > 0 ? armFmtMoney(t.pagoComImp) : '—'}</td>
     <td class="right" title="Total pago c/ impostos ÷ Vendas Liq">${pctVlCom}</td>
+    <td class="right" title="Total pago c/ impostos ÷ Vendas Brutas">${pctVbCom}</td>
   </tr>`;
 }
 
@@ -2500,15 +2513,18 @@ function armMensalMonthRowHtml(m) {
   const imp = armGetMonthImpostos(m);
   const pago = armGetMensalPagoSemImp(m);
   const pagoComImp = armGetMonthPagoComImp(m);
+  const vendasBrutas = armGetVendasBrutas(m);
   const vendasLiq = armGetVendasLiq(m);
   const pctArm = armFmtPctGasto(armFee, vendasLiq);
   const pctAdic = armFmtPctGasto(addVal, vendasLiq);
   const pctVl = armFmtPctGasto(pago, vendasLiq);
   const pctVlCom = armFmtPctGasto(pagoComImp, vendasLiq);
+  const pctVbCom = armFmtPctGasto(pagoComImp, vendasBrutas);
   const partial = m.partialParse ? ' <span class="badge b-warn" title="' + armEsc(m.parseNote || '') + '">NF omitido</span>' : '';
   const vlDisplay = vendasLiq ? fmtArmNum(vendasLiq, 2) : '';
   return `<tr class="arm-mensal-month-row">
     <td>${armEsc(armMesLabel(m))}${partial}</td>
+    <td class="right" title="Base NF / faturação bruta Unilog (armazenagem 5,5%)">${vendasBrutas > 0 ? armFmtMoney(vendasBrutas) : '—'}</td>
     <td class="right"><input type="text" class="fi arm-vendas-liq-input" data-mes="${armEsc(m.mesKey)}" value="${armEsc(vlDisplay)}" placeholder="R$ …" onblur="typeof armSetVendasLiq==='function'&&armSetVendasLiq('${armEsc(m.mesKey)}',this.value)" style="width:110px;text-align:right;font-size:11px;padding:4px 6px;"></td>
     <td class="right" title="Taxa 5,5% sobre NF expedida">${armFee > 0 ? armFmtMoney(armFee) : '—'}</td>
     <td class="right" title="Armazenagem ÷ Vendas Liq">${pctArm}</td>
@@ -2519,6 +2535,7 @@ function armMensalMonthRowHtml(m) {
     <td class="right">${imp > 0 ? armFmtMoney(imp) : '—'}</td>
     <td class="right">${pagoComImp > 0 ? armFmtMoney(pagoComImp) : '—'}</td>
     <td class="right" title="Total pago c/ impostos ÷ Vendas Liq">${pctVlCom}</td>
+    <td class="right" title="Total pago c/ impostos ÷ Vendas Brutas">${pctVbCom}</td>
   </tr>`;
 }
 
@@ -2526,10 +2543,12 @@ function armMensalExportRowFromMonth(m) {
   const armFee = armGetNfFee(m);
   const adicionais = armGetAdicionaisSum(m);
   const pago = armGetMensalPagoSemImp(m);
+  const vendasBrutas = armGetVendasBrutas(m);
   const vendasLiq = armGetVendasLiq(m);
   const pagoComImp = armGetMonthPagoComImp(m);
   return {
     Mes: armMesLabel(m),
+    VendasBrutas: vendasBrutas || '',
     VendasLiq: vendasLiq || '',
     Armazenagem55: armFee,
     PctArmazenagemSobreVendasLiq: vendasLiq > 0 ? armFee / vendasLiq : '',
@@ -2539,13 +2558,15 @@ function armMensalExportRowFromMonth(m) {
     PctSobreVendasLiq: vendasLiq > 0 ? pago / vendasLiq : '',
     Impostos: armGetMonthImpostos(m),
     TotalComImpostos: pagoComImp,
-    PctComImpSobreVendasLiq: vendasLiq > 0 ? pagoComImp / vendasLiq : ''
+    PctComImpSobreVendasLiq: vendasLiq > 0 ? pagoComImp / vendasLiq : '',
+    PctComImpSobreVendasBrutas: vendasBrutas > 0 ? pagoComImp / vendasBrutas : ''
   };
 }
 
 function armMensalExportRowFromTotals(t, label) {
   return {
     Mes: label,
+    VendasBrutas: t.vendasBrutas || '',
     VendasLiq: t.vendasLiq || '',
     Armazenagem55: t.armazenagem || '',
     PctArmazenagemSobreVendasLiq: t.vendasLiq > 0 ? t.armazenagem / t.vendasLiq : '',
@@ -2555,7 +2576,8 @@ function armMensalExportRowFromTotals(t, label) {
     PctSobreVendasLiq: t.vendasLiq > 0 ? t.pago / t.vendasLiq : '',
     Impostos: t.impostos,
     TotalComImpostos: t.pagoComImp,
-    PctComImpSobreVendasLiq: t.vendasLiq > 0 ? t.pagoComImp / t.vendasLiq : ''
+    PctComImpSobreVendasLiq: t.vendasLiq > 0 ? t.pagoComImp / t.vendasLiq : '',
+    PctComImpSobreVendasBrutas: t.vendasBrutas > 0 ? t.pagoComImp / t.vendasBrutas : ''
   };
 }
 
@@ -2614,6 +2636,7 @@ function renderArmMensal() {
   const rows = armApplySort(months, 'mensal', {
     mesKey: r => r.mesKey,
     mesLabel: r => armMesLabel(r),
+    vendasBrutas: r => armGetVendasBrutas(r),
     vendasLiq: r => armGetVendasLiq(r) ?? -1,
     armazenagemFee: r => armGetNfFee(r),
     pctArmazenagemVl: r => {
@@ -2639,6 +2662,11 @@ function renderArmMensal() {
       const vl = armGetVendasLiq(r);
       const t = armGetMonthPagoComImp(r);
       return vl > 0 && t >= 0 ? t / vl : -1;
+    },
+    pctVendasBrutasCom: r => {
+      const vb = armGetVendasBrutas(r);
+      const t = armGetMonthPagoComImp(r);
+      return vb > 0 && t >= 0 ? t / vb : -1;
     }
   });
   const displayRows = buildArmMensalDisplayRows(rows, groupByYear);
@@ -2651,6 +2679,7 @@ function renderArmMensal() {
   if (thead) {
     thead.innerHTML = `
       ${sortTh('mensal', 'mesLabel', 'Mês')}
+      ${sortTh('mensal', 'vendasBrutas', 'Vendas Brutas', 'right')}
       ${sortTh('mensal', 'vendasLiq', 'Vendas Liq', 'right')}
       ${sortTh('mensal', 'armazenagemFee', 'Armazenagem (5,5%)', 'right')}
       ${sortTh('mensal', 'pctArmazenagemVl', '% arm. s/ vendas liq', 'right')}
@@ -2660,7 +2689,8 @@ function renderArmMensal() {
       ${sortTh('mensal', 'pctVendasLiq', '% s/ vendas liq', 'right')}
       ${sortTh('mensal', 'impostos', 'Impostos', 'right')}
       ${sortTh('mensal', 'pagoComImp', 'Total pago (c/ imp.)', 'right')}
-      ${sortTh('mensal', 'pctVendasLiqCom', '% c/ imp. s/ vendas liq', 'right')}`;
+      ${sortTh('mensal', 'pctVendasLiqCom', '% c/ imp. s/ vendas liq', 'right')}
+      ${sortTh('mensal', 'pctVendasBrutasCom', '% c/ imp. s/ vendas brutas', 'right')}`;
   }
 
   if (body) {
