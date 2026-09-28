@@ -1,5 +1,5 @@
-// fretes.js v1.8.67 — Análise CT-e from quinzenais B2B (+ ZFACT); Conciliacao CT-e×NF upload removed from UI
-const FRETES_JS_VERSION = '1.8.67';
+// fretes.js v1.8.69 — Análise CT-e from quinzenais B2B (+ ZFACT); Conciliacao CT-e×NF upload removed from UI
+const FRETES_JS_VERSION = '1.8.69';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -219,6 +219,14 @@ function parseQuinzenalPackFromRec(rec) {
   }
 }
 
+function persistDateValue(v) {
+  if (v == null || v === '') return null;
+  const d = parseSapBrDate(v);
+  if (d) return dateToYmd(d);
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v.trim())) return v.trim().slice(0, 10);
+  return v;
+}
+
 function slimB2bRowForPersist(r) {
   if (!r) return r;
   return {
@@ -227,10 +235,10 @@ function slimB2bRowForPersist(r) {
     modalidade: r.modalidade || '',
     mesKey: r.mesKey, mesLabel: r.mesLabel,
     quinzenaKey: r.quinzenaKey, quinzenaLabel: r.quinzenaLabel, fileName: r.fileName,
-    dtNF: r.dtNF,
+    dtNF: persistDateValue(r.dtNF),
     temDevolucao: !!r.temDevolucao,
     ctes: Array.isArray(r.ctes) ? r.ctes.map(c => ({
-      numCte: c.numCte, dtCte: c.dtCte, pago: num(c.pago),
+      numCte: c.numCte, dtCte: persistDateValue(c.dtCte), pago: num(c.pago),
       devolucao: !!c.devolucao, tipoOp: c.tipoOp || '', peso: num(c.peso)
     })) : undefined
   };
@@ -239,7 +247,8 @@ function slimB2bRowForPersist(r) {
 function slimB2cRowForPersist(r) {
   if (!r) return r;
   return {
-    nf: r.nf, pedido: r.pedido, dtColeta: r.dtColeta, dtNF: r.dtNF,
+    nf: r.nf, pedido: r.pedido, dtColeta: persistDateValue(r.dtColeta) || r.dtColeta,
+    dtNF: persistDateValue(r.dtNF) || r.dtNF,
     numCte: r.numCte, transportador: r.transportador, destinatario: r.destinatario,
     valorProdutos: r.valorProdutos, valorNF: r.valorNF, pago: r.pago, zona: r.zona,
     quinzenaKey: r.quinzenaKey, quinzenaLabel: r.quinzenaLabel, fileName: r.fileName,
@@ -430,7 +439,7 @@ const FIELD_ALIASES = {
   dtNF: ['dt nf', 'data nf', 'data nota fiscal', 'dt nota fiscal'],
   numCte: ['num. cte', 'num cte', 'numero cte', 'n cte-e', 'num cte-e', 'numero do cte', 'numero do cte-e', 'chave cte', 'chave cte-e', 'numero cte-e', 'n cte e', 'num cte e', 'no cte-e', 'n. cte-e'],
   qtdCte: ['qtd cte', 'qtd. cte', 'qtd ct-e', 'qtd. ct-e', 'quantidade cte', 'quantidade ct-e', 'quantidade de cte', 'quantidade de ct-e', 'n ctes', 'numero ctes', 'total cte', 'total ct-e', 'total de cte', 'qtd cobranca', 'qtd cobrança', 'quantidade cobranca', 'quantidade cobrança', 'nº cte', 'no cte', 'n. cte', 'n cte'],
-  dtCte: ['dt cte', 'data cte', 'dt cte-e', 'data cte-e', 'data do cte'],
+  dtCte: ['dt cte', 'dt ct-e', 'dt. cte', 'dt. ct-e', 'data cte', 'data ct-e', 'data cte-e', 'dt cte-e', 'data do cte', 'data do ct-e', 'data cte e'],
   pago: ['total fatura rev.', 'total fatura rev', 'total fatura', 'valor fatura', 'valor pago', 'total pago', 'vl pago', 'frete pago', 'valor cte', 'valor do frete'],
   devolucao: ['devolucao', 'devolução', 'e devolucao', 'retorno'],
   tipoOp: ['tipo operacao', 'tipo operação', 'tipo op', 'operacao'],
@@ -742,6 +751,18 @@ function normalizeRow(row) {
   };
 }
 
+/** Normalize 2-digit years (Excel BR often uses 26 → 2026). */
+function sapNormalizeYear(yr) {
+  if (yr >= 0 && yr < 100) return yr >= 70 ? 1900 + yr : 2000 + yr;
+  return yr;
+}
+
+/** Persist/restore-safe date string YYYY-MM-DD (local calendar day). */
+function dateToYmd(d) {
+  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function parseSapBrDate(v) {
   if (v === null || v === undefined || v === '') return null;
   if (v instanceof Date && !isNaN(v.getTime())) {
@@ -763,32 +784,41 @@ function parseSapBrDate(v) {
   }
   const s = String(v).trim();
   if (!s) return null;
+  // ISO datetime from JSON.stringify(Date) — must run before parseFloat("2026-…") serial trap
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (iso) {
+    const d = sapDateFromParts(parseInt(iso[1], 10), parseInt(iso[2], 10), parseInt(iso[3], 10));
+    if (d) return d;
+  }
   const dotParts = s.split('.');
   if (dotParts.length === 3 && dotParts.every(p => /^\d+$/.test(p))) {
-    const dd = parseInt(dotParts[0], 10), mo = parseInt(dotParts[1], 10), yr = parseInt(dotParts[2], 10);
+    const dd = parseInt(dotParts[0], 10), mo = parseInt(dotParts[1], 10), yr = sapNormalizeYear(parseInt(dotParts[2], 10));
     const d = sapDateFromParts(yr, mo, dd);
     if (d) return d;
   }
   const slashParts = s.split('/');
   if (slashParts.length >= 3) {
-    const yr = parseInt(String(slashParts[2]).trim(), 10);
+    const yr = sapNormalizeYear(parseInt(String(slashParts[2]).trim(), 10));
     const mo = parseInt(slashParts[1], 10);
     const dd = parseInt(slashParts[0], 10);
     const d = sapDateFromParts(yr, mo, dd);
     if (d) return d;
   }
-  const m = s.match(/^(\d{2})[.\-/](\d{2})[.\-/](\d{4})$/) || s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const m = s.match(/^(\d{2})[.\-/](\d{2})[.\-/](\d{2,4})$/) || s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (m) {
-    const yr = m[1].length === 4 ? parseInt(m[1], 10) : parseInt(m[3], 10);
+    const yr = m[1].length === 4 ? parseInt(m[1], 10) : sapNormalizeYear(parseInt(m[3], 10));
     const mo = parseInt(m[2], 10);
     const dd = m[1].length === 4 ? parseInt(m[3], 10) : parseInt(m[1], 10);
     const d = sapDateFromParts(yr, mo, dd);
     if (d) return d;
   }
-  const serial = parseFloat(s.replace(',', '.'));
-  if (!isNaN(serial) && serial >= 1 && serial < 1000000) {
-    const d = sapDateFromExcelSerial(serial);
-    if (d) return d;
+  // Excel serial as string — only if the whole token is numeric (avoid "2026-07-15…" → 2026)
+  if (/^\d+([.,]\d+)?$/.test(s)) {
+    const serial = parseFloat(s.replace(',', '.'));
+    if (!isNaN(serial) && serial >= 1 && serial < 1000000) {
+      const d = sapDateFromExcelSerial(serial);
+      if (d) return d;
+    }
   }
   return null;
 }
@@ -2045,7 +2075,9 @@ function buildNfRecord(g) {
     sapFound: false, sapMissing: false, sapAnomalyType: '', sapAnomalyReason: '',
     sapValorMismatch: false,
     nCte, pago, esperado, diff, pct, status, motivo, ctes,
-    temDevolucao: g.temDevolucao, dtNF: g.dtNF, qtdCteFromSource: g.qtdCteFromSource || 0
+    temDevolucao: g.temDevolucao, dtNF: g.dtNF, qtdCteFromSource: g.qtdCteFromSource || 0,
+    mesKey: g.mesKey || g.qzMesKey || null,
+    qzMesKey: g.qzMesKey || g.mesKey || null
   };
 }
 
@@ -2091,7 +2123,9 @@ function processRows(rows, fileName, sheetName, headers, opts = {}) {
     if (!byNF[nfKey]) byNF[nfKey] = {
       nf: String(nf).trim(), valorNF: num(r.valorNF), transportador: r.transportador || '-',
       modalidade: r.modalidade || '-', ctes: [], temDevolucao: false, dtNF: r.dtNF,
-      cliente: '', qtdCteFromSource: 0
+      cliente: '', qtdCteFromSource: 0,
+      mesKey: r.mesKey || r.qzMesKey || null,
+      qzMesKey: r.qzMesKey || r.mesKey || null
     };
     const g = byNF[nfKey];
     const qtdRow = num(r.qtdCte);
@@ -2100,6 +2134,10 @@ function processRows(rows, fileName, sheetName, headers, opts = {}) {
     if (r.transportador && g.transportador === '-') g.transportador = r.transportador;
     if (r.modalidade && g.modalidade === '-') g.modalidade = r.modalidade;
     if (r.dtNF && !g.dtNF) g.dtNF = r.dtNF;
+    if (!g.mesKey && (r.mesKey || r.qzMesKey)) {
+      g.mesKey = r.mesKey || r.qzMesKey;
+      g.qzMesKey = r.qzMesKey || r.mesKey;
+    }
     const isDev = isDevolucaoFlag(r.devolucao);
     g.ctes.push({
       numCte: r.numCte, dtCte: r.dtCte, pago: num(r.pago),
@@ -2151,7 +2189,9 @@ async function processRowsAsync(rows, fileName, sheetName, headers, opts = {}) {
       if (!byNF[nfKey]) byNF[nfKey] = {
         nf: String(nf).trim(), valorNF: num(r.valorNF), transportador: r.transportador || '-',
         modalidade: r.modalidade || '-', ctes: [], temDevolucao: false, dtNF: r.dtNF,
-        cliente: '', qtdCteFromSource: 0
+        cliente: '', qtdCteFromSource: 0,
+        mesKey: r.mesKey || r.qzMesKey || null,
+        qzMesKey: r.qzMesKey || r.mesKey || null
       };
       const g = byNF[nfKey];
       const qtdRow = num(r.qtdCte);
@@ -2160,6 +2200,10 @@ async function processRowsAsync(rows, fileName, sheetName, headers, opts = {}) {
       if (r.transportador && g.transportador === '-') g.transportador = r.transportador;
       if (r.modalidade && g.modalidade === '-') g.modalidade = r.modalidade;
       if (r.dtNF && !g.dtNF) g.dtNF = r.dtNF;
+      if (!g.mesKey && (r.mesKey || r.qzMesKey)) {
+        g.mesKey = r.mesKey || r.qzMesKey;
+        g.qzMesKey = r.qzMesKey || r.mesKey;
+      }
       const isDev = isDevolucaoFlag(r.devolucao);
       g.ctes.push({
         numCte: r.numCte, dtCte: r.dtCte, pago: num(r.pago),
@@ -2201,7 +2245,7 @@ function computeSummary(list, fileName) {
   const totalValorNF = list.reduce((s, x) => s + x.valorNF, 0);
   const totalEsperado = list.reduce((s, x) => s + x.esperado, 0);
   const excesso = totalPago - totalEsperado;
-  const dates = list.flatMap(x => x.ctes.map(c => c.dtCte)).filter(Boolean).map(d => new Date(d));
+  const dates = list.flatMap(x => x.ctes.map(c => parseCteDateValue(c.dtCte))).filter(Boolean);
   const periodoInicio = dates.length ? new Date(Math.min(...dates)) : null;
   const periodoFim = dates.length ? new Date(Math.max(...dates)) : null;
 
@@ -2418,15 +2462,43 @@ function buildMonthlyExportRows(rows) {
   }));
 }
 
+function parseCteDateValue(v) {
+  if (v == null || v === '') return null;
+  const d = parseSapBrDate(v);
+  if (d && !isNaN(d) && isPlausibleSapDate(d)) return d;
+  if (v instanceof Date && !isNaN(v) && isPlausibleSapDate(v)) {
+    const local = new Date(v.getFullYear(), v.getMonth(), v.getDate());
+    local.setHours(0, 0, 0, 0);
+    return local;
+  }
+  return null;
+}
+
+/**
+ * Month bucket for Por mês: SAP emissão when present, else min Dt CTE (quinzenal),
+ * else mesKey from the quinzenal file name / pack. Never stick on stale 'sem-data'.
+ */
 function enrichNF(nf) {
-  if (nf.mesRef) return nf;
-  let d = nf.dtNF ? (parseSapBrDate(nf.dtNF) || (nf.dtNF instanceof Date && isPlausibleSapDate(nf.dtNF) ? nf.dtNF : null)) : null;
+  if (nf.mesRef && nf.mesRef !== 'sem-data' && nf.dtRef) return nf;
+  let d = nf.dtNF ? parseCteDateValue(nf.dtNF) : null;
   if ((!d || isNaN(d)) && nf.ctes?.length) {
-    const dates = nf.ctes.map(c => c.dtCte).filter(Boolean).map(x => parseSapBrDate(x) || new Date(x)).filter(x => x && !isNaN(x) && isPlausibleSapDate(x));
+    const dates = nf.ctes.map(c => parseCteDateValue(c.dtCte)).filter(Boolean);
     if (dates.length) d = new Date(Math.min(...dates.map(x => x.getTime())));
   }
-  nf.dtRef = d && !isNaN(d) ? d : null;
-  nf.mesRef = d && !isNaN(d) ? monthKey(d) : 'sem-data';
+  if (d && !isNaN(d) && isPlausibleSapDate(d)) {
+    nf.dtRef = d;
+    nf.mesRef = monthKey(d);
+    return nf;
+  }
+  // Fallback: quinzenal file month (e.g. "1ªQ Julho 2026") when Dt CTE / SAP blank
+  const qzMes = nf.mesKey || nf.qzMesKey || null;
+  if (qzMes && qzMes !== 'sem-mes' && qzMes !== 'sem-data' && /^\d{4}-\d{2}$/.test(String(qzMes))) {
+    nf.dtRef = null;
+    nf.mesRef = qzMes;
+    return nf;
+  }
+  nf.dtRef = null;
+  nf.mesRef = 'sem-data';
   return nf;
 }
 
@@ -3559,7 +3631,7 @@ const QZ_B2B_ALIASES = {
   pago: ['total fatura rev.', 'total fatura rev', 'total fatura', 'valor fatura'],
   transportador: ['transportador', 'transportadora'],
   dtNF: ['dt nf', 'data nf', 'data nota fiscal'],
-  dtCte: ['dt cte', 'data cte', 'dt cte-e', 'data cte-e', 'data do cte'],
+  dtCte: ['dt cte', 'dt ct-e', 'dt. cte', 'dt. ct-e', 'data cte', 'data ct-e', 'data cte-e', 'dt cte-e', 'data do cte', 'data do ct-e', 'data cte e'],
   devolucao: ['devolucao', 'devolução', 'e devolucao', 'retorno'],
   modalidade: ['modalidade', 'modal', 'mod'],
   tipoOp: ['tipo operacao', 'tipo operação', 'tipo op', 'operacao'],
@@ -3709,14 +3781,19 @@ function isQzB2CHeader(cells) {
 }
 
 function normalizeQzB2BRow(row) {
+  const dtCteRaw = findQzField(row, 'dtCte', QZ_B2B_ALIASES);
+  const dtNFRaw = findQzField(row, 'dtNF', QZ_B2B_ALIASES);
+  // Coerce Excel Date / serial / BR string at ingest so restore + month bucketing stay stable
+  const dtCte = persistDateValue(dtCteRaw) || dtCteRaw;
+  const dtNF = persistDateValue(dtNFRaw) || dtNFRaw;
   return {
     nf: findQzField(row, 'nf', QZ_B2B_ALIASES),
     valorNF: findQzField(row, 'valorNF', QZ_B2B_ALIASES),
     numCte: findQzField(row, 'numCte', QZ_B2B_ALIASES),
     pago: findQzField(row, 'pago', QZ_B2B_ALIASES),
     transportador: findQzField(row, 'transportador', QZ_B2B_ALIASES),
-    dtNF: findQzField(row, 'dtNF', QZ_B2B_ALIASES),
-    dtCte: findQzField(row, 'dtCte', QZ_B2B_ALIASES),
+    dtNF,
+    dtCte,
     devolucao: findQzField(row, 'devolucao', QZ_B2B_ALIASES),
     modalidade: findQzField(row, 'modalidade', QZ_B2B_ALIASES),
     tipoOp: findQzField(row, 'tipoOp', QZ_B2B_ALIASES),
@@ -3807,11 +3884,11 @@ function aggregateQzB2BRows(rows, fileMeta) {
     if (r.numCte) g.nCteSet.add(String(r.numCte).trim());
     if (r.transportador && g.transportador === '') g.transportador = r.transportador;
     if (r.modalidade && !g.modalidade) g.modalidade = r.modalidade;
-    if (r.dtNF && !g.dtNF) g.dtNF = r.dtNF;
+    if (r.dtNF && !g.dtNF) g.dtNF = persistDateValue(r.dtNF) || r.dtNF;
     const isDev = isDevolucaoFlag(r.devolucao);
     g.ctes.push({
       numCte: r.numCte != null && String(r.numCte).trim() !== '' ? String(r.numCte).trim() : null,
-      dtCte: r.dtCte || null,
+      dtCte: persistDateValue(r.dtCte) || r.dtCte || null,
       pago: num(r.pago),
       devolucao: isDev,
       tipoOp: r.tipoOp || '',
@@ -3828,6 +3905,8 @@ function aggregateQzB2BRows(rows, fileMeta) {
 function expandQzB2bToCteLines(b2bRows) {
   const lines = [];
   (b2bRows || []).forEach(nf => {
+    const qzMesKey = nf.mesKey || mesKeyFromQuinzenaKey(nf.quinzenaKey) || null;
+    const qzMesLabel = nf.mesLabel || (qzMesKey && qzMesKey !== 'sem-mes' ? fmtMesLabel(qzMesKey) : '');
     const ctes = Array.isArray(nf.ctes) ? nf.ctes : [];
     if (ctes.length) {
       ctes.forEach(c => {
@@ -3836,14 +3915,17 @@ function expandQzB2bToCteLines(b2bRows) {
           valorNF: nf.valorNF,
           transportador: nf.transportador || '-',
           modalidade: nf.modalidade || '-',
-          dtNF: nf.dtNF || null,
+          dtNF: persistDateValue(nf.dtNF) || nf.dtNF || null,
           numCte: c.numCte,
           qtdCte: nf.nCte || ctes.length,
-          dtCte: c.dtCte || null,
+          dtCte: persistDateValue(c.dtCte) || c.dtCte || null,
           pago: num(c.pago),
           devolucao: c.devolucao ? 'sim' : 'nao',
           tipoOp: c.tipoOp || '',
-          peso: num(c.peso)
+          peso: num(c.peso),
+          mesKey: qzMesKey,
+          mesLabel: qzMesLabel,
+          qzMesKey
         });
       });
       return;
@@ -3854,14 +3936,17 @@ function expandQzB2bToCteLines(b2bRows) {
       valorNF: nf.valorNF,
       transportador: nf.transportador || '-',
       modalidade: nf.modalidade || '-',
-      dtNF: nf.dtNF || null,
+      dtNF: persistDateValue(nf.dtNF) || nf.dtNF || null,
       numCte: null,
       qtdCte: nf.nCte || 1,
       dtCte: null,
       pago: num(nf.pago),
       devolucao: nf.temDevolucao ? 'sim' : 'nao',
       tipoOp: '',
-      peso: 0
+      peso: 0,
+      mesKey: qzMesKey,
+      mesLabel: qzMesLabel,
+      qzMesKey
     });
   });
   return lines;
