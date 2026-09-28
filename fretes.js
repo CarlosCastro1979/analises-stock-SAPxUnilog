@@ -1,5 +1,5 @@
-// fretes.js v1.8.72 — ZFACT/QZ: merge by NF (never wipe history on partial Excel)
-const FRETES_JS_VERSION = '1.8.72';
+// fretes.js v1.8.73 — ZFACT: parse "N BRL" doc totals; don't treat zero cols as Valor SAP
+const FRETES_JS_VERSION = '1.8.73';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -492,26 +492,38 @@ const FIELD_ALIASES = {
 /** Line-level billing (sum per NF). Doc-level totals repeat on every row — never sum those. */
 const SAP_LINE_VALOR_ALIASES = [
   'valor bruto', 'vl bruto', 'val bruto', 'valor linha', 'vl linha', 'valor item',
-  'val faturamento', 'valor faturamento', 'valor mercadoria'
+  'val faturamento', 'valor faturamento', 'valor mercadoria', 'netwr',
+  'valor liquido', 'vl liquido', 'valor liquido item', 'montante'
 ];
 const SAP_DOC_VALOR_ALIASES = [
   'doc total', 'doc. total', 'doctotal', 'valor documento', 'valor total', 'total nf', 'total documento',
   'total do documento', 'total geral', 'valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf',
-  'vl documento', 'vlr total', 'vlr documento', 'montante documento', 'montante doc'
+  'vl documento', 'vlr total', 'vlr documento', 'montante documento', 'montante doc',
+  'amount', 'net value', 'valor moeda', 'valor em brl', 'total brl', 'total moeda',
+  'valor da fatura', 'valor fatura', 'invoice total', 'billing value'
 ];
-const SAP_VALOR_FALLBACK_ALIASES = ['montante', 'vl total'];
-/** Never use as NF billing base — valor líquido, impostos, taxa 5,5%, etc. */
+const SAP_VALOR_FALLBACK_ALIASES = ['vl total', 'kwert'];
+/** Never use as NF billing base — impostos, taxa 5,5%, frete, etc. */
 const SAP_VALOR_EXCLUDE_ALIASES = [
-  'valor liquido', 'vl liquido', 'liquido',
   'imposto', 'impostos', 'icms', 'pis', 'cofins', 'ipi', 'iss',
   'taxa', 'frete', 'fee', 'armazenagem', 'comissao', 'comissão',
-  '5,5', '5.5', 'percentual', '%'
+  '5,5', '5.5', 'percentual', '%', 'valor unitario', 'preco unitario', 'preço unitário'
 ];
-/** ZFACT export: D=Nota Fiscal (3), N=valor bruto (13). */
+/** ZFACT export: D=Nota Fiscal (3), N=valor bruto (13) — only a fallback when headers missing. */
 const SAP_ZFACT_BRUTO_COL = 13;
+/** ISO currency suffixes seen in SAP GUI Excel exports (e.g. "4 992,26 BRL"). */
+const SAP_CURRENCY_SUFFIX_RE = /(?:BRL|USD|EUR|GBP|JPY|CHF|CAD|AUD|CNY|MXN|ARS|CLP|COP|PEN)\s*$/i;
+
+const SAP_NF_PREFERRED_ALIASES = [
+  'nota fiscal', 'n nota fiscal', 'num nota fiscal', 'num. nota fiscal', 'notafiscal',
+  'nº nf', 'numero nf', 'nº da nf', 'numero da nf', 'nf-e', 'nfe', 'nº nf-e', 'numero nf-e',
+  'referencia', 'referência', 'reference', 'xblnr', 'assignment'
+];
+const SAP_NF_WEAK_ALIASES = ['docnum', 'nº doc', 'num doc', 'billing document', 'documento de faturamento'];
 
 const SAP_ALIASES = {
-  nf: ['nota fiscal', 'nf', 'n nota fiscal', 'num nota fiscal', 'num. nota fiscal', 'notafiscal', 'nº nf', 'numero nf', 'docnum'],
+  // Prefer Unilog-facing NF / referência over SAP DocNum (VBELN) — docnum last.
+  nf: [...SAP_NF_PREFERRED_ALIASES, 'nf', ...SAP_NF_WEAK_ALIASES],
   dtEmissao: ['dt emissao', 'data emissao', 'dt emissão', 'data emissão', 'data doc', 'dt nf', 'data nf', 'data nota fiscal'],
   cliente: ['cliente', 'nome cliente', 'razao social', 'razão social', 'destinatario', 'destinatário', 'cardname', 'nome do cliente'],
   material: ['material', 'cod material', 'cod. material', 'codigo material', 'item code', 'cod item', 'cod. item', 'nº item', 'num item', 'item no', 'produto'],
@@ -777,6 +789,24 @@ function resolveSapValorColFromHeader(headerRow) {
   return { lineCol, docCol };
 }
 
+/** Prefer Nota Fiscal / referência over DocNum when both headers exist. */
+function resolveSapNfColFromHeader(headerRow) {
+  if (!headerRow || !headerRow.length) return null;
+  let prefer = null;
+  let weak = null;
+  headerRow.forEach((hdr, j) => {
+    const h = normCol(hdr);
+    if (!h) return;
+    if (prefer == null && SAP_NF_PREFERRED_ALIASES.some(a => h === a || h.includes(a) || a.includes(h))) {
+      prefer = j;
+    }
+    if (weak == null && SAP_NF_WEAK_ALIASES.some(a => h === a || h.includes(a) || a.includes(h))) {
+      weak = j;
+    }
+  });
+  return prefer != null ? prefer : weak;
+}
+
 function normalizeRow(row) {
   return {
     nf: findField(row, 'nf'),
@@ -882,29 +912,34 @@ function looksLikeSapNfCell(v) {
 const SAP_VALOR_MAX = 5_000_000;
 
 function hasSapValorFormatting(v) {
-  const s = String(v).trim().replace(/\s/g, '');
-  return /^R\$/i.test(s) || s.includes(',');
+  const raw = String(v).trim();
+  if (!raw) return false;
+  if (/R\$/i.test(raw) || SAP_CURRENCY_SUFFIX_RE.test(raw)) return true;
+  const s = raw.replace(/[\s\u00a0\u202f]/g, '');
+  return /^R\$/i.test(s) || s.includes(',') || SAP_CURRENCY_SUFFIX_RE.test(s);
 }
 
-/** Reject SAP doc entry / NF identifiers mistaken for monetary valor (no R$/comma). */
+/** Reject SAP doc entry / NF identifiers mistaken for monetary valor (no R$/comma/currency). */
 function looksLikeSapDocOrNfNumber(v) {
   if (v === null || v === undefined || v === '') return false;
   if (hasSapValorFormatting(v)) return false;
   const key = normNFKey(v);
   if (key.length >= 8) return true;
-  const s = String(v).trim().replace(/\s/g, '').replace(/^R\$/i, '');
+  const s = String(v).trim().replace(/[\s\u00a0\u202f]/g, '').replace(/^R\$/i, '');
   if (/^\d{7,}$/.test(s)) return true;
   if (typeof v === 'number' && Number.isInteger(v) && Math.abs(v) >= 1_000_000) return true;
   return false;
 }
 
-/** Parse NF monetary values from SAP/ZFACT exports (BR format, R$, thousands). */
+/** Parse NF monetary values from SAP/ZFACT exports (BR format, R$, "N BRL", thousands). */
 function parseSapNum(v) {
   if (v === null || v === undefined || v === '') return 0;
   if (typeof v === 'number' && Number.isFinite(v)) return v;
-  let s = String(v).trim().replace(/\s/g, '');
+  let s = String(v).trim().replace(/[\s\u00a0\u202f]/g, '');
   if (!s || s === '-') return 0;
-  s = s.replace(/^R\$\s?/i, '');
+  s = s.replace(/^R\$/i, '');
+  s = s.replace(SAP_CURRENCY_SUFFIX_RE, '');
+  if (!s || s === '-') return 0;
   if (s.includes(',')) {
     const n = parseFloat(s.replace(/\./g, '').replace(',', '.'));
     return Number.isFinite(n) ? n : 0;
@@ -937,8 +972,10 @@ function looksLikeSapValorCell(v, opts = {}) {
   const n = parseSapNum(v);
   if (n === 0 || Math.abs(n) > SAP_VALOR_MAX) return false;
   if (looksLikeSapDocOrNfNumber(v)) return false;
-  const s = String(v).trim().replace(/\s/g, '');
-  if (/^R\$/i.test(s) || s.includes(',')) return true;
+  const s = String(v).trim().replace(/[\s\u00a0\u202f]/g, '');
+  if (/^R\$/i.test(s) || s.includes(',') || SAP_CURRENCY_SUFFIX_RE.test(s) || SAP_CURRENCY_SUFFIX_RE.test(String(v))) {
+    return true;
+  }
   // Valor bruto column (header / ZFACT col N): accept whole reais stored as integers
   // (e.g. NF 99642 TIMOR R$786 — Excel serial 786 was dropped, sum became 1977 not 2763).
   if (opts.trustColumn) {
@@ -948,6 +985,14 @@ function looksLikeSapValorCell(v, opts = {}) {
   // Heuristic column scan only: reject bare 1–3 digit integers (likely qty, not R$).
   if (/^\d{1,3}$/.test(s) && n < 1000) return false;
   return n >= 10 || s.includes('.') || (typeof v === 'number' && !Number.isInteger(v));
+}
+
+/** True when cell looks like SAP currency export "4 992,26 BRL". */
+function looksLikeSapCurrencyAmount(v) {
+  if (v === null || v === undefined || v === '') return false;
+  const raw = String(v).trim();
+  if (!SAP_CURRENCY_SUFFIX_RE.test(raw) && !/^R\$/i.test(raw)) return false;
+  return looksLikeSapValorCell(v, { trustColumn: true });
 }
 
 /** Console self-check for SAP valor heuristics — run once at module load. */
@@ -963,7 +1008,10 @@ function _debugSapValorSamples() {
     ['786,00', true],
     [-6000, true],
     ['-6.000,00', true],
-    ['-6000,00', true]
+    ['-6000,00', true],
+    ['4 992,26 BRL', true],
+    ['4\u00a0992,26 BRL', true],
+    ['4992,26BRL', true]
   ];
   const reject = [
     [9540067078, false],
@@ -972,21 +1020,26 @@ function _debugSapValorSamples() {
     [9540067312, false],
     [9540067546, false],
     [0, false],
-    ['', false]
+    ['', false],
+    ['0,00', false],
+    ['0,00 BRL', false]
   ];
   const all = [...accept, ...reject];
   const mismatches = all.filter(([v, exp]) => looksLikeSapValorCell(v, { trustColumn: true }) !== exp);
   if (mismatches.length) {
     console.warn('[SAP valor] sample mismatches:', mismatches.map(([v, exp]) => ({
-      v, expected: exp, got: looksLikeSapValorCell(v, { trustColumn: true })
+      v, expected: exp, got: looksLikeSapValorCell(v, { trustColumn: true }), parsed: parseSapNum(v)
     })));
   } else {
     console.debug('[SAP valor] samples OK:', accept.length + reject.length, 'cases');
   }
+  const brlOk = Math.abs(parseSapNum('4 992,26 BRL') - 4992.26) < 0.001
+    && Math.abs(parseSapNum('4\u00a0992,26 BRL') - 4992.26) < 0.001;
+  if (!brlOk) console.warn('[SAP valor] BRL parse failed', parseSapNum('4 992,26 BRL'));
 }
 _debugSapValorSamples();
 
-/** ZFACT: col D=NF, col N=valor bruto — never scan Valor Líquido (J) or impostos. */
+/** ZFACT: col D=NF, col N=valor bruto — never scan impostos; prefer BRL doc totals when bruto is 0. */
 function pickSapValorFromLine(line, colIdx, headerRow) {
   const idx = colIdx || activeSapColIdx;
   if (!idx || !Array.isArray(line)) return { line: null, doc: null };
@@ -1010,15 +1063,47 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
   if (headerValor.lineCol != null) tryLine(line[headerValor.lineCol]);
   if (headerValor.docCol != null) tryDoc(line[headerValor.docCol]);
 
+  // Hardcoded col N only when it actually holds a non-zero amount (wide exports shift columns).
   if (!out.line && line.length > SAP_ZFACT_BRUTO_COL) tryLine(line[SAP_ZFACT_BRUTO_COL]);
 
   if (!out.line && idx.valorNF != null && idx.valorNF !== headerValor.docCol) {
     tryLine(line[idx.valorNF]);
   }
 
+  // SAP GUI exports often put the NF total as "4 992,26 BRL" without a matching header alias.
+  if (!out.doc) {
+    for (let j = 0; j < line.length; j++) {
+      if (headerRow && sapHeaderIsExcluded(headerRow[j])) continue;
+      const cell = line[j];
+      if (looksLikeSapCurrencyAmount(cell) && !isSameNf(cell)) {
+        tryDoc(cell);
+        if (out.doc) break;
+      }
+    }
+  }
+
+  // When line bruto is missing/zero but a repeating currency doc total exists, keep doc only.
   if (out.line && out.doc && sapValoresClose(parseSapNum(out.line), parseSapNum(out.doc))) out.line = null;
   return out;
 }
+
+(function _debugPickSapValorWideRow() {
+  const wideLine = new Array(20).fill(null);
+  wideLine[1] = 'CENCOSUD BRASIL COMERCIAL S.A';
+  wideLine[2] = '07/07/2026';
+  wideLine[3] = '100796';
+  wideLine[13] = '0,00';
+  wideLine[14] = '0,00';
+  wideLine[15] = '354,45';
+  wideLine[17] = '4 992,26 BRL';
+  const picked = pickSapValorFromLine(wideLine, { cliente: 1, dtEmissao: 2, nf: 3, valorNF: 13 }, []);
+  const pickedDoc = parseSapNum(picked.doc);
+  if (Math.abs(pickedDoc - 4992.26) > 0.01) {
+    console.warn('[SAP valor] wide-row BRL doc pick failed', picked, pickedDoc);
+  } else {
+    console.debug('[SAP valor] wide-row BRL doc pick OK', pickedDoc);
+  }
+})();
 
 function looksLikeSapDataRow(line, colIdx) {
   const idx = colIdx || activeSapColIdx;
@@ -1096,6 +1181,7 @@ function scoreSapLayout(dataLines, colIdx, headerRow) {
 
 function resolveSapColIdx(headerRow, dataLines) {
   const headerValor = resolveSapValorColFromHeader(headerRow);
+  const headerNfCol = resolveSapNfColFromHeader(headerRow);
   const brutoCol = headerValor.lineCol ?? SAP_ZFACT_BRUTO_COL;
   const layouts = [
     { cliente: 1, dtEmissao: 2, nf: 3, valorNF: brutoCol, label: 'B/C/D/N (ZFACT)' },
@@ -1107,22 +1193,27 @@ function resolveSapColIdx(headerRow, dataLines) {
     { cliente: 2, dtEmissao: 3, nf: 4, valorNF: headerValor.lineCol ?? 6, label: 'C/D/E/G' }
   ];
   for (const layout of layouts) {
+    const nfCol = headerNfCol != null ? headerNfCol : layout.nf;
+    const candidate = { ...layout, nf: nfCol };
     if (headerRow &&
-        isSapHeaderAtCol(headerRow, layout.cliente, 'cliente') &&
-        isSapHeaderAtCol(headerRow, layout.dtEmissao, 'dtEmissao') &&
-        isSapHeaderAtCol(headerRow, layout.nf, 'nf')) {
-      console.debug('[SAP NF] Layout por cabeçalho:', layout.label,
-        headerValor.lineCol != null ? `(valor bruto col ${headerValor.lineCol})` : '');
-      return layout;
+        isSapHeaderAtCol(headerRow, candidate.cliente, 'cliente') &&
+        isSapHeaderAtCol(headerRow, candidate.dtEmissao, 'dtEmissao') &&
+        (headerNfCol != null || isSapHeaderAtCol(headerRow, candidate.nf, 'nf'))) {
+      console.debug('[SAP NF] Layout por cabeçalho:', candidate.label,
+        headerNfCol != null ? `(NF col ${headerNfCol})` : '',
+        headerValor.lineCol != null ? `(valor bruto col ${headerValor.lineCol})` : '',
+        headerValor.docCol != null ? `(doc total col ${headerValor.docCol})` : '');
+      return candidate;
     }
   }
   let best = layouts[0];
   let bestResult = { hits: 0, valorHits: 0, score: 0 };
   for (const layout of layouts) {
-    const r = scoreSapLayout(dataLines, layout, headerRow);
+    const candidate = headerNfCol != null ? { ...layout, nf: headerNfCol } : layout;
+    const r = scoreSapLayout(dataLines, candidate, headerRow);
     if (r.score > bestResult.score || (r.score === bestResult.score && r.hits > bestResult.hits)) {
       bestResult = r;
-      best = layout;
+      best = candidate;
     }
   }
   if (bestResult.hits >= 2 || (bestResult.hits >= 1 && bestResult.valorHits >= 1)) {
@@ -1131,7 +1222,10 @@ function resolveSapColIdx(headerRow, dataLines) {
     return best;
   }
   console.debug('[SAP NF] Layout padrão B/C/D (fallback)');
-  return { ...SAP_COL_IDX_DEFAULT };
+  const fallback = { ...SAP_COL_IDX_DEFAULT };
+  if (headerNfCol != null) fallback.nf = headerNfCol;
+  if (headerValor.lineCol != null) fallback.valorNF = headerValor.lineCol;
+  return fallback;
 }
 
 function logSapRowDebug(line, row, idx, colIdx) {
@@ -1564,6 +1658,18 @@ function _debugBuildSapNfMapAggregation() {
     { nf: '000018596-004', _hasMaterialCol: true, material: 'M2', valorLine: '-6.000,00' },
     { nf: '000018596-004', _hasMaterialCol: true, material: 'M3', valorLine: '24.346,00' }
   ]);
+  // NF 100796 / ZFACT: valor bruto cols are 0,00; NF total repeats as "4 992,26 BRL" (use once).
+  const map100796brl = buildSapNfMap([
+    { nf: '100796', _hasMaterialCol: true, material: 'DELTA Q', valorLine: '0,00', valorDoc: '4 992,26 BRL' },
+    { nf: '100796', _hasMaterialCol: true, material: 'DELTA QH', valorLine: '0,00', valorDoc: '4 992,26 BRL' },
+    { nf: '100796', _hasMaterialCol: true, material: 'COLOMBIA', valorLine: '0,00', valorDoc: '4\u00a0992,26 BRL' }
+  ]);
+  // Same NF: line nets present + repeating BRL doc total → sum lines (or doc if lines empty).
+  const map100796lines = buildSapNfMap([
+    { nf: '100796', _hasMaterialCol: true, material: 'A', valorLine: '354,45', valorDoc: '4 992,26 BRL' },
+    { nf: '100796', _hasMaterialCol: true, material: 'B', valorLine: '620,29', valorDoc: '4 992,26 BRL' },
+    { nf: '100796', _hasMaterialCol: true, material: 'C', valorLine: '4017,52', valorDoc: '4 992,26 BRL' }
+  ]);
   const ok97723 = Math.abs((map['97723']?.valorNF || 0) - 3500.5) < 0.01;
   const ok88888 = Math.abs((map['88888']?.valorNF || 0) - 500) < 0.01;
   const ok99999 = map['99999']?.valorNF === 0;
@@ -1584,10 +1690,12 @@ function _debugBuildSapNfMapAggregation() {
   const ok99642 = Math.abs((map99642['99642']?.valorNF || 0) - 2763) < 0.01;
   const ok18596 = Math.abs((map18596['18596']?.valorNF || 0) - 24346) < 0.01;
   const ok18596multi = Math.abs((map18596multi['18596']?.valorNF || 0) - 24346) < 0.01;
+  const ok100796brl = Math.abs((map100796brl['100796']?.valorNF || 0) - 4992.26) < 0.01;
+  const ok100796lines = Math.abs((map100796lines['100796']?.valorNF || 0) - 4992.26) < 0.01;
   if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat || !ok99635dupPos
       || !ok99635lineDoc || !ok99635inflate || !ok99635brutoZfact || !ok99635feeLines || !ok99636bruto
       || !ok99636lineDoc || !ok2223 || !ok18591 || !ok99641 || !ok99641sameMat || !ok99642
-      || !ok18596 || !ok18596multi) {
+      || !ok18596 || !ok18596multi || !ok100796brl || !ok100796lines) {
     console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
       ok97723, got97723: map['97723']?.valorNF,
       ok88888, got88888: map['88888']?.valorNF,
@@ -1608,7 +1716,9 @@ function _debugBuildSapNfMapAggregation() {
       ok99641sameMat, got99641sameMat: map99641sameMat['99641']?.valorNF,
       ok99642, got99642: map99642['99642']?.valorNF,
       ok18596, got18596: map18596['18596']?.valorNF,
-      ok18596multi, got18596multi: map18596multi['18596']?.valorNF
+      ok18596multi, got18596multi: map18596multi['18596']?.valorNF,
+      ok100796brl, got100796brl: map100796brl['100796']?.valorNF,
+      ok100796lines, got100796lines: map100796lines['100796']?.valorNF
     });
   } else {
     console.debug('[SAP NF] buildSapNfMap aggregation OK');
