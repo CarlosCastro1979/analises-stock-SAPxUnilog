@@ -507,7 +507,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.71 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.72 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1744,7 +1744,7 @@ select.cad-inp{cursor:pointer;}
           <div class="uz" id="fte-sapZone">
             <div style="font-size:26px;margin-bottom:8px">🗄️</div>
             <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel SAP (ZFACT)</div>
-            <div style="font-size:11px;color:var(--muted)">NF · data emissão · cliente · valor — anomalias SAP / Δ valor · partilhado com Armazém</div>
+            <div style="font-size:11px;color:var(--muted)">NF · data emissão · cliente · valor — merge acumulado por NF (não apaga histórico). Partilhado com Armazém.</div>
             <div id="fte-sapFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
             <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
           </div>
@@ -2292,7 +2292,7 @@ const db=supabase.createClient(SB_URL,SB_KEY);
 // );
 // ALTER TABLE logistica_excel_files ENABLE ROW LEVEL SECURITY;
 // CREATE POLICY "anon_all" ON logistica_excel_files FOR ALL TO anon USING (true) WITH CHECK (true);
-const EXCEL_SLOTS={STOCK_SAP:'stock_sap',STOCK_UNILOG:'stock_unilog',FRETES_CTE:'fretes_cte',FRETES_SAP_NF:'fretes_sap_nf',FRETES_QUINZENAL:'fretes_quinzenal',ARMAZEM:'armazem_monthly'};
+const EXCEL_SLOTS={STOCK_SAP:'stock_sap',STOCK_UNILOG:'stock_unilog',FRETES_CTE:'fretes_cte',FRETES_SAP_NF:'fretes_sap_nf',FRETES_SAP_MAP:'fretes_sap_map',FRETES_QUINZENAL:'fretes_quinzenal',ARMAZEM:'armazem_monthly'};
 let stockSapFileName='',stockUniFileName='',stockSapBuffer=null,stockUniBuffer=null;
 
 function arrayBufferToBase64(buf){
@@ -9658,7 +9658,7 @@ function applyResizable(){scheduleColResize();}
       load('inventario-acerto.js', 'v=1.0.10');
     });
   }
-  load('fretes.js', 'v=1.8.71', function () {
+  load('fretes.js', 'v=1.8.72', function () {
     loadInventarioAcerto();
     load('armazem.js', 'v=1.0.41', bootApp, function () {
       var e = document.getElementById('arm-initErr');

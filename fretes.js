@@ -1,5 +1,5 @@
-// fretes.js v1.8.71 — Por mês: SAP emissão → Data NF (QZ) → Dt CTE → mês ficheiro
-const FRETES_JS_VERSION = '1.8.71';
+// fretes.js v1.8.72 — ZFACT/QZ: merge by NF (never wipe history on partial Excel)
+const FRETES_JS_VERSION = '1.8.72';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -10,6 +10,8 @@ const $ = id => document.getElementById('fte-' + id);
 
 let fteInited = false;
 let sapNfMap = {};
+/** Provenance of merged ZFACT loads (persisted with sap map pack). */
+let sapMapSourceFiles = [];
 let lastCtePack = null;
 
 let currentNFs = [];
@@ -72,6 +74,11 @@ function fteCteSlot() {
 
 function fteSapSlot() {
   return typeof EXCEL_SLOTS !== 'undefined' ? EXCEL_SLOTS.FRETES_SAP_NF : 'fretes_sap_nf';
+}
+
+/** Accumulated SAP NF map (JSON) — history across partial ZFACT uploads. */
+function fteSapMapSlot() {
+  return typeof EXCEL_SLOTS !== 'undefined' ? EXCEL_SLOTS.FRETES_SAP_MAP : 'fretes_sap_map';
 }
 
 function fteQuinzenalSlot() {
@@ -275,21 +282,51 @@ function fmtByteSize(n) {
   return (n / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
+/** Merge key for quinzenal rows: canal + NF (pedido fallback for B2C without NF). */
+function qzRowMergeKey(r, canal) {
+  const ch = canal || (/B2B/i.test(r?.fileName || '') ? 'B2B' : 'B2C');
+  const nf = r?.nfKey || normNFKey(r?.nf);
+  if (nf) return `${ch}|nf:${nf}`;
+  const ped = r?.pedido != null && String(r.pedido).trim() !== '' ? String(r.pedido).trim() : '';
+  if (ped) return `${ch}|ped:${ped}`;
+  return '';
+}
+
+/**
+ * Merge quinzenal packs without treating the new Excel as full truth.
+ * - Same fileName → replace that file's rows (re-upload of same report).
+ * - Else NF-level (canal|nf): update overlapping NFs; keep NFs absent from the new file.
+ */
 function mergeQuinzenalPacks(prev, next) {
   if (!prev?.files?.length) return next;
   if (!next?.files?.length) return prev;
   const replaceNames = new Set((next.files || []).map(f => f.fileName));
-  const files = [
-    ...(prev.files || []).filter(f => !replaceNames.has(f.fileName)),
-    ...(next.files || [])
-  ];
+  const nextB2bKeys = new Set(
+    (next.b2bRows || []).map(r => qzRowMergeKey(r, 'B2B')).filter(Boolean)
+  );
+  const nextB2cKeys = new Set(
+    (next.b2cRows || []).map(r => qzRowMergeKey(r, 'B2C')).filter(Boolean)
+  );
+  const keepPrevRow = (r, canal, nextKeys) => {
+    if (replaceNames.has(r.fileName)) return false;
+    const k = qzRowMergeKey(r, canal);
+    if (k && nextKeys.has(k)) return false;
+    return true;
+  };
   const b2bRows = [
-    ...(prev.b2bRows || []).filter(r => !replaceNames.has(r.fileName)),
+    ...(prev.b2bRows || []).filter(r => keepPrevRow(r, 'B2B', nextB2bKeys)),
     ...(next.b2bRows || [])
   ];
   const b2cRows = [
-    ...(prev.b2cRows || []).filter(r => !replaceNames.has(r.fileName)),
+    ...(prev.b2cRows || []).filter(r => keepPrevRow(r, 'B2C', nextB2cKeys)),
     ...(next.b2cRows || [])
+  ];
+  const usedNames = new Set(
+    [...b2bRows, ...b2cRows].map(r => r.fileName).filter(Boolean)
+  );
+  const files = [
+    ...(prev.files || []).filter(f => !replaceNames.has(f.fileName) && usedNames.has(f.fileName)),
+    ...(next.files || [])
   ];
   const failKeys = new Set((next.failedFiles || []).map(f => f.fileName));
   const failedFiles = [
@@ -1696,6 +1733,157 @@ function processArrayBufferCte(arrayBuffer, fileName, opts = {}) {
   }
 }
 
+/** Merge SAP NF maps by normalized NF key — next overwrites; prev keys absent from next are kept. */
+function mergeSapNfMaps(prev, next) {
+  if (!next || !Object.keys(next).length) return prev && typeof prev === 'object' ? prev : {};
+  if (!prev || !Object.keys(prev).length) return { ...next };
+  return { ...prev, ...next };
+}
+
+function trackSapMapSourceFile(fileName, nfCount) {
+  const name = fileName || 'sap.xlsx';
+  sapMapSourceFiles = [
+    ...(sapMapSourceFiles || []).filter(f => f.fileName !== name),
+    { fileName: name, nfCount: nfCount || 0, mergedAt: new Date().toISOString() }
+  ];
+}
+
+function reviveSapNfMapEntry(e) {
+  if (!e || typeof e !== 'object') return null;
+  let dt = e.dtEmissao || null;
+  if (dt && !(dt instanceof Date)) {
+    dt = (typeof parseSapBrDate === 'function' ? parseSapBrDate(dt) : null)
+      || (typeof dt === 'string' || typeof dt === 'number' ? new Date(dt) : null);
+    if (dt && isNaN(dt.getTime())) dt = null;
+  }
+  return {
+    nf: e.nf,
+    cliente: e.cliente || '',
+    dtEmissao: dt,
+    valorNF: e.valorNF
+  };
+}
+
+function reviveSapNfMap(raw) {
+  const map = {};
+  if (!raw || typeof raw !== 'object') return map;
+  Object.keys(raw).forEach(k => {
+    const entry = reviveSapNfMapEntry(raw[k]);
+    if (entry) map[k] = entry;
+  });
+  return map;
+}
+
+function slimSapNfMapForPersist(map) {
+  const out = {};
+  Object.keys(map || {}).forEach(k => {
+    const e = map[k];
+    if (!e) return;
+    let dt = e.dtEmissao || null;
+    if (dt instanceof Date && !isNaN(dt.getTime())) dt = dt.toISOString();
+    else if (dt != null && typeof dt !== 'string') dt = String(dt);
+    out[k] = { nf: e.nf, cliente: e.cliente || '', dtEmissao: dt, valorNF: e.valorNF };
+  });
+  return out;
+}
+
+async function persistSapNfMap(map, opts = {}) {
+  if (typeof upsertExcelBinary !== 'function') {
+    if (!opts.silent) fteToastError('Persistência Excel indisponível — recarrega a página.');
+    return false;
+  }
+  const m = map || sapNfMap;
+  const n = Object.keys(m || {}).length;
+  if (!n) {
+    console.warn('[fretes] persist sap map skip — empty');
+    return false;
+  }
+  const pack = {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    files: sapMapSourceFiles || [],
+    map: slimSapNfMapForPersist(m)
+  };
+  const json = JSON.stringify(pack);
+  const buf = new TextEncoder().encode(json).buffer;
+  const jsonBytes = buf.byteLength;
+  if (jsonBytes > QZ_PERSIST_MAX_JSON_BYTES) {
+    const msg = `Mapa SAP demasiado grande (${fmtByteSize(jsonBytes)}).`;
+    console.error('[fretes] persist sap map too large', fteCompany(), jsonBytes);
+    if (!opts.silent) fteToastError(msg);
+    return false;
+  }
+  const slot = fteSapMapSlot();
+  const fileName = `sap_nf_map_${n}.json`;
+  console.log('[fretes] persist sap map', fteCompany(), slot, n, 'NFs', 'jsonBytes', jsonBytes);
+  try {
+    await upsertExcelBinary(slot, fileName, buf);
+    console.log('[fretes] persist sap map ok', fteCompany(), slot, fileName);
+    if (!opts.silent) fteToast(`Mapa SAP acumulado guardado (${n} NFs).`);
+    return true;
+  } catch (err) {
+    console.error('[fretes] persist sap map', fteCompany(), slot, err);
+    if (!opts.silent) {
+      if (typeof isExcelFilesTableMissing === 'function' && isExcelFilesTableMissing(err)) {
+        fteToastError('Tabela logistica_excel_files em falta no Supabase.');
+      } else {
+        fteToastError('Erro ao guardar mapa SAP: ' + (err.message || err));
+      }
+    }
+    return false;
+  }
+}
+
+function parseSapNfMapFromRec(rec) {
+  if (!rec?.file_data || typeof base64ToArrayBuffer !== 'function') return null;
+  try {
+    const buf = base64ToArrayBuffer(rec.file_data);
+    const text = new TextDecoder().decode(buf);
+    const parsed = JSON.parse(text);
+    if (!parsed) return null;
+    if (parsed.map && typeof parsed.map === 'object') {
+      return {
+        map: reviveSapNfMap(parsed.map),
+        files: Array.isArray(parsed.files) ? parsed.files : []
+      };
+    }
+    // Legacy: raw map object
+    return { map: reviveSapNfMap(parsed), files: [] };
+  } catch (err) {
+    console.error('[fretes] parse sap map', err);
+    return null;
+  }
+}
+
+/** Restore accumulated SAP map from cloud JSON (does not clear keys absent from Excel). */
+async function loadSavedSapNfMap(meta, opts = {}) {
+  if (typeof fetchExcelFiles !== 'function') return false;
+  try {
+    const m = meta || await fetchExcelFiles([fteSapMapSlot()]);
+    const rec = m[fteSapMapSlot()];
+    if (!rec?.file_data) return false;
+    const parsed = parseSapNfMapFromRec(rec);
+    if (!parsed?.map || !Object.keys(parsed.map).length) {
+      console.warn('[fretes] sap map parse empty', fteCompany(), rec.file_name);
+      return false;
+    }
+    sapNfMap = mergeSapNfMaps(sapNfMap, parsed.map);
+    if (parsed.files?.length) {
+      const byName = new Map((sapMapSourceFiles || []).map(f => [f.fileName, f]));
+      parsed.files.forEach(f => {
+        if (f?.fileName) byName.set(f.fileName, f);
+      });
+      sapMapSourceFiles = [...byName.values()];
+    }
+    console.log('[fretes] load sap map', fteCompany(), rec.file_name, 'mapSize', Object.keys(sapNfMap).length);
+    return true;
+  } catch (err) {
+    console.error('[fretes] load sap map', err);
+    if (!opts.silent) fteToastError('Erro ao carregar mapa SAP acumulado.');
+    return false;
+  }
+}
+
 function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
   try {
     const wb = readSapWorkbookFromArrayBuffer(arrayBuffer);
@@ -1705,19 +1893,25 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
       if (!opts.silent) setSapLoadStatus(msg, false);
       return false;
     }
-    sapNfMap = buildSapNfMap(rows);
+    const incoming = buildSapNfMap(rows);
+    const nIncoming = Object.keys(incoming).length;
+    const nBefore = Object.keys(sapNfMap).length;
+    sapNfMap = mergeSapNfMaps(sapNfMap, incoming);
+    trackSapMapSourceFile(fileName, nIncoming);
     const nMapped = Object.keys(sapNfMap).length;
     const nWithValor = Object.values(sapNfMap).filter(e => parseSapNum(e.valorNF) > 0).length;
     if (!opts.silent) {
-      console.log('[SAP] Map size:', nMapped, 'NFs únicas (', rows.length, 'linhas ZFACT), with valor:', nWithValor);
+      console.log('[SAP] Map merge:', nBefore, '+', nIncoming, '→', nMapped, 'NFs (', rows.length, 'linhas ZFACT), with valor:', nWithValor);
     }
 
-    reEnrichAfterSapLoad();
-    if (typeof window.refreshArmazemSapValidation === 'function') {
-      try {
-        window.refreshArmazemSapValidation();
-      } catch (armErr) {
-        console.warn('[SAP] refreshArmazemSapValidation', armErr);
+    if (!opts.skipEnrich) {
+      reEnrichAfterSapLoad();
+      if (typeof window.refreshArmazemSapValidation === 'function') {
+        try {
+          window.refreshArmazemSapValidation();
+        } catch (armErr) {
+          console.warn('[SAP] refreshArmazemSapValidation', armErr);
+        }
       }
     }
 
@@ -1725,7 +1919,7 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
     if (!opts.silent) {
       logSapKeyDebug(currentNFs);
       setSapLoadStatus(
-        nMapped + ' NFs SAP mapeadas · ' + nMatched + ' matched com Unilog',
+        nMapped + ' NFs SAP acumuladas (' + nIncoming + ' neste ficheiro) · ' + nMatched + ' matched com Unilog',
         nMatched > 0 || !currentNFs.length
       );
       if (nMatched > 0) {
@@ -1735,10 +1929,10 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
         const nMissing = currentSummary?.nSapMissing || 0;
         if (nMissing) fteToast(nMissing + ' NF(s) no Unilog sem correspondência no SAP — ver Anomalias.');
       } else if (currentNFs.length) {
-        setSapLoadStatus(nMapped + ' NFs SAP mapeadas · 0 matched com Unilog', false);
+        setSapLoadStatus(nMapped + ' NFs SAP acumuladas · 0 matched com Unilog', false);
         fteToastError('SAP carregado mas nenhuma NF cruzou com Unilog — verifica formato/chaves.');
       } else {
-        fteToast('Dados SAP carregados (' + nMapped + ' NFs). Carrega o Excel Unilog para cruzar.');
+        fteToast('Dados SAP mesclados (' + nMapped + ' NFs acumuladas, ' + nIncoming + ' neste ficheiro).');
       }
     }
     return true;
@@ -1843,7 +2037,7 @@ async function processAndSaveFretes() {
 
     if (hasCte) {
       fteSetProcessing(true, 'A processar CT-e / SAP…');
-      sapNfMap = {};
+      // Do NOT clear sapNfMap — CT-e reload must not wipe accumulated ZFACT history
       const ok = processArrayBufferCte(fteCteBuffer, fteCteFileName);
       if (!ok) return;
       if (hasSap) {
@@ -1886,6 +2080,12 @@ async function processAndSaveFretes() {
     if (hasSap && (sapProcessed || cteProcessed || qzCteBuilt)) {
       sapSaved = await persistFretesFile(fteSapSlot(), fteSapFileName, fteSapBuffer);
       if (!sapSaved) errors.push('SAP');
+    }
+
+    // Always persist accumulated SAP map when we have NFs (merge history ≠ last Excel alone)
+    if (sapProcessed && isSapLoaded()) {
+      const mapSaved = await persistSapNfMap(sapNfMap, { silent: true });
+      if (!mapSaved) errors.push('mapa SAP');
     }
 
     syncQzUploadZone();
@@ -3500,7 +3700,7 @@ async function restoreCteFromRec(cteRec, sapRec, silent = false) {
   }
   _fteSkipAutosave = true;
   try {
-    sapNfMap = {};
+    // Keep accumulated sapNfMap — Excel merge updates keys; does not wipe history
     const cteBuf = base64ToArrayBuffer(cteRec.file_data);
     const ok = processArrayBufferCte(cteBuf, cteRec.file_name || 'cte.xlsx', { silent: true });
     if (!ok) return false;
@@ -3534,7 +3734,8 @@ async function ensureCteLoadedForQz(silent = true) {
   if (currentNFs.length) return true;
   if (typeof fetchExcelFiles !== 'function' || typeof base64ToArrayBuffer !== 'function') return false;
   try {
-    const meta = await fetchExcelFiles([fteCteSlot(), fteSapSlot()]);
+    const meta = await fetchExcelFiles([fteCteSlot(), fteSapMapSlot(), fteSapSlot()]);
+    await loadSavedSapNfMap(meta, { silent: true });
     const ok = await restoreCteFromRec(meta[fteCteSlot()], meta[fteSapSlot()], silent);
     if (ok) refreshQuinzenalCompare();
     return ok;
@@ -3581,8 +3782,8 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   let meta;
   try {
     await fteYield('A descarregar Fretes…');
-    // QZ + SAP first (structured path). CTE Excel is legacy Conciliacao only.
-    meta = await fetchExcelFiles([fteQuinzenalSlot(), fteSapSlot(), fteCteSlot()]);
+    // QZ + SAP map + SAP Excel first (structured path). CTE Excel is legacy Conciliacao only.
+    meta = await fetchExcelFiles([fteQuinzenalSlot(), fteSapMapSlot(), fteSapSlot(), fteCteSlot()]);
   } catch (err) {
     console.error('[fretes] load saved', co, err);
     if (!silent) {
@@ -3629,18 +3830,28 @@ async function _loadSavedFretesFilesImpl(silent = false) {
     }
   }
 
-  // 4) ZFACT / SAP NF map
-  if (!isSapLoaded() && sapRec?.file_data) {
+  // 4) ZFACT / SAP NF map — JSON history first, then merge latest Excel (never replace-all)
+  await fteYield('A restaurar mapa SAP…');
+  const mapHad = await loadSavedSapNfMap(meta, { silent: true });
+  const nBeforeExcel = Object.keys(sapNfMap).length;
+  if (sapRec?.file_data) {
     await fteYield('A processar ZFACT…');
     const sapOnlyOk = restoreSapFromRec(sapRec, silent);
-    console.log('[fretes] restore sap-only', co, sapRec.file_name, 'ok', sapOnlyOk, 'mapSize', Object.keys(sapNfMap).length);
-    if (sapOnlyOk && (qzCteBuilt || cteAnalysisSource === 'quinzenal' || currentNFs.length)) {
-      await fteYield('A cruzar SAP…');
-      reEnrichAfterSapLoad();
+    console.log('[fretes] restore sap', co, sapRec.file_name, 'ok', sapOnlyOk,
+      'mapHad', mapHad, 'mapSize', Object.keys(sapNfMap).length);
+    const nAfter = Object.keys(sapNfMap).length;
+    // Bootstrap / grow cloud map when missing or Excel added new NFs
+    if (nAfter > 0 && (!mapHad || nAfter > nBeforeExcel)) {
+      await persistSapNfMap(sapNfMap, { silent: true });
     }
-  } else if (cteOk && sapRec?.file_data && !isSapLoaded()) {
-    await fteYield('A processar ZFACT…');
-    restoreSapFromRec(sapRec, silent);
+  } else if (mapHad && (qzCteBuilt || cteAnalysisSource === 'quinzenal' || currentNFs.length)) {
+    await fteYield('A cruzar SAP…');
+    reEnrichAfterSapLoad();
+    if (typeof window.refreshArmazemSapValidation === 'function') {
+      try { window.refreshArmazemSapValidation(); } catch (armErr) {
+        console.warn('[SAP] refreshArmazemSapValidation', armErr);
+      }
+    }
   }
 
   await fteYield('A calcular confrontos…');
@@ -5488,6 +5699,7 @@ function reloadFretesForCompany() {
   currentSummary = null;
   currentUploadId = null;
   sapNfMap = {};
+  sapMapSourceFiles = [];
   lastCtePack = null;
   cteAnalysisSource = null;
   activeSubPanel = null;
@@ -5730,11 +5942,14 @@ window.FretesSAP = {
   normNFKey,
   parseSapNum,
   buildSapNfMap,
+  mergeSapNfMaps,
   lookupSapEntry,
   isRelevantValorDiff,
   isSapLoaded,
   loadSapRowsFromWorkbook,
   ensureLoaded: (silent = true) => loadSavedFretesFiles(silent).then(() => isSapLoaded()),
-  restoreSapFromRec
+  restoreSapFromRec,
+  persistSapNfMap,
+  loadSavedSapNfMap
 };
 window.fteNeedsCloudReload = fteNeedsCloudReload;
