@@ -1,5 +1,5 @@
-// armazem.js v1.0.40
-const ARMAZEM_JS_VERSION = '1.0.40';
+// armazem.js v1.0.41
+const ARMAZEM_JS_VERSION = '1.0.41';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -3386,18 +3386,21 @@ function initArmazem() {
   }).catch(e => console.warn('[armazem] load saved', e));
 }
 
-/** Monthly rows for Total Custo Unilog — Vendas Liq + armazenagem c/ impostos. */
+/** Monthly rows for Total Custo Unilog — Vendas Brutas/Liq + armazenagem c/ impostos. */
 function getArmMonthlyCustoRows() {
   return (armPack?.months || [])
     .filter(m => m.mesKey && /^\d{4}-\d{2}$/.test(String(m.mesKey)))
     .map(m => {
       const armComImp = armGetMonthPagoComImp(m) || 0;
+      const vendasBrutas = armGetVendasBrutas(m) || 0;
+      const vendasLiq = armGetVendasLiq(m) || 0;
       return {
         mesKey: m.mesKey,
         mesLabel: armMesLabel(m),
-        vendasLiq: armGetVendasLiq(m) || 0,
+        vendasBrutas,
+        vendasLiq,
         armComImp,
-        hasData: !!(m.servicos?.length || m.nfRows?.length || armComImp > 0 || armGetVendasLiq(m))
+        hasData: !!(m.servicos?.length || m.nfRows?.length || armComImp > 0 || vendasLiq || vendasBrutas)
       };
     })
     .sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));

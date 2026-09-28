@@ -377,7 +377,8 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-armazem tr.arm-resumo-subtotal td{background:#f8fafc;border-top:1px solid var(--border);font-weight:600;}
 #page-armazem .empty{text-align:center;padding:40px 16px;color:var(--muted);}
 #page-custoUnilog .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0;}
-@media(min-width:1200px){#page-custoUnilog .kpis{grid-template-columns:repeat(6,1fr);}}
+@media(min-width:1200px){#page-custoUnilog .kpis{grid-template-columns:repeat(4,1fr);}}
+@media(min-width:1500px){#page-custoUnilog .kpis{grid-template-columns:repeat(7,1fr);}}
 @media(max-width:640px){#page-custoUnilog .kpis{grid-template-columns:repeat(2,1fr);}}
 #page-custoUnilog .kpi{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;}
 #page-custoUnilog .kpi .label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;font-weight:600;}
@@ -506,7 +507,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.69 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.70 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -2212,11 +2213,13 @@ select.cad-inp{cursor:pointer;}
           <table id="cuTable">
             <thead><tr>
               <th class="sortable">Mês</th>
+              <th class="sortable right" title="Base NF / faturação bruta Unilog (armazenagem 5,5%)">Vendas Brutas</th>
               <th class="sortable right">Vendas Liq</th>
               <th class="sortable right" title="Armazenagem total pago c/ impostos">Armazenagem</th>
               <th class="sortable right" title="Fretes B2B — quinzenal totalPagoQz">Fretes B2B</th>
               <th class="sortable right" title="Armazenagem + Fretes B2B">Total (Arm+B2B)</th>
               <th class="sortable right" title="Total (Arm+B2B) ÷ Vendas Líquidas">% s/ Vendas</th>
+              <th class="sortable right" title="Total (Arm+B2B) ÷ Vendas Brutas">% s/ Vendas Brutas</th>
               <th class="sortable right" title="Fretes B2C — quinzenal">Fretes B2C</th>
               <th class="sortable right" title="Total Unilog + Fretes B2C">Total c/ B2C</th>
               <th class="sortable right" title="Total c/ B2C ÷ Vendas Líquidas">% c/ B2C</th>
@@ -2649,11 +2652,12 @@ function cuMesLabel(mesKey){
 function buildCustoUnilogRows(){
   const armRows=typeof getArmMonthlyCustoRows==='function'?getArmMonthlyCustoRows():[];
   const fteRows=typeof getFretesMonthlyCustoRows==='function'?getFretesMonthlyCustoRows():[];
-  const empty={mesKey:'',mesLabel:'',vendasLiq:0,armComImp:0,freteB2b:0,freteB2c:0,fretePago:0};
+  const empty={mesKey:'',mesLabel:'',vendasBrutas:0,vendasLiq:0,armComImp:0,freteB2b:0,freteB2c:0,fretePago:0};
   const byMes={};
   armRows.forEach(r=>{
     if(!r.mesKey||r.mesKey==='sem-mes')return;
     byMes[r.mesKey]=byMes[r.mesKey]||{...empty,mesKey:r.mesKey,mesLabel:r.mesLabel||cuMesLabel(r.mesKey)};
+    byMes[r.mesKey].vendasBrutas=r.vendasBrutas||0;
     byMes[r.mesKey].vendasLiq=r.vendasLiq||0;
     byMes[r.mesKey].armComImp=r.armComImp||0;
     if(r.mesLabel)byMes[r.mesKey].mesLabel=r.mesLabel;
@@ -2675,11 +2679,13 @@ function buildCustoUnilogRows(){
     const total=arm+b2b;
     const totalComB2c=total+b2c;
     const vl=r.vendasLiq||0;
+    const vb=r.vendasBrutas||0;
     return{
       ...r,
       fretePago:b2b,
       total,
       pct:vl>0?total/vl:null,
+      pctVendasBrutas:vb>0?total/vb:null,
       totalComB2c,
       pctComB2c:vl>0?totalComB2c/vl:null
     };
@@ -2712,7 +2718,7 @@ function renderCustoUnilog(){
 
   const empty=document.getElementById('cu-empty');
   const dash=document.getElementById('cu-dash');
-  const rowHas=r=>r.vendasLiq||r.armComImp||r.freteB2b||r.freteB2c;
+  const rowHas=r=>r.vendasBrutas||r.vendasLiq||r.armComImp||r.freteB2b||r.freteB2c;
   const hasData=rows.some(rowHas);
   if(empty){
     empty.style.display=hasData?'none':'block';
@@ -2731,8 +2737,9 @@ function renderCustoUnilog(){
   if(dash)dash.style.display=hasData?'block':'none';
   if(!hasData)return;
 
-  const tot={vendasLiq:0,armComImp:0,freteB2b:0,freteB2c:0,total:0,totalComB2c:0};
+  const tot={vendasBrutas:0,vendasLiq:0,armComImp:0,freteB2b:0,freteB2c:0,total:0,totalComB2c:0};
   rows.forEach(r=>{
+    tot.vendasBrutas+=r.vendasBrutas||0;
     tot.vendasLiq+=r.vendasLiq||0;
     tot.armComImp+=r.armComImp||0;
     tot.freteB2b+=r.freteB2b||0;
@@ -2741,14 +2748,16 @@ function renderCustoUnilog(){
     tot.totalComB2c+=r.totalComB2c||0;
   });
   const pctTot=tot.vendasLiq>0?tot.total/tot.vendasLiq:null;
+  const pctTotVb=tot.vendasBrutas>0?tot.total/tot.vendasBrutas:null;
   const pctTotB2c=tot.vendasLiq>0?tot.totalComB2c/tot.vendasLiq:null;
   const kpis=document.getElementById('cu-kpis');
   if(kpis){
     kpis.innerHTML=`
+      <div class="kpi"><div class="label">Vendas Brutas</div><div class="value">${cuFmtMoney(tot.vendasBrutas)}</div><div class="sub">Base NF Unilog (5,5%)</div></div>
       <div class="kpi"><div class="label">Vendas Líquidas</div><div class="value">${cuFmtMoney(tot.vendasLiq)}</div><div class="sub">Visão mensal Armazém</div></div>
       <div class="kpi"><div class="label">Custo Armazenagem</div><div class="value">${cuFmtMoney(tot.armComImp)}</div><div class="sub">Total pago c/ impostos</div></div>
       <div class="kpi"><div class="label">Custo Fretes B2B</div><div class="value">${cuFmtMoney(tot.freteB2b)}</div><div class="sub">Quinzenal B2B (totalPagoQz)</div></div>
-      <div class="kpi flag"><div class="label">Custo Total Unilog</div><div class="value">${cuFmtMoney(tot.total)}</div><div class="sub">Arm + B2B · ${pctTot!=null?cuFmtPct(tot.total,tot.vendasLiq):'—'} s/ vendas</div></div>
+      <div class="kpi flag"><div class="label">Custo Total Unilog</div><div class="value">${cuFmtMoney(tot.total)}</div><div class="sub">Arm + B2B · ${pctTot!=null?cuFmtPct(tot.total,tot.vendasLiq):'—'} s/ vendas · ${pctTotVb!=null?cuFmtPct(tot.total,tot.vendasBrutas):'—'} s/ brutas</div></div>
       <div class="kpi"><div class="label">Custo Fretes B2C</div><div class="value">${cuFmtMoney(tot.freteB2c)}</div><div class="sub">Quinzenal B2C (após total)</div></div>
       <div class="kpi flag"><div class="label">Total c/ B2C</div><div class="value">${cuFmtMoney(tot.totalComB2c)}</div><div class="sub">Unilog + B2C · ${pctTotB2c!=null?cuFmtPct(tot.totalComB2c,tot.vendasLiq):'—'} s/ vendas</div></div>`;
   }
@@ -2766,11 +2775,13 @@ function renderCustoUnilog(){
     if(thead){
       thead.innerHTML=
         sortTh('mesKey','Mês','')+
+        sortTh('vendasBrutas','Vendas Brutas','right','Base NF / faturação bruta Unilog (armazenagem 5,5%)')+
         sortTh('vendasLiq','Vendas Liq','right')+
         sortTh('armComImp','Armazenagem','right','Armazenagem total pago c/ impostos')+
         sortTh('freteB2b','Fretes B2B','right','Fretes B2B — quinzenal totalPagoQz')+
         sortTh('total','Total (Arm+B2B)','right','Armazenagem + Fretes B2B')+
         sortTh('pct','% s/ Vendas','right','Total (Arm+B2B) ÷ Vendas Líquidas')+
+        sortTh('pctVendasBrutas','% s/ Vendas Brutas','right','Total (Arm+B2B) ÷ Vendas Brutas')+
         sortTh('freteB2c','Fretes B2C','right','Fretes B2C — quinzenal')+
         sortTh('totalComB2c','Total c/ B2C','right','Total Unilog + Fretes B2C')+
         sortTh('pctComB2c','% c/ B2C','right','Total c/ B2C ÷ Vendas Líquidas');
@@ -2778,21 +2789,25 @@ function renderCustoUnilog(){
     const moneyCell=(v,title)=>`<td class="right"${title?` title="${title}"`:''}>${v>0?cuFmtMoney(v):'—'}</td>`;
     body.innerHTML=rows.map(r=>`<tr>
       <td>${cuEsc(r.mesLabel||cuMesLabel(r.mesKey))}</td>
+      ${moneyCell(r.vendasBrutas,'Base NF / faturação bruta Unilog')}
       ${moneyCell(r.vendasLiq)}
       ${moneyCell(r.armComImp)}
       ${moneyCell(r.freteB2b,'Fretes B2B (quinzenal)')}
       ${moneyCell(r.total)}
       <td class="right">${r.pct!=null?cuFmtPct(r.total,r.vendasLiq):'—'}</td>
+      <td class="right">${r.pctVendasBrutas!=null?cuFmtPct(r.total,r.vendasBrutas):'—'}</td>
       ${moneyCell(r.freteB2c,'Fretes B2C (quinzenal)')}
       ${moneyCell(r.totalComB2c)}
       <td class="right">${r.pctComB2c!=null?cuFmtPct(r.totalComB2c,r.vendasLiq):'—'}</td>
     </tr>`).join('')+`<tr class="cu-total-row">
       <td>Total${yearFilter?' '+yearFilter:''}</td>
+      ${moneyCell(tot.vendasBrutas)}
       ${moneyCell(tot.vendasLiq)}
       ${moneyCell(tot.armComImp)}
       ${moneyCell(tot.freteB2b)}
       ${moneyCell(tot.total)}
       <td class="right">${pctTot!=null?cuFmtPct(tot.total,tot.vendasLiq):'—'}</td>
+      <td class="right">${pctTotVb!=null?cuFmtPct(tot.total,tot.vendasBrutas):'—'}</td>
       ${moneyCell(tot.freteB2c)}
       ${moneyCell(tot.totalComB2c)}
       <td class="right">${pctTotB2c!=null?cuFmtPct(tot.totalComB2c,tot.vendasLiq):'—'}</td>
@@ -9645,7 +9660,7 @@ function applyResizable(){scheduleColResize();}
   }
   load('fretes.js', 'v=1.8.69', function () {
     loadInventarioAcerto();
-    load('armazem.js', 'v=1.0.40', bootApp, function () {
+    load('armazem.js', 'v=1.0.41', bootApp, function () {
       var e = document.getElementById('arm-initErr');
       if (e) e.style.display = 'block';
       bootApp();
