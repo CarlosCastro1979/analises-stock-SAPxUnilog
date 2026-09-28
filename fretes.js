@@ -1,5 +1,5 @@
-// fretes.js v1.8.69 — Análise CT-e from quinzenais B2B (+ ZFACT); Conciliacao CT-e×NF upload removed from UI
-const FRETES_JS_VERSION = '1.8.69';
+// fretes.js v1.8.71 — Por mês: SAP emissão → Data NF (QZ) → Dt CTE → mês ficheiro
+const FRETES_JS_VERSION = '1.8.71';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -236,6 +236,7 @@ function slimB2bRowForPersist(r) {
     mesKey: r.mesKey, mesLabel: r.mesLabel,
     quinzenaKey: r.quinzenaKey, quinzenaLabel: r.quinzenaLabel, fileName: r.fileName,
     dtNF: persistDateValue(r.dtNF),
+    dtNFQz: persistDateValue(r.dtNFQz || r.dtNF),
     temDevolucao: !!r.temDevolucao,
     ctes: Array.isArray(r.ctes) ? r.ctes.map(c => ({
       numCte: c.numCte, dtCte: persistDateValue(c.dtCte), pago: num(c.pago),
@@ -436,7 +437,12 @@ const FIELD_ALIASES = {
   valorNF: ['valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf', 'valor nf r$'],
   transportador: ['transportador', 'transportadora', 'nome transportador', 'transp'],
   modalidade: ['modalidade', 'modal', 'mod'],
-  dtNF: ['dt nf', 'data nf', 'data nota fiscal', 'dt nota fiscal'],
+  dtNF: [
+    'dt nf', 'data nf', 'datanf', 'data da nf', 'data nota fiscal', 'dt nota fiscal',
+    'data emissao', 'data de emissao', 'data emissão', 'data de emissão',
+    'dt emissao', 'dt emissão', 'emissao nf', 'emissão nf',
+    'data emissao nf', 'data emissão nf', 'datas de emissao nf', 'datas de emissão nf'
+  ],
   numCte: ['num. cte', 'num cte', 'numero cte', 'n cte-e', 'num cte-e', 'numero do cte', 'numero do cte-e', 'chave cte', 'chave cte-e', 'numero cte-e', 'n cte e', 'num cte e', 'no cte-e', 'n. cte-e'],
   qtdCte: ['qtd cte', 'qtd. cte', 'qtd ct-e', 'qtd. ct-e', 'quantidade cte', 'quantidade ct-e', 'quantidade de cte', 'quantidade de ct-e', 'n ctes', 'numero ctes', 'total cte', 'total ct-e', 'total de cte', 'qtd cobranca', 'qtd cobrança', 'quantidade cobranca', 'quantidade cobrança', 'nº cte', 'no cte', 'n. cte', 'n cte'],
   dtCte: ['dt cte', 'dt ct-e', 'dt. cte', 'dt. ct-e', 'data cte', 'data ct-e', 'data cte-e', 'dt cte-e', 'data do cte', 'data do ct-e', 'data cte e'],
@@ -1629,8 +1635,13 @@ function applySapToNf(nf) {
 
   if (sap.cliente) nf.cliente = sap.cliente;
 
+  // Keep quinzenal Data NF before SAP overwrite (month bucketing fallback)
+  if (nf.dtNF && !nf.dtNFQz && !nf.dtSAP) {
+    nf.dtNFQz = persistDateValue(nf.dtNF) || nf.dtNF;
+  }
   const sapDt = parseSapBrDate(sap.dtEmissao);
   if (sapDt) {
+    nf.dtSAP = sapDt;
     nf.dtNF = sapDt;
     delete nf.mesRef;
     delete nf.dtRef;
@@ -2075,7 +2086,9 @@ function buildNfRecord(g) {
     sapFound: false, sapMissing: false, sapAnomalyType: '', sapAnomalyReason: '',
     sapValorMismatch: false,
     nCte, pago, esperado, diff, pct, status, motivo, ctes,
-    temDevolucao: g.temDevolucao, dtNF: g.dtNF, qtdCteFromSource: g.qtdCteFromSource || 0,
+    temDevolucao: g.temDevolucao, dtNF: g.dtNF,
+    dtNFQz: g.dtNFQz || g.dtNF || null,
+    qtdCteFromSource: g.qtdCteFromSource || 0,
     mesKey: g.mesKey || g.qzMesKey || null,
     qzMesKey: g.qzMesKey || g.mesKey || null
   };
@@ -2090,9 +2103,13 @@ function setCteValidacao(nfStr, cteKey, value) {
   const rebuilt = buildNfRecord({
     nf: nf.nf, cliente: nf.cliente, transportador: nf.transportador, modalidade: nf.modalidade,
     valorNF: nf.valorNF, ctes: nf.ctes, temDevolucao: nf.temDevolucao, dtNF: nf.dtNF,
-    qtdCteFromSource: nf.qtdCteFromSource
+    dtNFQz: nf.dtNFQz, qtdCteFromSource: nf.qtdCteFromSource,
+    mesKey: nf.mesKey, qzMesKey: nf.qzMesKey
   });
   Object.assign(nf, rebuilt);
+  delete nf.mesRef;
+  delete nf.dtRef;
+  enrichNF(nf);
   renderTable();
 }
 
@@ -2122,7 +2139,9 @@ function processRows(rows, fileName, sheetName, headers, opts = {}) {
     const nfKey = normNFKey(nf);
     if (!byNF[nfKey]) byNF[nfKey] = {
       nf: String(nf).trim(), valorNF: num(r.valorNF), transportador: r.transportador || '-',
-      modalidade: r.modalidade || '-', ctes: [], temDevolucao: false, dtNF: r.dtNF,
+      modalidade: r.modalidade || '-', ctes: [], temDevolucao: false,
+      dtNF: r.dtNF || r.dtNFQz || null,
+      dtNFQz: r.dtNFQz || r.dtNF || null,
       cliente: '', qtdCteFromSource: 0,
       mesKey: r.mesKey || r.qzMesKey || null,
       qzMesKey: r.qzMesKey || r.mesKey || null
@@ -2133,7 +2152,11 @@ function processRows(rows, fileName, sheetName, headers, opts = {}) {
     if (num(r.valorNF) > g.valorNF) g.valorNF = num(r.valorNF);
     if (r.transportador && g.transportador === '-') g.transportador = r.transportador;
     if (r.modalidade && g.modalidade === '-') g.modalidade = r.modalidade;
-    if (r.dtNF && !g.dtNF) g.dtNF = r.dtNF;
+    const rowDtNF = r.dtNFQz || r.dtNF;
+    if (rowDtNF) {
+      g.dtNFQz = pickEarliestDateValue(g.dtNFQz, rowDtNF);
+      g.dtNF = pickEarliestDateValue(g.dtNF, rowDtNF);
+    }
     if (!g.mesKey && (r.mesKey || r.qzMesKey)) {
       g.mesKey = r.mesKey || r.qzMesKey;
       g.qzMesKey = r.qzMesKey || r.mesKey;
@@ -2188,7 +2211,9 @@ async function processRowsAsync(rows, fileName, sheetName, headers, opts = {}) {
       const nfKey = normNFKey(nf);
       if (!byNF[nfKey]) byNF[nfKey] = {
         nf: String(nf).trim(), valorNF: num(r.valorNF), transportador: r.transportador || '-',
-        modalidade: r.modalidade || '-', ctes: [], temDevolucao: false, dtNF: r.dtNF,
+        modalidade: r.modalidade || '-', ctes: [], temDevolucao: false,
+        dtNF: r.dtNF || r.dtNFQz || null,
+        dtNFQz: r.dtNFQz || r.dtNF || null,
         cliente: '', qtdCteFromSource: 0,
         mesKey: r.mesKey || r.qzMesKey || null,
         qzMesKey: r.qzMesKey || r.mesKey || null
@@ -2199,7 +2224,11 @@ async function processRowsAsync(rows, fileName, sheetName, headers, opts = {}) {
       if (num(r.valorNF) > g.valorNF) g.valorNF = num(r.valorNF);
       if (r.transportador && g.transportador === '-') g.transportador = r.transportador;
       if (r.modalidade && g.modalidade === '-') g.modalidade = r.modalidade;
-      if (r.dtNF && !g.dtNF) g.dtNF = r.dtNF;
+      const rowDtNF = r.dtNFQz || r.dtNF;
+      if (rowDtNF) {
+        g.dtNFQz = pickEarliestDateValue(g.dtNFQz, rowDtNF);
+        g.dtNF = pickEarliestDateValue(g.dtNF, rowDtNF);
+      }
       if (!g.mesKey && (r.mesKey || r.qzMesKey)) {
         g.mesKey = r.mesKey || r.qzMesKey;
         g.qzMesKey = r.qzMesKey || r.mesKey;
@@ -2474,14 +2503,44 @@ function parseCteDateValue(v) {
   return null;
 }
 
+/** Earliest plausible date among candidates (Data NF / Dt CTE aggregation). */
+function pickEarliestDateValue(...vals) {
+  let bestRaw = null;
+  let bestT = Infinity;
+  for (const v of vals) {
+    if (v == null || v === '') continue;
+    const d = parseCteDateValue(v);
+    if (!d) {
+      if (bestRaw == null) bestRaw = persistDateValue(v) || v;
+      continue;
+    }
+    const t = d.getTime();
+    if (t < bestT) {
+      bestT = t;
+      bestRaw = persistDateValue(v) || v;
+    }
+  }
+  return bestRaw;
+}
+
 /**
- * Month bucket for Por mês: SAP emissão when present, else min Dt CTE (quinzenal),
- * else mesKey from the quinzenal file name / pack. Never stick on stale 'sem-data'.
+ * Month bucket for Por mês:
+ * 1) SAP emissão (dtSAP / ZFACT) when present and valid
+ * 2) else Data NF from quinzenais (invoice emission)
+ * 3) else min Dt CTE
+ * 4) else mesKey from the quinzenal file name / pack
+ * Never stick on stale 'sem-data'.
  */
 function enrichNF(nf) {
   if (nf.mesRef && nf.mesRef !== 'sem-data' && nf.dtRef) return nf;
-  let d = nf.dtNF ? parseCteDateValue(nf.dtNF) : null;
-  if ((!d || isNaN(d)) && nf.ctes?.length) {
+  // 1. SAP emissão
+  let d = parseCteDateValue(nf.dtSAP);
+  // 2. Data NF (quinzenal emissão da fatura) — preferred QZ date for bucketing
+  if (!d) d = parseCteDateValue(nf.dtNFQz);
+  // 3. dtNF may still hold QZ Data NF (no SAP overwrite) or legacy SAP date
+  if (!d) d = parseCteDateValue(nf.dtNF);
+  // 4. min Dt CTE across CT-e lines
+  if (!d && nf.ctes?.length) {
     const dates = nf.ctes.map(c => parseCteDateValue(c.dtCte)).filter(Boolean);
     if (dates.length) d = new Date(Math.min(...dates.map(x => x.getTime())));
   }
@@ -2490,7 +2549,7 @@ function enrichNF(nf) {
     nf.mesRef = monthKey(d);
     return nf;
   }
-  // Fallback: quinzenal file month (e.g. "1ªQ Julho 2026") when Dt CTE / SAP blank
+  // Fallback: quinzenal file month (e.g. "1ªQ Julho 2026") when dates blank
   const qzMes = nf.mesKey || nf.qzMesKey || null;
   if (qzMes && qzMes !== 'sem-mes' && qzMes !== 'sem-data' && /^\d{4}-\d{2}$/.test(String(qzMes))) {
     nf.dtRef = null;
@@ -3630,7 +3689,12 @@ const QZ_B2B_ALIASES = {
   numCte: ['num. cte', 'num cte', 'numero cte', 'numeros cte', 'n cte', 'numero do cte', 'nº cte'],
   pago: ['total fatura rev.', 'total fatura rev', 'total fatura', 'valor fatura'],
   transportador: ['transportador', 'transportadora'],
-  dtNF: ['dt nf', 'data nf', 'data nota fiscal'],
+  dtNF: [
+    'dt nf', 'data nf', 'datanf', 'data da nf', 'data nota fiscal', 'dt nota fiscal',
+    'data emissao', 'data de emissao', 'data emissão', 'data de emissão',
+    'dt emissao', 'dt emissão', 'emissao nf', 'emissão nf',
+    'data emissao nf', 'data emissão nf'
+  ],
   dtCte: ['dt cte', 'dt ct-e', 'dt. cte', 'dt. ct-e', 'data cte', 'data ct-e', 'data cte-e', 'dt cte-e', 'data do cte', 'data do ct-e', 'data cte e'],
   devolucao: ['devolucao', 'devolução', 'e devolucao', 'retorno'],
   modalidade: ['modalidade', 'modal', 'mod'],
@@ -3872,7 +3936,7 @@ function aggregateQzB2BRows(rows, fileMeta) {
         nf: String(r.nf).trim(), nfKey: key, valorNF: 0, pago: 0, nCteSet: new Set(),
         transportador: r.transportador || '', destinatario: r.destinatario || '',
         modalidade: r.modalidade || '',
-        temDevolucao: false, ctes: [],
+        temDevolucao: false, ctes: [], dtNF: null, dtNFQz: null,
         mesKey: fileMeta.mesKey || mesKeyFromQuinzenaKey(fileMeta.quinzenaKey),
         mesLabel: fileMeta.mesLabel || (fileMeta.mesKey ? fmtMesLabel(fileMeta.mesKey) : ''),
         quinzenaKey: fileMeta.quinzenaKey, quinzenaLabel: fileMeta.quinzenaLabel, fileName: fileMeta.fileName
@@ -3884,7 +3948,11 @@ function aggregateQzB2BRows(rows, fileMeta) {
     if (r.numCte) g.nCteSet.add(String(r.numCte).trim());
     if (r.transportador && g.transportador === '') g.transportador = r.transportador;
     if (r.modalidade && !g.modalidade) g.modalidade = r.modalidade;
-    if (r.dtNF && !g.dtNF) g.dtNF = persistDateValue(r.dtNF) || r.dtNF;
+    if (r.dtNF) {
+      const kept = pickEarliestDateValue(g.dtNF, r.dtNF);
+      g.dtNF = kept;
+      g.dtNFQz = kept;
+    }
     const isDev = isDevolucaoFlag(r.devolucao);
     g.ctes.push({
       numCte: r.numCte != null && String(r.numCte).trim() !== '' ? String(r.numCte).trim() : null,
@@ -3916,6 +3984,7 @@ function expandQzB2bToCteLines(b2bRows) {
           transportador: nf.transportador || '-',
           modalidade: nf.modalidade || '-',
           dtNF: persistDateValue(nf.dtNF) || nf.dtNF || null,
+          dtNFQz: persistDateValue(nf.dtNFQz || nf.dtNF) || nf.dtNFQz || nf.dtNF || null,
           numCte: c.numCte,
           qtdCte: nf.nCte || ctes.length,
           dtCte: persistDateValue(c.dtCte) || c.dtCte || null,
@@ -3937,6 +4006,7 @@ function expandQzB2bToCteLines(b2bRows) {
       transportador: nf.transportador || '-',
       modalidade: nf.modalidade || '-',
       dtNF: persistDateValue(nf.dtNF) || nf.dtNF || null,
+      dtNFQz: persistDateValue(nf.dtNFQz || nf.dtNF) || nf.dtNFQz || nf.dtNF || null,
       numCte: null,
       qtdCte: nf.nCte || 1,
       dtCte: null,
@@ -4064,7 +4134,11 @@ function mergeQzB2BNf(into, r) {
   into.valorNF = Math.max(into.valorNF, r.valorNF);
   into.pago += r.pago;
   into.nCte += r.nCte;
-  if (r.dtNF && !into.dtNF) into.dtNF = r.dtNF;
+  if (r.dtNF || r.dtNFQz) {
+    const picked = pickEarliestDateValue(into.dtNFQz || into.dtNF, r.dtNFQz || r.dtNF);
+    into.dtNF = picked;
+    into.dtNFQz = picked;
+  }
   if (r.temDevolucao) into.temDevolucao = true;
   if (Array.isArray(r.ctes) && r.ctes.length) {
     if (!Array.isArray(into.ctes)) into.ctes = [];
