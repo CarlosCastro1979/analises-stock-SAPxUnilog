@@ -1,5 +1,5 @@
-// fretes.js v1.8.76 — UI responsiveness: async Processar, capped NF table, yieldToUI
-const FRETES_JS_VERSION = '1.8.76';
+// fretes.js v1.8.77 — ZFACT: exclude Valor Líquido (col J); prefer Valor Bruto / doc BRL
+const FRETES_JS_VERSION = '1.8.77';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
