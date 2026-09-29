@@ -1,5 +1,7 @@
-// fretes.js v1.8.78 — defer Fretes/ZFACT cloud restore; skip sync XLSX on open when SAP map JSON exists
-const FRETES_JS_VERSION = '1.8.78';
+// fretes.js v1.8.79 — ZFACT NF total from col AP (Val.total incl.imp.), not Valor líquido
+const FRETES_JS_VERSION = '1.8.79';
+/** Bump when ZFACT valorNF column semantics change — stale cloud maps must re-parse Excel. */
+const SAP_NF_MAP_PARSER_VERSION = 2;
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -512,7 +514,18 @@ const SAP_LINE_VALOR_ALIASES = [
   'valor linha', 'vl linha', 'valor item',
   'val faturamento', 'valor faturamento', 'valor mercadoria', 'netwr'
 ];
+/**
+ * ZFACT NFe export col AP — "Val.total incl.imp." — matches Unilog Valor NF.
+ * Prefer over Valor líquido (AI) / Valor Bruto when present (e.g. NF 100934: AP 6673.50 vs AI 6951.56).
+ */
+const SAP_NF_TOTAL_INCL_IMP_ALIASES = [
+  'val.total incl.imp.', 'val.total incl.imp', 'val total incl imp', 'val.total incl imp',
+  'valor total incl.imp', 'valor total incl imp', 'valor total incluindo', 'valor total com imposto',
+  'total incl.imp', 'total incl.imp.', 'total incluindo imposto', 'total com imposto',
+  'vnf', 'valor total da nf-e', 'valor total nfe'
+];
 const SAP_DOC_VALOR_ALIASES = [
+  ...SAP_NF_TOTAL_INCL_IMP_ALIASES,
   'doc total', 'doc. total', 'doctotal', 'valor documento', 'valor total', 'total nf', 'total documento',
   'total do documento', 'total geral', 'valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf',
   'vl documento', 'vlr total', 'vlr documento', 'montante documento', 'montante doc',
@@ -522,19 +535,22 @@ const SAP_DOC_VALOR_ALIASES = [
 /** Last resort only — never preferred over Valor Bruto / doc total. */
 const SAP_VALOR_FALLBACK_ALIASES = ['vl total', 'kwert', 'montante'];
 /**
- * Never use as NF billing base — ZFACT Valor Líquido (often col J) ≠ Unilog Valor NF;
+ * Never use as NF billing base — ZFACT Valor Líquido (col AI / classic J) ≠ Unilog Valor NF;
  * also impostos, taxa 5,5%, frete, unit prices.
  */
 const SAP_VALOR_EXCLUDE_ALIASES = [
   'valor liquido', 'vl liquido', 'vlr liquido', 'liquido', 'valor liquido item',
   'imposto', 'impostos', 'icms', 'pis', 'cofins', 'ipi', 'iss',
   'taxa', 'frete', 'fee', 'armazenagem', 'comissao', 'comissão',
-  '5,5', '5.5', 'percentual', '%', 'valor unitario', 'preco unitario', 'preço unitário'
+  '5,5', '5.5', 'percentual', '%', 'valor unitario', 'preco unitario', 'preço unitário',
+  'preco liq', 'preço líq', 'preco liquido'
 ];
 /** ZFACT export: D=Nota Fiscal (3), N=valor bruto (13) — only a fallback when headers missing. */
 const SAP_ZFACT_BRUTO_COL = 13;
 /** Typical ZFACT Valor Líquido column (0-based) — never treat as NF billing. */
 const SAP_ZFACT_LIQUIDO_COL = 9;
+/** ZFACT NFe export: AP = Val.total incl.imp. (Excel col 42 → 0-based 41) — matches Unilog. */
+const SAP_ZFACT_TOTAL_INCL_IMP_COL = 41;
 /** ISO currency suffixes seen in SAP GUI Excel exports (e.g. "4 992,26 BRL"). */
 const SAP_CURRENCY_SUFFIX_RE = /(?:BRL|USD|EUR|GBP|JPY|CHF|CAD|AUD|CNY|MXN|ARS|CLP|COP|PEN)\s*$/i;
 
@@ -786,18 +802,29 @@ function findSapField(row, field) {
 }
 
 function findSapValorFields(row) {
-  const docKey = findSapFieldKeyByAliases(row, SAP_DOC_VALOR_ALIASES);
+  // Prefer Unilog-matching total (AP / Val.total incl.imp.) over generic doc aliases.
+  const preferredDocKey = findSapFieldKeyByAliases(row, SAP_NF_TOTAL_INCL_IMP_ALIASES);
+  const docKey = preferredDocKey || findSapFieldKeyByAliases(row, SAP_DOC_VALOR_ALIASES);
   const doc = docKey ? row[docKey] : null;
   let lineKey = findSapFieldKeyByAliases(row, SAP_LINE_VALOR_ALIASES);
   if (lineKey && docKey && lineKey === docKey) lineKey = null;
   const line = lineKey ? row[lineKey] : null;
   const fallback = !line && !doc ? findSapFieldByAliases(row, SAP_VALOR_FALLBACK_ALIASES) : null;
-  return { line, doc, fallback, primary: line || doc || fallback };
+  // Doc total (AP) is the NF billing base when present — primary must not be líquido/bruto alone.
+  return { line, doc, fallback, primary: doc || line || fallback };
+}
+
+function isSapTotalInclImpHeader(hdr) {
+  const h = normCol(hdr);
+  if (!h || sapHeaderIsExcluded(hdr)) return false;
+  if (h.includes('incl.imp') || h.includes('incl imp') || h.includes('incluindo imposto')) return true;
+  return sapHeaderMatchesField(hdr, SAP_NF_TOTAL_INCL_IMP_ALIASES);
 }
 
 function resolveSapValorColFromHeader(headerRow) {
   let lineCol = null;
   let docCol = null;
+  let preferredDocCol = null;
   const isBrutoHeader = (hdr) => {
     const h = normCol(hdr);
     if (!h || sapHeaderIsExcluded(hdr)) return false;
@@ -816,8 +843,11 @@ function resolveSapValorColFromHeader(headerRow) {
   }
   (headerRow || []).forEach((hdr, j) => {
     if (sapHeaderIsExcluded(hdr)) return;
-    if (sapHeaderMatchesField(hdr, SAP_DOC_VALOR_ALIASES)) docCol = j;
+    // Col AP "Val.total incl.imp." — Unilog-matching NF total (beats generic "valor total").
+    if (isSapTotalInclImpHeader(hdr)) preferredDocCol = j;
+    else if (sapHeaderMatchesField(hdr, SAP_DOC_VALOR_ALIASES)) docCol = j;
   });
+  if (preferredDocCol != null) docCol = preferredDocCol;
   if (lineCol != null && lineCol === docCol) lineCol = null;
   return { lineCol, docCol };
 }
@@ -1072,7 +1102,7 @@ function _debugSapValorSamples() {
 }
 _debugSapValorSamples();
 
-/** ZFACT: col D=NF, col N=valor bruto — never scan Valor Líquido (J) or impostos; prefer BRL doc totals when bruto is 0. */
+/** ZFACT: prefer col AP Val.total incl.imp.; never Valor Líquido (AI/J); bruto N only as line fallback. */
 function pickSapValorFromLine(line, colIdx, headerRow) {
   const idx = colIdx || activeSapColIdx;
   if (!idx || !Array.isArray(line)) return { line: null, doc: null };
@@ -1099,8 +1129,16 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
     }
   };
 
-  if (headerValor.lineCol != null && !colExcluded(headerValor.lineCol)) tryLine(line[headerValor.lineCol]);
+  // Prefer Unilog-matching doc total (AP / Val.total incl.imp.) before line bruto.
   if (headerValor.docCol != null && !colExcluded(headerValor.docCol)) tryDoc(line[headerValor.docCol]);
+  if (!out.doc && line.length > SAP_ZFACT_TOTAL_INCL_IMP_COL && !colExcluded(SAP_ZFACT_TOTAL_INCL_IMP_COL)) {
+    const apHdr = headerRow?.[SAP_ZFACT_TOTAL_INCL_IMP_COL];
+    if (!headerRow?.length || isSapTotalInclImpHeader(apHdr)) {
+      tryDoc(line[SAP_ZFACT_TOTAL_INCL_IMP_COL]);
+    }
+  }
+
+  if (headerValor.lineCol != null && !colExcluded(headerValor.lineCol)) tryLine(line[headerValor.lineCol]);
 
   // Hardcoded col N only when it actually holds a non-zero amount (wide exports shift columns).
   if (!out.line && line.length > SAP_ZFACT_BRUTO_COL && !colExcluded(SAP_ZFACT_BRUTO_COL)) {
@@ -1170,6 +1208,29 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
   const resolved = resolveSapValorColFromHeader(hdr);
   if (resolved.lineCol !== 13) {
     console.warn('[SAP valor] bruto header col expected 13, got', resolved);
+  }
+  // NF 100934 / ZFACT NFe: AI Valor líquido 6951.56 ≠ Unilog; AP Val.total incl.imp. 6673.50 matches.
+  const hdrAp = new Array(45).fill(null);
+  hdrAp[0] = 'Nº da nota fiscal eletrônica';
+  hdrAp[14] = 'Nome';
+  hdrAp[24] = 'Material';
+  hdrAp[34] = 'Valor líquido';
+  hdrAp[41] = 'Val.total incl.imp.';
+  const line100934 = new Array(45).fill(null);
+  line100934[0] = '100934';
+  line100934[14] = 'CLIENTE Y';
+  line100934[24] = '7801547';
+  line100934[34] = '6 951,56';
+  line100934[41] = '6 673,50';
+  const pickedAp = pickSapValorFromLine(line100934, { cliente: 14, dtEmissao: 43, nf: 0, valorNF: 41 }, hdrAp);
+  const apDoc = parseSapNum(pickedAp.doc);
+  const apLine = parseSapNum(pickedAp.line);
+  const resolvedAp = resolveSapValorColFromHeader(hdrAp);
+  if (resolvedAp.docCol !== 41 || Math.abs(apDoc - 6673.5) > 0.01 || Math.abs(apLine - 6951.56) < 0.01) {
+    console.warn('[SAP valor] AP/Val.total trap — expected doc 6673.50 not líquido 6951.56, got',
+      { resolvedAp, pickedAp, apDoc, apLine });
+  } else {
+    console.debug('[SAP valor] AP/Val.total incl.imp. OK', apDoc);
   }
 })();
 
@@ -1250,9 +1311,9 @@ function scoreSapLayout(dataLines, colIdx, headerRow) {
 function resolveSapColIdx(headerRow, dataLines) {
   const headerValor = resolveSapValorColFromHeader(headerRow);
   const headerNfCol = resolveSapNfColFromHeader(headerRow);
-  const brutoCol = headerValor.lineCol ?? SAP_ZFACT_BRUTO_COL;
+  const valorCol = headerValor.docCol ?? headerValor.lineCol ?? SAP_ZFACT_BRUTO_COL;
   const layouts = [
-    { cliente: 1, dtEmissao: 2, nf: 3, valorNF: brutoCol, label: 'B/C/D/N (ZFACT)' },
+    { cliente: 1, dtEmissao: 2, nf: 3, valorNF: valorCol, label: 'B/C/D + valor (ZFACT)' },
     { cliente: 1, dtEmissao: 2, nf: 3, valorNF: headerValor.lineCol ?? 4, label: 'B/C/D/E' },
     { cliente: 1, dtEmissao: 2, nf: 3, valorNF: headerValor.lineCol ?? 5, label: 'B/C/D/F' },
     { cliente: 1, dtEmissao: 2, nf: 3, valorNF: headerValor.lineCol ?? 6, label: 'B/C/D/G' },
@@ -1263,14 +1324,15 @@ function resolveSapColIdx(headerRow, dataLines) {
   for (const layout of layouts) {
     const nfCol = headerNfCol != null ? headerNfCol : layout.nf;
     const candidate = { ...layout, nf: nfCol };
+    if (headerValor.docCol != null) candidate.valorNF = headerValor.docCol;
     if (headerRow &&
         isSapHeaderAtCol(headerRow, candidate.cliente, 'cliente') &&
         isSapHeaderAtCol(headerRow, candidate.dtEmissao, 'dtEmissao') &&
         (headerNfCol != null || isSapHeaderAtCol(headerRow, candidate.nf, 'nf'))) {
       console.debug('[SAP NF] Layout por cabeçalho:', candidate.label,
         headerNfCol != null ? `(NF col ${headerNfCol})` : '',
-        headerValor.lineCol != null ? `(valor bruto col ${headerValor.lineCol})` : '',
-        headerValor.docCol != null ? `(doc total col ${headerValor.docCol})` : '');
+        headerValor.docCol != null ? `(Val.total/AP col ${headerValor.docCol})` : '',
+        headerValor.lineCol != null ? `(valor bruto col ${headerValor.lineCol})` : '');
       return candidate;
     }
   }
@@ -1292,7 +1354,8 @@ function resolveSapColIdx(headerRow, dataLines) {
   console.debug('[SAP NF] Layout padrão B/C/D (fallback)');
   const fallback = { ...SAP_COL_IDX_DEFAULT };
   if (headerNfCol != null) fallback.nf = headerNfCol;
-  if (headerValor.lineCol != null) fallback.valorNF = headerValor.lineCol;
+  if (headerValor.docCol != null) fallback.valorNF = headerValor.docCol;
+  else if (headerValor.lineCol != null) fallback.valorNF = headerValor.lineCol;
   return fallback;
 }
 
@@ -1776,10 +1839,18 @@ function _debugBuildSapNfMapAggregation() {
   const ok100796brl = Math.abs((map100796brl['100796']?.valorNF || 0) - 4992.26) < 0.01;
   const ok100796lines = Math.abs((map100796lines['100796']?.valorNF || 0) - 4992.26) < 0.01;
   const ok100796partial = Math.abs((map100796partial['100796']?.valorNF || 0) - 4992.26) < 0.01;
+  const map100934 = buildSapNfMap([normalizeSapRow({
+    'Nº da nota fiscal eletrônica': '100934',
+    Nome: 'CLIENTE Y',
+    Material: '7801547',
+    'Valor líquido': '6 951,56',
+    'Val.total incl.imp.': '6 673,50'
+  })]);
+  const ok100934ap = Math.abs((map100934['100934']?.valorNF || 0) - 6673.5) < 0.01;
   if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat || !ok99635dupPos
       || !ok99635lineDoc || !ok99635inflate || !ok99635brutoZfact || !ok99635feeLines || !ok99636bruto
       || !ok99636lineDoc || !ok2223 || !ok18591 || !ok99641 || !ok99641sameMat || !ok99642
-      || !ok18596 || !ok18596multi || !ok100796brl || !ok100796lines || !ok100796partial) {
+      || !ok18596 || !ok18596multi || !ok100796brl || !ok100796lines || !ok100796partial || !ok100934ap) {
     console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
       ok97723, got97723: map['97723']?.valorNF,
       ok88888, got88888: map['88888']?.valorNF,
@@ -1803,7 +1874,8 @@ function _debugBuildSapNfMapAggregation() {
       ok18596multi, got18596multi: map18596multi['18596']?.valorNF,
       ok100796brl, got100796brl: map100796brl['100796']?.valorNF,
       ok100796lines, got100796lines: map100796lines['100796']?.valorNF,
-      ok100796partial, got100796partial: map100796partial['100796']?.valorNF
+      ok100796partial, got100796partial: map100796partial['100796']?.valorNF,
+      ok100934ap, got100934ap: map100934['100934']?.valorNF
     });
   } else {
     console.debug('[SAP NF] buildSapNfMap aggregation OK');
@@ -2049,7 +2121,7 @@ async function persistSapNfMap(map, opts = {}) {
     return false;
   }
   const pack = {
-    version: 1,
+    version: SAP_NF_MAP_PARSER_VERSION,
     updatedAt: new Date().toISOString(),
     files: sapMapSourceFiles || [],
     map: slimSapNfMapForPersist(m)
@@ -2094,11 +2166,12 @@ function parseSapNfMapFromRec(rec) {
     if (parsed.map && typeof parsed.map === 'object') {
       return {
         raw: parsed.map,
-        files: Array.isArray(parsed.files) ? parsed.files : []
+        files: Array.isArray(parsed.files) ? parsed.files : [],
+        version: Number(parsed.version) || 1
       };
     }
     // Legacy: raw map object
-    return { raw: parsed, files: [] };
+    return { raw: parsed, files: [], version: 1 };
   } catch (err) {
     console.error('[fretes] parse sap map', err);
     return null;
@@ -2116,6 +2189,11 @@ async function loadSavedSapNfMap(meta, opts = {}) {
     const parsed = parseSapNfMapFromRec(rec);
     if (!parsed?.raw || typeof parsed.raw !== 'object') {
       console.warn('[fretes] sap map parse empty', fteCompany(), rec.file_name);
+      return false;
+    }
+    if ((parsed.version || 1) < SAP_NF_MAP_PARSER_VERSION) {
+      console.warn('[fretes] sap map stale parser v' + (parsed.version || 1)
+        + ' < ' + SAP_NF_MAP_PARSER_VERSION + ' — will re-parse ZFACT Excel');
       return false;
     }
     const revived = await reviveSapNfMapAsync(parsed.raw);
