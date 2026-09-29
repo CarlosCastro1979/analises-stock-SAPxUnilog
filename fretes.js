@@ -1,5 +1,5 @@
-// fretes.js v1.8.74 — SAP vs Unilog: prefer NF doc total once; ignore ≤R$0.05 Δ
-const FRETES_JS_VERSION = '1.8.74';
+// fretes.js v1.8.76 — UI responsiveness: async Processar, capped NF table, yieldToUI
+const FRETES_JS_VERSION = '1.8.76';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -491,9 +491,9 @@ const FIELD_ALIASES = {
 
 /** Line-level billing (sum per NF). Doc-level totals repeat on every row — never sum those. */
 const SAP_LINE_VALOR_ALIASES = [
-  'valor bruto', 'vl bruto', 'val bruto', 'valor linha', 'vl linha', 'valor item',
-  'val faturamento', 'valor faturamento', 'valor mercadoria', 'netwr',
-  'valor liquido', 'vl liquido', 'valor liquido item', 'montante'
+  'valor bruto', 'vl bruto', 'val bruto', 'vlr bruto', 'vlr.bruto', 'val.bruto',
+  'valor linha', 'vl linha', 'valor item',
+  'val faturamento', 'valor faturamento', 'valor mercadoria', 'netwr'
 ];
 const SAP_DOC_VALOR_ALIASES = [
   'doc total', 'doc. total', 'doctotal', 'valor documento', 'valor total', 'total nf', 'total documento',
@@ -502,15 +502,22 @@ const SAP_DOC_VALOR_ALIASES = [
   'amount', 'net value', 'valor moeda', 'valor em brl', 'total brl', 'total moeda',
   'valor da fatura', 'valor fatura', 'invoice total', 'billing value'
 ];
-const SAP_VALOR_FALLBACK_ALIASES = ['vl total', 'kwert'];
-/** Never use as NF billing base — impostos, taxa 5,5%, frete, etc. */
+/** Last resort only — never preferred over Valor Bruto / doc total. */
+const SAP_VALOR_FALLBACK_ALIASES = ['vl total', 'kwert', 'montante'];
+/**
+ * Never use as NF billing base — ZFACT Valor Líquido (often col J) ≠ Unilog Valor NF;
+ * also impostos, taxa 5,5%, frete, unit prices.
+ */
 const SAP_VALOR_EXCLUDE_ALIASES = [
+  'valor liquido', 'vl liquido', 'vlr liquido', 'liquido', 'valor liquido item',
   'imposto', 'impostos', 'icms', 'pis', 'cofins', 'ipi', 'iss',
   'taxa', 'frete', 'fee', 'armazenagem', 'comissao', 'comissão',
   '5,5', '5.5', 'percentual', '%', 'valor unitario', 'preco unitario', 'preço unitário'
 ];
 /** ZFACT export: D=Nota Fiscal (3), N=valor bruto (13) — only a fallback when headers missing. */
 const SAP_ZFACT_BRUTO_COL = 13;
+/** Typical ZFACT Valor Líquido column (0-based) — never treat as NF billing. */
+const SAP_ZFACT_LIQUIDO_COL = 9;
 /** ISO currency suffixes seen in SAP GUI Excel exports (e.g. "4 992,26 BRL"). */
 const SAP_CURRENCY_SUFFIX_RE = /(?:BRL|USD|EUR|GBP|JPY|CHF|CAD|AUD|CNY|MXN|ARS|CLP|COP|PEN)\s*$/i;
 
@@ -724,7 +731,11 @@ function sapHeaderMatchesField(hdr, aliases) {
 }
 
 function sapHeaderIsExcluded(hdr) {
-  return sapHeaderMatchesField(hdr, SAP_VALOR_EXCLUDE_ALIASES);
+  const h = normCol(hdr);
+  if (!h) return false;
+  // Only header-contains-alias (not alias-contains-header) — avoids excluding bare "Valor"
+  // because exclude list has "valor liquido".
+  return SAP_VALOR_EXCLUDE_ALIASES.some(alias => h === alias || h.includes(alias));
 }
 
 function findSapFieldKeyByAliases(row, aliases, opts = {}) {
@@ -770,10 +781,15 @@ function findSapValorFields(row) {
 function resolveSapValorColFromHeader(headerRow) {
   let lineCol = null;
   let docCol = null;
-  (headerRow || []).forEach((hdr, j) => {
-    if (sapHeaderIsExcluded(hdr)) return;
+  const isBrutoHeader = (hdr) => {
     const h = normCol(hdr);
-    if (h === 'valor bruto' || h.startsWith('valor bruto')) lineCol = j;
+    if (!h || sapHeaderIsExcluded(hdr)) return false;
+    if (h === 'valor bruto' || h.startsWith('valor bruto')) return true;
+    if (h.includes('valor bruto') || h.includes('vl bruto') || h.includes('vlr bruto') || h.includes('val bruto')) return true;
+    return SAP_LINE_VALOR_ALIASES.some(a => h === a || h.startsWith(a + ' '));
+  };
+  (headerRow || []).forEach((hdr, j) => {
+    if (isBrutoHeader(hdr)) lineCol = j;
   });
   if (lineCol == null) {
     (headerRow || []).forEach((hdr, j) => {
@@ -1039,7 +1055,7 @@ function _debugSapValorSamples() {
 }
 _debugSapValorSamples();
 
-/** ZFACT: col D=NF, col N=valor bruto — never scan impostos; prefer BRL doc totals when bruto is 0. */
+/** ZFACT: col D=NF, col N=valor bruto — never scan Valor Líquido (J) or impostos; prefer BRL doc totals when bruto is 0. */
 function pickSapValorFromLine(line, colIdx, headerRow) {
   const idx = colIdx || activeSapColIdx;
   if (!idx || !Array.isArray(line)) return { line: null, doc: null };
@@ -1048,6 +1064,12 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
   const out = { line: null, doc: null };
   const nfKey = normNFKey(line[idx.nf]);
   const isSameNf = (v) => nfKey && normNFKey(v) === nfKey;
+  const colExcluded = (j) => {
+    if (headerRow && sapHeaderIsExcluded(headerRow[j])) return true;
+    // Classic ZFACT layout without usable headers: col J = líquido (not NF total).
+    if ((!headerRow || !headerRow.length) && j === SAP_ZFACT_LIQUIDO_COL) return true;
+    return false;
+  };
 
   const tryLine = (v) => {
     if (v != null && v !== '' && !isSameNf(v) && looksLikeSapValorCell(v, { trustColumn: true })) {
@@ -1060,26 +1082,34 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
     }
   };
 
-  if (headerValor.lineCol != null) tryLine(line[headerValor.lineCol]);
-  if (headerValor.docCol != null) tryDoc(line[headerValor.docCol]);
+  if (headerValor.lineCol != null && !colExcluded(headerValor.lineCol)) tryLine(line[headerValor.lineCol]);
+  if (headerValor.docCol != null && !colExcluded(headerValor.docCol)) tryDoc(line[headerValor.docCol]);
 
   // Hardcoded col N only when it actually holds a non-zero amount (wide exports shift columns).
-  if (!out.line && line.length > SAP_ZFACT_BRUTO_COL) tryLine(line[SAP_ZFACT_BRUTO_COL]);
+  if (!out.line && line.length > SAP_ZFACT_BRUTO_COL && !colExcluded(SAP_ZFACT_BRUTO_COL)) {
+    tryLine(line[SAP_ZFACT_BRUTO_COL]);
+  }
 
-  if (!out.line && idx.valorNF != null && idx.valorNF !== headerValor.docCol) {
+  if (!out.line && idx.valorNF != null && idx.valorNF !== headerValor.docCol && !colExcluded(idx.valorNF)) {
     tryLine(line[idx.valorNF]);
   }
 
   // SAP GUI exports often put the NF total as "4 992,26 BRL" without a matching header alias.
+  // Prefer the largest currency amount on the row (doc total), not a smaller fee/line cell.
   if (!out.doc) {
+    let best = null;
+    let bestAbs = 0;
     for (let j = 0; j < line.length; j++) {
-      if (headerRow && sapHeaderIsExcluded(headerRow[j])) continue;
+      if (colExcluded(j)) continue;
       const cell = line[j];
-      if (looksLikeSapCurrencyAmount(cell) && !isSameNf(cell)) {
-        tryDoc(cell);
-        if (out.doc) break;
+      if (!looksLikeSapCurrencyAmount(cell) || isSameNf(cell)) continue;
+      const abs = Math.abs(parseSapNum(cell));
+      if (abs > bestAbs) {
+        bestAbs = abs;
+        best = cell;
       }
     }
+    if (best != null) tryDoc(best);
   }
 
   // When line bruto is missing/zero but a repeating currency doc total exists, keep doc only.
@@ -1092,6 +1122,7 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
   wideLine[1] = 'CENCOSUD BRASIL COMERCIAL S.A';
   wideLine[2] = '07/07/2026';
   wideLine[3] = '100796';
+  wideLine[9] = '354,45'; // Valor Líquido (col J) — must NOT become NF total
   wideLine[13] = '0,00';
   wideLine[14] = '0,00';
   wideLine[15] = '354,45';
@@ -1102,6 +1133,26 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
     console.warn('[SAP valor] wide-row BRL doc pick failed', picked, pickedDoc);
   } else {
     console.debug('[SAP valor] wide-row BRL doc pick OK', pickedDoc);
+  }
+  // Headered ZFACT: Valor Líquido + Valor Bruto — always prefer bruto / BRL doc, never líquido.
+  const hdr = new Array(20).fill(null);
+  hdr[1] = 'Cliente'; hdr[2] = 'Dt.emissão'; hdr[3] = 'Nota Fiscal';
+  hdr[9] = 'Valor Líquido'; hdr[13] = 'Valor Bruto'; hdr[17] = 'Valor em BRL';
+  const lineBruto = new Array(20).fill(null);
+  lineBruto[1] = 'CLIENTE X'; lineBruto[2] = '01/05/2026'; lineBruto[3] = '99635';
+  lineBruto[9] = '40.000,00'; lineBruto[13] = '49.937,37'; lineBruto[17] = '49 937,37 BRL';
+  const pickedHdr = pickSapValorFromLine(lineBruto, { cliente: 1, dtEmissao: 2, nf: 3, valorNF: 13 }, hdr);
+  const lineN = parseSapNum(pickedHdr.line);
+  const docN = parseSapNum(pickedHdr.doc);
+  const liquidoUsed = Math.abs(lineN - 40000) < 0.01 && Math.abs(docN - 49937.37) > 0.01;
+  if (liquidoUsed || (Math.abs(lineN - 49937.37) > 0.01 && Math.abs(docN - 49937.37) > 0.01)) {
+    console.warn('[SAP valor] líquido trap — expected bruto/doc 49937.37, got', pickedHdr, lineN, docN);
+  } else {
+    console.debug('[SAP valor] líquido trap OK', { line: lineN, doc: docN });
+  }
+  const resolved = resolveSapValorColFromHeader(hdr);
+  if (resolved.lineCol !== 13) {
+    console.warn('[SAP valor] bruto header col expected 13, got', resolved);
   }
 })();
 
@@ -1870,6 +1921,34 @@ function processArrayBufferCte(arrayBuffer, fileName, opts = {}) {
   }
 }
 
+/** Async CT-e parse — yields during processRowsAsync so Processar e Guardar stays responsive. */
+async function processArrayBufferCteAsync(arrayBuffer, fileName, opts = {}) {
+  try {
+    await fteYield('A ler Excel CT-e…');
+    const wb = readWorkbookFromArrayBuffer(arrayBuffer);
+    const { rows, sheetName, headers } = loadRowsFromWorkbook(wb);
+    if (!rows.length) {
+      const msg = 'Nenhuma linha de dados encontrada. Folhas: ' + wb.SheetNames.join(', ');
+      if (!opts.silent) {
+        setLoadbar(msg, false);
+        fteToastError(msg);
+      }
+      return false;
+    }
+    if (!opts.silent) setLoadbar('A ler ' + fileName + ' ...', false);
+    await processRowsAsync(rows, fileName, sheetName, headers, { source: 'conciliacao', autosave: opts.autosave });
+    return true;
+  } catch (err) {
+    console.error(err);
+    const msg = formatXlsxReadError(err, 'cte');
+    if (!opts.silent) {
+      setLoadbar(msg, true);
+      fteToastError(msg);
+    }
+    return false;
+  }
+}
+
 /** Merge SAP NF maps by normalized NF key — next overwrites; prev keys absent from next are kept. */
 function mergeSapNfMaps(prev, next) {
   if (!next || !Object.keys(next).length) return prev && typeof prev === 'object' ? prev : {};
@@ -2175,15 +2254,17 @@ async function processAndSaveFretes() {
     if (hasCte) {
       fteSetProcessing(true, 'A processar CT-e / SAP…');
       // Do NOT clear sapNfMap — CT-e reload must not wipe accumulated ZFACT history
-      const ok = processArrayBufferCte(fteCteBuffer, fteCteFileName);
+      const ok = await processArrayBufferCteAsync(fteCteBuffer, fteCteFileName, { autosave: false });
       if (!ok) return;
       if (hasSap) {
+        await fteYield('A processar SAP NF…');
         sapProcessed = !!processArrayBufferSap(fteSapBuffer, fteSapFileName);
       }
       cteProcessed = true;
     } else if (hasSap) {
       // ZFACT / SAP NF alone — required for Fretes anomalies + Armazém NF 5,5% validation
       fteSetProcessing(true, 'A processar SAP NF (ZFACT)…');
+      await fteYield('A processar SAP NF (ZFACT)…');
       sapProcessed = !!processArrayBufferSap(fteSapBuffer, fteSapFileName);
       if (!sapProcessed) return;
     }
@@ -2192,7 +2273,7 @@ async function processAndSaveFretes() {
     let qzCteBuilt = false;
     if (!cteProcessed && !hasConciliacaoCte() && quinzenalPack?.b2bRows?.length) {
       fteSetProcessing(true, 'A montar Análise CT-e a partir dos quinzenais…');
-      qzCteBuilt = processCteAnalysisFromQuinzenal({ switchTab: false });
+      qzCteBuilt = await processCteAnalysisFromQuinzenalAsync({ switchTab: false });
       if (qzCteBuilt && isSapLoaded()) reEnrichAfterSapLoad();
     }
 
@@ -3531,20 +3612,32 @@ const statusMeta = {
   low: { cls: 'b-low', label: 'Abaixo' }
 };
 
+const FTE_NF_ROW_PAGE = 400;
+let fteNfRowLimit = FTE_NF_ROW_PAGE;
+let _fteNfKeepLimit = false;
+function showMoreNfRows() {
+  fteNfRowLimit += FTE_NF_ROW_PAGE;
+  _fteNfKeepLimit = true;
+  renderTable();
+}
+
 function renderTable() {
   const list = getFilteredNFs();
   updateSortHeadIndicators('nfTableHead', tableSort);
+  if (!_fteNfKeepLimit) fteNfRowLimit = FTE_NF_ROW_PAGE;
+  _fteNfKeepLimit = false;
 
   const body = $('nfTableBody');
-  body.innerHTML = '';
-  list.forEach((x) => {
-    const tr = document.createElement('tr');
-    tr.className = 'row-clickable'
+  const display = list.slice(0, fteNfRowLimit);
+  const parts = [];
+  for (let i = 0; i < display.length; i++) {
+    const x = display[i];
+    enrichNF(x);
+    const meta = statusMeta[x.status] || statusMeta.flag;
+    const cls = 'row-clickable'
       + (x.sapValorMismatch ? ' nf-val-mismatch' : '')
       + (x.sapMissing ? ' nf-sap-missing' : '');
-    const meta = statusMeta[x.status];
-    enrichNF(x);
-    tr.innerHTML = `
+    parts.push(`<tr class="${cls}" data-nf-i="${i}">
       <td>${x.nf}</td>
       <td>${fmtDate(x.dtNF)}</td>
       <td>${x.cliente || '-'}</td>
@@ -3559,12 +3652,22 @@ function renderTable() {
       <td class="right" style="color:${x.diff > 0.5 ? '#b3261e' : (x.diff < -0.5 ? '#555' : 'inherit')}">${fmtMoney(x.diff)}</td>
       <td class="right">${fmtPct(x.pct)}</td>
       <td><span class="badge ${meta.cls}">${meta.label}</span></td>
-    `;
-    tr.addEventListener('click', () => toggleDetail(tr, x));
-    body.appendChild(tr);
+    </tr>`);
+  }
+  body.innerHTML = parts.length
+    ? parts.join('')
+    : `<tr><td colspan="${nfColCount()}" class="empty">Sem resultados para este filtro.</td></tr>`;
+  body.querySelectorAll('tr.row-clickable').forEach(tr => {
+    const i = parseInt(tr.getAttribute('data-nf-i'), 10);
+    const x = display[i];
+    if (x) tr.addEventListener('click', () => toggleDetail(tr, x));
   });
-  if (list.length === 0) {
-    body.innerHTML = `<tr><td colspan="${nfColCount()}" class="empty">Sem resultados para este filtro.</td></tr>`;
+  const moreWrap = $('nfMoreWrap');
+  const moreHint = $('nfMoreHint');
+  if (moreWrap) {
+    const hasMore = list.length > display.length;
+    moreWrap.style.display = hasMore ? 'block' : 'none';
+    if (moreHint) moreHint.textContent = hasMore ? `A mostrar ${display.length} de ${list.length}` : '';
   }
 }
 
@@ -5899,6 +6002,7 @@ function initFretes() {
   }
 
   $('procBtn')?.addEventListener('click', () => processAndSaveFretes());
+  $('nfMoreBtn')?.addEventListener('click', () => showMoreNfRows());
   $('loadLastBtn')?.addEventListener('click', async () => {
     const ok = await loadSavedFretesFiles(false);
     if (ok && currentNFs.length) switchFteTab('analise-cte');
