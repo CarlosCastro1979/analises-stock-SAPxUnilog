@@ -1,5 +1,5 @@
-// fretes.js v1.8.77 — ZFACT: exclude Valor Líquido (col J); prefer Valor Bruto / doc BRL
-const FRETES_JS_VERSION = '1.8.77';
+// fretes.js v1.8.78 — defer Fretes/ZFACT cloud restore; skip sync XLSX on open when SAP map JSON exists
+const FRETES_JS_VERSION = '1.8.78';
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -132,6 +132,8 @@ function checkFteBtn() {
 
 const FTE_TAB_IDS = ['carregamento', 'analise-cte', 'analise-b2c', 'cte-vs-qz', 'resumo-total'];
 
+const FTE_ANALYSIS_TABS = new Set(['analise-cte', 'analise-b2c', 'cte-vs-qz', 'resumo-total']);
+
 function switchFteTab(tab) {
   document.querySelectorAll('.fte-tab').forEach(x => {
     x.classList.toggle('active', x.dataset.tab === tab);
@@ -140,6 +142,21 @@ function switchFteTab(tab) {
     const el = $('tab-' + id);
     if (el) el.style.display = id === tab ? 'block' : 'none';
   });
+  // Analysis tabs need cloud data — lazy restore (never on Carregamento alone).
+  if (FTE_ANALYSIS_TABS.has(tab) && typeof fteNeedsCloudReload === 'function' && fteNeedsCloudReload()) {
+    fteSetProcessing(true, 'A carregar Fretes…');
+    const paintThenLoad = () => {
+      loadSavedFretesFiles(true).then(() => {
+        if (tab === 'analise-cte') renderCteSubPanels();
+        else if (tab === 'analise-b2c') renderB2cAnalysisTab();
+        else if (tab === 'cte-vs-qz') renderB2bCompareTab();
+        else if (tab === 'resumo-total') renderResumoTotal();
+      }).catch(e => console.warn('[fretes] lazy tab load', e));
+    };
+    try { requestAnimationFrame(() => setTimeout(paintThenLoad, 0)); }
+    catch (_) { setTimeout(paintThenLoad, 0); }
+    return;
+  }
   if (tab === 'analise-cte') renderCteSubPanels();
   if (tab === 'analise-b2c') renderB2cAnalysisTab();
   if (tab === 'cte-vs-qz') renderB2bCompareTab();
@@ -1990,6 +2007,23 @@ function reviveSapNfMap(raw) {
   return map;
 }
 
+/** Chunked revive — large accumulated SAP maps must not block the UI for seconds. */
+async function reviveSapNfMapAsync(raw) {
+  const map = {};
+  if (!raw || typeof raw !== 'object') return map;
+  const keys = Object.keys(raw);
+  const CHUNK = 2500;
+  for (let i = 0; i < keys.length; i += CHUNK) {
+    const end = Math.min(i + CHUNK, keys.length);
+    for (let j = i; j < end; j++) {
+      const entry = reviveSapNfMapEntry(raw[keys[j]]);
+      if (entry) map[keys[j]] = entry;
+    }
+    if (end < keys.length) await fteYield(`A indexar mapa SAP… ${end}/${keys.length}`);
+  }
+  return map;
+}
+
 function slimSapNfMapForPersist(map) {
   const out = {};
   Object.keys(map || {}).forEach(k => {
@@ -2059,12 +2093,12 @@ function parseSapNfMapFromRec(rec) {
     if (!parsed) return null;
     if (parsed.map && typeof parsed.map === 'object') {
       return {
-        map: reviveSapNfMap(parsed.map),
+        raw: parsed.map,
         files: Array.isArray(parsed.files) ? parsed.files : []
       };
     }
     // Legacy: raw map object
-    return { map: reviveSapNfMap(parsed), files: [] };
+    return { raw: parsed, files: [] };
   } catch (err) {
     console.error('[fretes] parse sap map', err);
     return null;
@@ -2078,12 +2112,18 @@ async function loadSavedSapNfMap(meta, opts = {}) {
     const m = meta || await fetchExcelFiles([fteSapMapSlot()]);
     const rec = m[fteSapMapSlot()];
     if (!rec?.file_data) return false;
+    await fteYield('A descodificar mapa SAP…');
     const parsed = parseSapNfMapFromRec(rec);
-    if (!parsed?.map || !Object.keys(parsed.map).length) {
+    if (!parsed?.raw || typeof parsed.raw !== 'object') {
       console.warn('[fretes] sap map parse empty', fteCompany(), rec.file_name);
       return false;
     }
-    sapNfMap = mergeSapNfMaps(sapNfMap, parsed.map);
+    const revived = await reviveSapNfMapAsync(parsed.raw);
+    if (!Object.keys(revived).length) {
+      console.warn('[fretes] sap map parse empty', fteCompany(), rec.file_name);
+      return false;
+    }
+    sapNfMap = mergeSapNfMaps(sapNfMap, revived);
     if (parsed.files?.length) {
       const byName = new Map((sapMapSourceFiles || []).map(f => [f.fileName, f]));
       parsed.files.forEach(f => {
@@ -2100,6 +2140,51 @@ async function loadSavedSapNfMap(meta, opts = {}) {
   }
 }
 
+function applySapProcessResult(incoming, fileName, rowsLen, opts = {}) {
+  const nIncoming = Object.keys(incoming).length;
+  const nBefore = Object.keys(sapNfMap).length;
+  sapNfMap = mergeSapNfMaps(sapNfMap, incoming);
+  trackSapMapSourceFile(fileName, nIncoming);
+  const nMapped = Object.keys(sapNfMap).length;
+  const nWithValor = Object.values(sapNfMap).filter(e => parseSapNum(e.valorNF) > 0).length;
+  if (!opts.silent) {
+    console.log('[SAP] Map merge:', nBefore, '+', nIncoming, '→', nMapped, 'NFs (', rowsLen, 'linhas ZFACT), with valor:', nWithValor);
+  }
+
+  if (!opts.skipEnrich) {
+    reEnrichAfterSapLoad();
+    if (typeof window.refreshArmazemSapValidation === 'function') {
+      try {
+        window.refreshArmazemSapValidation();
+      } catch (armErr) {
+        console.warn('[SAP] refreshArmazemSapValidation', armErr);
+      }
+    }
+  }
+
+  const nMatched = currentSummary?.nSapMatched ?? countSapMatches(currentNFs);
+  if (!opts.silent) {
+    logSapKeyDebug(currentNFs);
+    setSapLoadStatus(
+      nMapped + ' NFs SAP acumuladas (' + nIncoming + ' neste ficheiro) · ' + nMatched + ' matched com Unilog',
+      nMatched > 0 || !currentNFs.length
+    );
+    if (nMatched > 0) {
+      fteToast('Dados SAP carregados — ' + nMatched + ' NF(s) cruzadas com Unilog.');
+      const nMismatch = currentSummary?.nValorMismatch || 0;
+      if (nMismatch) fteToast(nMismatch + ' NF(s) com diferença relevante de valor SAP vs Unilog.');
+      const nMissing = currentSummary?.nSapMissing || 0;
+      if (nMissing) fteToast(nMissing + ' NF(s) no Unilog sem correspondência no SAP — ver Anomalias.');
+    } else if (currentNFs.length) {
+      setSapLoadStatus(nMapped + ' NFs SAP acumuladas · 0 matched com Unilog', false);
+      fteToastError('SAP carregado mas nenhuma NF cruzou com Unilog — verifica formato/chaves.');
+    } else {
+      fteToast('Dados SAP mesclados (' + nMapped + ' NFs acumuladas, ' + nIncoming + ' neste ficheiro).');
+    }
+  }
+  return true;
+}
+
 function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
   try {
     const wb = readSapWorkbookFromArrayBuffer(arrayBuffer);
@@ -2109,49 +2194,36 @@ function processArrayBufferSap(arrayBuffer, fileName, opts = {}) {
       if (!opts.silent) setSapLoadStatus(msg, false);
       return false;
     }
+    return applySapProcessResult(buildSapNfMap(rows), fileName, rows.length, opts);
+  } catch (err) {
+    console.error(err);
+    const msg = formatXlsxReadError(err, 'sap');
+    if (!opts.silent) {
+      setSapLoadStatus(msg, false);
+      fteToastError(msg);
+    }
+    return false;
+  }
+}
+
+/** Async ZFACT — yield before/after XLSX.read so the spinner paints; avoid sync restore on boot. */
+async function processArrayBufferSapAsync(arrayBuffer, fileName, opts = {}) {
+  try {
+    await fteYield(opts.yieldLabel || 'A ler Excel ZFACT…');
+    // Double yield so Chrome paints "A processar ZFACT…" before the heavy sync read.
+    await fteYield(opts.yieldLabel || 'A parsear Excel ZFACT…');
+    const wb = readSapWorkbookFromArrayBuffer(arrayBuffer);
+    await fteYield('A mapear NFs SAP…');
+    const { rows, sheetName } = loadSapRowsFromWorkbook(wb);
+    if (!rows.length) {
+      const msg = 'Nenhuma linha SAP encontrada na folha "' + sheetName + '".';
+      if (!opts.silent) setSapLoadStatus(msg, false);
+      return false;
+    }
+    await fteYield(`A agregar ${rows.length} linhas ZFACT…`);
     const incoming = buildSapNfMap(rows);
-    const nIncoming = Object.keys(incoming).length;
-    const nBefore = Object.keys(sapNfMap).length;
-    sapNfMap = mergeSapNfMaps(sapNfMap, incoming);
-    trackSapMapSourceFile(fileName, nIncoming);
-    const nMapped = Object.keys(sapNfMap).length;
-    const nWithValor = Object.values(sapNfMap).filter(e => parseSapNum(e.valorNF) > 0).length;
-    if (!opts.silent) {
-      console.log('[SAP] Map merge:', nBefore, '+', nIncoming, '→', nMapped, 'NFs (', rows.length, 'linhas ZFACT), with valor:', nWithValor);
-    }
-
-    if (!opts.skipEnrich) {
-      reEnrichAfterSapLoad();
-      if (typeof window.refreshArmazemSapValidation === 'function') {
-        try {
-          window.refreshArmazemSapValidation();
-        } catch (armErr) {
-          console.warn('[SAP] refreshArmazemSapValidation', armErr);
-        }
-      }
-    }
-
-    const nMatched = currentSummary?.nSapMatched ?? countSapMatches(currentNFs);
-    if (!opts.silent) {
-      logSapKeyDebug(currentNFs);
-      setSapLoadStatus(
-        nMapped + ' NFs SAP acumuladas (' + nIncoming + ' neste ficheiro) · ' + nMatched + ' matched com Unilog',
-        nMatched > 0 || !currentNFs.length
-      );
-      if (nMatched > 0) {
-        fteToast('Dados SAP carregados — ' + nMatched + ' NF(s) cruzadas com Unilog.');
-        const nMismatch = currentSummary?.nValorMismatch || 0;
-        if (nMismatch) fteToast(nMismatch + ' NF(s) com diferença relevante de valor SAP vs Unilog.');
-        const nMissing = currentSummary?.nSapMissing || 0;
-        if (nMissing) fteToast(nMissing + ' NF(s) no Unilog sem correspondência no SAP — ver Anomalias.');
-      } else if (currentNFs.length) {
-        setSapLoadStatus(nMapped + ' NFs SAP acumuladas · 0 matched com Unilog', false);
-        fteToastError('SAP carregado mas nenhuma NF cruzou com Unilog — verifica formato/chaves.');
-      } else {
-        fteToast('Dados SAP mesclados (' + nMapped + ' NFs acumuladas, ' + nIncoming + ' neste ficheiro).');
-      }
-    }
-    return true;
+    await fteYield('A cruzar SAP…');
+    return applySapProcessResult(incoming, fileName, rows.length, opts);
   } catch (err) {
     console.error(err);
     const msg = formatXlsxReadError(err, 'sap');
@@ -2258,14 +2330,15 @@ async function processAndSaveFretes() {
       if (!ok) return;
       if (hasSap) {
         await fteYield('A processar SAP NF…');
-        sapProcessed = !!processArrayBufferSap(fteSapBuffer, fteSapFileName);
+        sapProcessed = !!(await processArrayBufferSapAsync(fteSapBuffer, fteSapFileName));
       }
       cteProcessed = true;
     } else if (hasSap) {
       // ZFACT / SAP NF alone — required for Fretes anomalies + Armazém NF 5,5% validation
       fteSetProcessing(true, 'A processar SAP NF (ZFACT)…');
-      await fteYield('A processar SAP NF (ZFACT)…');
-      sapProcessed = !!processArrayBufferSap(fteSapBuffer, fteSapFileName);
+      sapProcessed = !!(await processArrayBufferSapAsync(fteSapBuffer, fteSapFileName, {
+        yieldLabel: 'A processar SAP NF (ZFACT)…'
+      }));
       if (!sapProcessed) return;
     }
 
@@ -3909,11 +3982,15 @@ async function loadLatestFromCloud() {
   return ok;
 }
 
-function restoreSapFromRec(sapRec, silent = false) {
+async function restoreSapFromRec(sapRec, silent = false) {
   if (!sapRec?.file_data || typeof base64ToArrayBuffer !== 'function') return false;
   try {
+    await fteYield('A descodificar ZFACT…');
     const buf = base64ToArrayBuffer(sapRec.file_data);
-    const ok = processArrayBufferSap(buf, sapRec.file_name || 'sap.xlsx', { silent: true });
+    const ok = await processArrayBufferSapAsync(buf, sapRec.file_name || 'sap.xlsx', {
+      silent: true,
+      yieldLabel: 'A processar ZFACT…'
+    });
     if (!ok) return false;
     fteSapFileName = sapRec.file_name || '';
     fteSapBuffer = buf;
@@ -3930,36 +4007,28 @@ async function restoreCteFromRec(cteRec, sapRec, silent = false) {
   if (!cteRec?.file_data) return false;
   const co = fteCompany();
   if (_fteLoadedCompany === co && currentNFs.length && lastCtePack?.fileName === cteRec.file_name) {
-    if (sapRec?.file_data) {
-      processArrayBufferSap(
-        base64ToArrayBuffer(sapRec.file_data),
-        sapRec.file_name || 'sap.xlsx',
-        { silent: true }
-      );
+    if (sapRec?.file_data && !isSapLoaded()) {
+      await restoreSapFromRec(sapRec, silent);
     }
     return true;
   }
   _fteSkipAutosave = true;
   try {
     // Keep accumulated sapNfMap — Excel merge updates keys; does not wipe history
+    await fteYield('A descodificar CT-e…');
     const cteBuf = base64ToArrayBuffer(cteRec.file_data);
-    const ok = processArrayBufferCte(cteBuf, cteRec.file_name || 'cte.xlsx', { silent: true });
+    const ok = await processArrayBufferCteAsync(cteBuf, cteRec.file_name || 'cte.xlsx', { silent: true, autosave: false });
     if (!ok) return false;
-    if (sapRec?.file_data) {
-      processArrayBufferSap(base64ToArrayBuffer(sapRec.file_data), sapRec.file_name || 'sap.xlsx', { silent: true });
+    if (sapRec?.file_data && !isSapLoaded()) {
+      await restoreSapFromRec(sapRec, silent);
     }
     _fteLoadedCompany = co;
     fteCteFileName = cteRec.file_name || '';
     fteCteBuffer = cteBuf;
     setCteZoneLoaded(cteRec.file_name);
-    if (sapRec?.file_data) {
+    if (sapRec?.file_name && !fteSapFileName) {
       fteSapFileName = sapRec.file_name || '';
-      fteSapBuffer = base64ToArrayBuffer(sapRec.file_data);
       setSapZoneLoaded(sapRec.file_name);
-    } else {
-      fteSapFileName = '';
-      fteSapBuffer = null;
-      setSapZoneLoaded('');
     }
     return true;
   } catch (err) {
@@ -4071,18 +4140,34 @@ async function _loadSavedFretesFilesImpl(silent = false) {
     }
   }
 
-  // 4) ZFACT / SAP NF map — JSON history first, then merge latest Excel (never replace-all)
+  // 4) ZFACT / SAP NF map — prefer accumulated JSON (fast). Only parse Excel when map missing.
   await fteYield('A restaurar mapa SAP…');
   const mapHad = await loadSavedSapNfMap(meta, { silent: true });
-  const nBeforeExcel = Object.keys(sapNfMap).length;
-  if (sapRec?.file_data) {
+  if (mapHad && Object.keys(sapNfMap).length) {
+    // Skip multi-MB sync XLSX.read of ZFACT on restore — map JSON is source of truth.
+    if (sapRec?.file_name) {
+      fteSapFileName = sapRec.file_name || fteSapFileName;
+      setSapZoneLoaded(sapRec.file_name);
+    }
+    if (qzCteBuilt || cteAnalysisSource === 'quinzenal' || currentNFs.length) {
+      await fteYield('A cruzar SAP…');
+      reEnrichAfterSapLoad();
+      if (typeof window.refreshArmazemSapValidation === 'function') {
+        try { window.refreshArmazemSapValidation(); } catch (armErr) {
+          console.warn('[SAP] refreshArmazemSapValidation', armErr);
+        }
+      }
+    }
+    console.log('[fretes] restore sap from map JSON', co, 'mapSize', Object.keys(sapNfMap).length,
+      'skippedZfactExcel', !!sapRec?.file_data);
+  } else if (sapRec?.file_data) {
     await fteYield('A processar ZFACT…');
-    const sapOnlyOk = restoreSapFromRec(sapRec, silent);
+    const sapOnlyOk = await restoreSapFromRec(sapRec, silent);
     console.log('[fretes] restore sap', co, sapRec.file_name, 'ok', sapOnlyOk,
       'mapHad', mapHad, 'mapSize', Object.keys(sapNfMap).length);
     const nAfter = Object.keys(sapNfMap).length;
-    // Bootstrap / grow cloud map when missing or Excel added new NFs
-    if (nAfter > 0 && (!mapHad || nAfter > nBeforeExcel)) {
+    // Bootstrap cloud map when Excel was the only source
+    if (nAfter > 0) {
       await persistSapNfMap(sapNfMap, { silent: true });
     }
   } else if (mapHad && (qzCteBuilt || cteAnalysisSource === 'quinzenal' || currentNFs.length)) {
@@ -5960,7 +6045,10 @@ function reloadFretesForCompany() {
   updateSaveStatus('');
   updateFretesFileStatus();
   switchFteTab('carregamento');
-  if (typeof loadSavedFretesFiles === 'function') loadSavedFretesFiles(true);
+  // Labels only — never auto-parse multi-MB ZFACT/QZ on company switch.
+  if (typeof applyFretesFileLabelsFromMeta === 'function') {
+    applyFretesFileLabelsFromMeta().catch(() => {});
+  }
 }
 
 function initFretes() {
@@ -6108,10 +6196,9 @@ function initFretes() {
     });
   });
 
-  // Only fetch if empty — boot may already have loaded; avoid double download
-  if (fteNeedsCloudReload()) {
-    loadSavedFretesFiles(true).catch(() => {});
-  }
+  // Labels only on init — never auto-start "A processar ZFACT…" (freezes Chrome).
+  // Full restore: "Carregar último guardado" or opening an analysis tab.
+  applyFretesFileLabelsFromMeta().catch(() => {});
 }
 
 /** True when this company has no fretes data in memory yet (needs cloud load). */

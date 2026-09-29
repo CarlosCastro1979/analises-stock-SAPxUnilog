@@ -507,7 +507,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.77 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.78 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1726,7 +1726,7 @@ select.cad-inp{cursor:pointer;}
 
     <!-- Tab 1: Carregamento de dados -->
     <div id="fte-tab-carregamento">
-      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud.</p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
       <div class="upload-grid">
         <div>
           <div class="sl">Relatórios quinzenais Unilog (B2B + B2C)</div>
@@ -2399,6 +2399,17 @@ function xlsxRowsFromArrayBuffer(buf){
   const wb=XLSX.read(buf,{type:'array'});
   return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
 }
+/** Yield to the browser so spinners/menus paint between heavy sync work (XLSX, big loops). */
+async function yieldToUI(label){
+  if(label){
+    try{setStockProcessing(true,label);}catch(_){}
+  }
+  return new Promise(resolve=>{
+    try{requestAnimationFrame(()=>setTimeout(resolve,0));}
+    catch(_){setTimeout(resolve,0);}
+  });
+}
+window.yieldToUI=yieldToUI;
 async function loadSavedStockExcelFiles(silent=false,parseIntoMemory=true){
   try{
     syncCompanyDepotMap();
@@ -2412,7 +2423,9 @@ async function loadSavedStockExcelFiles(silent=false,parseIntoMemory=true){
       document.getElementById('sapFn').textContent='✓ '+stockSapFileName;
       document.getElementById('sapZone').classList.add('loaded');
       if(parseIntoMemory){
+        await yieldToUI('A parsear Excel SAP…');
         const rows=xlsxRowsFromArrayBuffer(stockSapBuffer);
+        await yieldToUI('A normalizar SAP…');
         window._rawSapRows=rows;
         sapData=normSap(rows);
         invalidateSapMaps();
@@ -2431,7 +2444,9 @@ async function loadSavedStockExcelFiles(silent=false,parseIntoMemory=true){
       document.getElementById('uniFn').textContent='✓ '+stockUniFileName;
       document.getElementById('uniZone').classList.add('loaded');
       if(parseIntoMemory){
+        await yieldToUI('A parsear Excel Unilog…');
         const rows=xlsxRowsFromArrayBuffer(stockUniBuffer);
+        await yieldToUI('A normalizar Unilog…');
         window._rawUniRows=rows;
         uniData=filterUniForCompany(normUni(rows));
         invalidateReconExclEANs();
@@ -2572,20 +2587,15 @@ function activateCobrancasPage(page){
     catch(_){setTimeout(fn,0);}
   };
   if(page==='fretes'){
-    // Spinner immediately (before rAF) so user sees progress instead of empty freeze
-    try{if(typeof fteSetProcessing==='function'&&typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload())fteSetProcessing(true,'A carregar Fretes…');}catch(_){}
     runAfterPaint(()=>{
       try{
         if(typeof initFretes==='function')initFretes();
-        if(typeof fteNeedsCloudReload==='function'&&fteNeedsCloudReload()&&typeof loadSavedFretesFiles==='function'){
-          // Full restore (shows spinner, yields between steps). Skip label-only fetch — it used to
-          // pull+parse multi-MB QZ packs and freeze the menu.
-          loadSavedFretesFiles(true).catch(e=>console.warn('[cobrancas] fretes load',e));
-        }else{
-          // Already in RAM — labels only (metadata, no file_data)
-          if(typeof applyFretesFileLabelsFromMeta==='function')applyFretesFileLabelsFromMeta();
-          try{if(typeof fteSetProcessing==='function')fteSetProcessing(false);}catch(_){}
+        // Labels/metadata only — NEVER auto full-restore ZFACT/QZ here (Chrome "Página sem resposta").
+        // Full restore: "Carregar último guardado" or opening Análise / CT-e vs Qz / Resumo.
+        if(typeof applyFretesFileLabelsFromMeta==='function'){
+          applyFretesFileLabelsFromMeta().catch(e=>console.warn('[cobrancas] fretes labels',e));
         }
+        try{if(typeof fteSetProcessing==='function')fteSetProcessing(false);}catch(_){}
       }catch(e){console.warn('[cobrancas] fretes',e);try{if(typeof fteSetProcessing==='function')fteSetProcessing(false);}catch(_){}}
     });
   }
@@ -9748,7 +9758,7 @@ function applyResizable(){scheduleColResize();}
       load('inventario-acerto.js', 'v=1.0.10');
     });
   }
-  load('fretes.js', 'v=1.8.77', function () {
+  load('fretes.js', 'v=1.8.78', function () {
     loadInventarioAcerto();
     load('armazem.js', 'v=1.0.41', bootApp, function () {
       var e = document.getElementById('arm-initErr');
