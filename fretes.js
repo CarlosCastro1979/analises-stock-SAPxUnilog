@@ -1,9 +1,9 @@
-// fretes.js v1.8.83 — coverage: ignore pre-Nov; Nov 2ªQ-only OK
-const FRETES_JS_VERSION = '1.8.83';
+// fretes.js v1.8.84 — SAP NF face (bruto/line over net) + coverage 1.8.83
+const FRETES_JS_VERSION = '1.8.84';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
 /** Bump when ZFACT valorNF column semantics change — stale cloud maps must re-parse Excel. */
-const SAP_NF_MAP_PARSER_VERSION = 3;
+const SAP_NF_MAP_PARSER_VERSION = 4;
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -721,8 +721,12 @@ const SAP_DOC_VALOR_ALIASES = [
   'doc total', 'doc. total', 'doctotal', 'valor documento', 'valor total', 'total nf', 'total documento',
   'total do documento', 'total geral', 'valor nf', 'valor da nf', 'valor nota fiscal', 'vl nf',
   'vl documento', 'vlr total', 'vlr documento', 'montante documento', 'montante doc',
-  'amount', 'net value', 'valor moeda', 'valor em brl', 'total brl', 'total moeda',
+  'amount', 'valor moeda', 'valor em brl', 'total brl', 'total moeda',
   'valor da fatura', 'valor fatura', 'invoice total', 'billing value'
+];
+/** Líquido / net — never treat as NF face doc total (Unilog Valor NF is gross/doc face). */
+const SAP_NET_VALOR_ALIASES = [
+  'valor liquido', 'vl liquido', 'valor liquido item', 'net value', 'netwr', 'valor mercadoria'
 ];
 /** Last resort only — never preferred over Valor Bruto / doc total. */
 const SAP_VALOR_FALLBACK_ALIASES = ['vl total', 'kwert', 'montante'];
@@ -1042,6 +1046,7 @@ function resolveSapValorColFromHeader(headerRow) {
     if (sapHeaderIsExcluded(hdr)) return;
     // Col AP "Val.total incl.imp." — Unilog-matching NF total (beats generic "valor total").
     if (isSapTotalInclImpHeader(hdr)) preferredDocCol = j;
+    else if (sapHeaderMatchesField(hdr, SAP_NET_VALOR_ALIASES)) return; // never líquido as doc
     else if (sapHeaderMatchesField(hdr, SAP_DOC_VALOR_ALIASES)) docCol = j;
   });
   if (preferredDocCol != null) docCol = preferredDocCol;
@@ -1347,7 +1352,7 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
   }
 
   // SAP GUI exports often put the NF total as "4 992,26 BRL" without a matching header alias.
-  // Prefer the largest currency amount on the row (doc total), not a smaller fee/line cell.
+  // Prefer the largest currency cell (doc face), not a smaller net/partial BRL earlier in the row.
   if (!out.doc) {
     let best = null;
     let bestAbs = 0;
@@ -1755,24 +1760,39 @@ function finalizeSapNfValor(acc) {
   const lineSum = acc.lineSum;
   const doc = acc.docVal > 0 ? acc.docVal : 0;
 
-  // ZFACT col AP "Val.total incl.imp." (and other doc totals) repeat the NF total on
-  // every item line — take ONE value per NF. Never SUM(AP).
-  if (doc > 0) return doc;
-
-  // No doc total: fall back to valor bruto lines (legacy / narrow exports).
+  // Unilog "Valor NF" = invoice face (gross). ZFACT may expose:
+  // - lineSum = SUM valor bruto (face) OR partial líquido lines
+  // - docVal  = AP incl.imp. / repeating "N BRL" (often face, sometimes net without tax)
+  // Rule: partial lines (sum << doc) → doc once (never SUM AP); bruto > net doc → lineSum.
   if (vals.length > 0) {
     const allIdentical = vals.every(v => sapValoresClose(v, vals[0]));
 
-    // Positional export without material column: same NF total on each row.
-    if (allIdentical && vals.length > 1 && !acc.hasMaterialCol) return vals[0];
+    // Doc total repeated as line bruto on every row — take once.
+    if (allIdentical && doc > 0 && sapValoresClose(vals[0], doc)) return doc;
+
+    if (doc > 0) {
+      if (sapValoresClose(lineSum, doc, 0.05)) return doc;
+      const ref = Math.max(Math.abs(doc), Math.abs(lineSum), 1);
+      const gap = Math.abs(lineSum - doc) / ref;
+      if (gap > 0.02) {
+        // Partial líquido lines (e.g. 354+620 vs 4 992 BRL) → doc is the NF face.
+        if (lineSum < doc) return doc;
+        // Bruto/line face > smaller net/BRL doc (NF 101267: 2259,34 vs 2121,44) → lineSum.
+        return lineSum;
+      }
+    }
 
     // ZFACT with material/item lines: SUM every billable line (even equal bruto / same SKU).
     if (acc.hasMaterialCol) return lineSum;
 
+    // Positional export without material column: same NF total on each row.
     if (allIdentical && vals.length > 1) return vals[0];
 
     return lineSum;
   }
+
+  // Doc only (e.g. AP Val.total incl.imp. with líquido excluded from lines) — once, never sum.
+  if (doc > 0) return doc;
 
   if (acc.fallbackVals.length) {
     const fb = acc.fallbackVals;
@@ -1781,6 +1801,35 @@ function finalizeSapNfValor(acc) {
     return Math.max(...fb);
   }
   return 0;
+}
+
+/** Among SAP candidates, prefer the amount closest to Unilog NF face (not líquido). */
+function pickSapValorNearUnilog(sap, unilogVal) {
+  if (!sap) return null;
+  const u = num(unilogVal);
+  const candidates = [];
+  const add = (v) => {
+    const n = num(v);
+    if (!(n > 0)) return;
+    if (candidates.some(c => sapValoresClose(c, n))) return;
+    candidates.push(n);
+  };
+  add(sap.valorNF);
+  add(sap.lineSum);
+  add(sap.docVal);
+  if (!candidates.length) return sap.valorNF ?? null;
+  if (!(u > 0)) return sap.valorNF ?? candidates[0];
+  let best = candidates[0];
+  let bestDiff = Math.abs(best - u);
+  for (let i = 1; i < candidates.length; i++) {
+    const c = candidates[i];
+    const d = Math.abs(c - u);
+    if (d < bestDiff - 1e-9) {
+      best = c;
+      bestDiff = d;
+    }
+  }
+  return best;
 }
 
 const SAP_NF_DEBUG_KEYS = new Set(['99635', '99636', '99641', '99642', '99633', '18596', '2223', '18591', '99977']);
@@ -1882,7 +1931,9 @@ function buildSapNfMap(rows) {
       nf: acc.nf,
       cliente: acc.cliente,
       dtEmissao: acc.dtEmissao,
-      valorNF
+      valorNF,
+      lineSum: acc.lineSum || 0,
+      docVal: acc.docVal || 0
     };
   });
   return map;
@@ -2006,6 +2057,15 @@ function _debugBuildSapNfMapAggregation() {
     { nf: '100796', _hasMaterialCol: true, material: 'DELTA Q', valorLine: '354,45', valorDoc: '4 992,26 BRL' },
     { nf: '100796', _hasMaterialCol: true, material: 'DELTA QH', valorLine: '620,29', valorDoc: '4 992,26 BRL' }
   ]);
+  // NF 101267: bruto line face 2259,34 vs smaller net/BRL doc 2121,44 → prefer Unilog face (lineSum).
+  const map101267 = buildSapNfMap([
+    { nf: '101267', _hasMaterialCol: true, material: 'A', valorLine: '1.200,00', valorDoc: '2.121,44 BRL' },
+    { nf: '101267', _hasMaterialCol: true, material: 'B', valorLine: '1.059,34', valorDoc: '2.121,44 BRL' }
+  ]);
+  const map101267netOnly = buildSapNfMap([
+    { nf: '101267', _hasMaterialCol: true, material: 'A', valorLine: '1.060,72', valorDoc: '2.121,44 BRL' },
+    { nf: '101267', _hasMaterialCol: true, material: 'B', valorLine: '1.060,72', valorDoc: '2.121,44 BRL' }
+  ]);
   const ok97723 = Math.abs((map['97723']?.valorNF || 0) - 3500.5) < 0.01;
   const ok88888 = Math.abs((map['88888']?.valorNF || 0) - 500) < 0.01;
   const ok99999 = map['99999']?.valorNF === 0;
@@ -2066,11 +2126,20 @@ function _debugBuildSapNfMapAggregation() {
     'Val.total incluindo impostos': '442.314,49'
   })]);
   const ok99977impHdr = Math.abs((map99977imp['99977']?.valorNF || 0) - 442314.49) < 0.01;
+  const ok101267 = Math.abs((map101267['101267']?.valorNF || 0) - 2259.34) < 0.01;
+  const near101267 = pickSapValorNearUnilog(
+    { valorNF: 2121.44, lineSum: 2259.34, docVal: 2121.44 },
+    2259.34
+  );
+  const ok101267near = Math.abs((near101267 || 0) - 2259.34) < 0.01;
+  // When lineSum equals net doc, keep doc (no better face candidate in map alone).
+  const ok101267netOnly = Math.abs((map101267netOnly['101267']?.valorNF || 0) - 2121.44) < 0.01;
   if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat || !ok99635dupPos
       || !ok99635lineDoc || !ok99635inflate || !ok99635brutoZfact || !ok99635feeLines || !ok99636bruto
       || !ok99636lineDoc || !ok2223 || !ok18591 || !ok99641 || !ok99641sameMat || !ok99642
       || !ok18596 || !ok18596multi || !ok100796brl || !ok100796lines || !ok100796partial || !ok100934ap
-      || !ok99977apOnce || !ok99977norm || !ok99977impHdr) {
+      || !ok99977apOnce || !ok99977norm || !ok99977impHdr
+      || !ok101267 || !ok101267near || !ok101267netOnly) {
     console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
       ok97723, got97723: map['97723']?.valorNF,
       ok88888, got88888: map['88888']?.valorNF,
@@ -2098,7 +2167,10 @@ function _debugBuildSapNfMapAggregation() {
       ok100934ap, got100934ap: map100934['100934']?.valorNF,
       ok99977apOnce, got99977: map99977['99977']?.valorNF,
       ok99977norm, got99977norm: map99977normalize['99977']?.valorNF,
-      ok99977impHdr, got99977impHdr: map99977imp['99977']?.valorNF
+      ok99977impHdr, got99977impHdr: map99977imp['99977']?.valorNF,
+      ok101267, got101267: map101267['101267']?.valorNF,
+      ok101267near, got101267near: near101267,
+      ok101267netOnly, got101267netOnly: map101267netOnly['101267']?.valorNF
     });
   } else {
     console.debug('[SAP NF] buildSapNfMap aggregation OK');
@@ -2177,24 +2249,25 @@ function applySapToNf(nf) {
     delete nf.dtRef;
   }
 
-  nf.valorSAP = sap.valorNF;
   const unilogVal = nf.valorUnilog;
+  nf.valorSAP = pickSapValorNearUnilog(sap, unilogVal);
+  const sapVal = num(nf.valorSAP);
 
-  if ((!nf.valorNF || nf.valorNF === 0) && sap.valorNF) {
-    nf.valorNF = sap.valorNF;
+  if ((!nf.valorNF || nf.valorNF === 0) && sapVal) {
+    nf.valorNF = sapVal;
     nf.esperado = nf.valorNF * CTE_PCT_TARGET;
     nf.diff = nf.pago - nf.esperado;
     nf.pct = nf.valorNF > 0 ? nf.pago / nf.valorNF : 0;
   }
 
-  const rawDiff = sap.valorNF - unilogVal;
+  const rawDiff = sapVal - unilogVal;
   // Cent-level rounding (4.992,25 vs 4.992,26) is not a SAP↔Unilog difference.
   if (Math.abs(rawDiff) <= SAP_VALOR_NEAR_EPS) {
     nf.valorDiff = 0;
     nf.sapValorMismatch = false;
   } else {
     nf.valorDiff = rawDiff;
-    nf.sapValorMismatch = isRelevantValorDiff(unilogVal, sap.valorNF);
+    nf.sapValorMismatch = isRelevantValorDiff(unilogVal, sapVal);
   }
 
   return nf;
@@ -2288,7 +2361,9 @@ function reviveSapNfMapEntry(e) {
     nf: e.nf,
     cliente: e.cliente || '',
     dtEmissao: dt,
-    valorNF: e.valorNF
+    valorNF: e.valorNF,
+    lineSum: e.lineSum || 0,
+    docVal: e.docVal || 0
   };
 }
 
@@ -2327,7 +2402,14 @@ function slimSapNfMapForPersist(map) {
     let dt = e.dtEmissao || null;
     if (dt instanceof Date && !isNaN(dt.getTime())) dt = dt.toISOString();
     else if (dt != null && typeof dt !== 'string') dt = String(dt);
-    out[k] = { nf: e.nf, cliente: e.cliente || '', dtEmissao: dt, valorNF: e.valorNF };
+    out[k] = {
+      nf: e.nf,
+      cliente: e.cliente || '',
+      dtEmissao: dt,
+      valorNF: e.valorNF,
+      lineSum: e.lineSum || 0,
+      docVal: e.docVal || 0
+    };
   });
   return out;
 }
