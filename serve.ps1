@@ -32,34 +32,39 @@ try {
         $context = $listener.GetContext()
         $request = $context.Request
         $response = $context.Response
+        try {
+            $rel = [System.Uri]::UnescapeDataString($request.Url.LocalPath).TrimStart('/')
+            if (-not $rel) { $rel = 'index.html' }
+            $file = Join-Path $root ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
 
-        $rel = [System.Uri]::UnescapeDataString($request.Url.LocalPath).TrimStart('/')
-        if (-not $rel) { $rel = 'index.html' }
-        $file = Join-Path $root ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
-
-        if ((Test-Path $file -PathType Leaf) -and $file.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
-            $ext = [IO.Path]::GetExtension($file).ToLower()
-            $response.ContentType = if ($mime.ContainsKey($ext)) { $mime[$ext] } else { 'application/octet-stream' }
-            if ($mime.ContainsKey($ext)) {
-                $response.Headers.Add('Cache-Control', 'no-cache, no-store, must-revalidate')
-                $response.Headers.Add('Pragma', 'no-cache')
-                $response.Headers.Add('Expires', '0')
-                $lm = (Get-Item $file).LastWriteTimeUtc
-                $response.Headers.Add('Last-Modified', $lm.ToString('R'))
+            if ((Test-Path $file -PathType Leaf) -and $file.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+                $ext = [IO.Path]::GetExtension($file).ToLower()
+                $response.ContentType = if ($mime.ContainsKey($ext)) { $mime[$ext] } else { 'application/octet-stream' }
+                if ($mime.ContainsKey($ext)) {
+                    $response.Headers.Add('Cache-Control', 'no-cache, no-store, must-revalidate')
+                    $response.Headers.Add('Pragma', 'no-cache')
+                    $response.Headers.Add('Expires', '0')
+                    $lm = (Get-Item $file).LastWriteTimeUtc
+                    $response.Headers.Add('Last-Modified', $lm.ToString('R'))
+                }
+                $bytes = [IO.File]::ReadAllBytes($file)
+                $response.ContentLength64 = $bytes.Length
+                $response.StatusCode = 200
+                $response.OutputStream.Write($bytes, 0, $bytes.Length)
+                Write-Host "  200  $($request.HttpMethod)  /$rel" -ForegroundColor DarkGray
+            } else {
+                $response.StatusCode = 404
+                $msg = [Text.Encoding]::UTF8.GetBytes('404 Not Found')
+                $response.ContentLength64 = $msg.Length
+                $response.OutputStream.Write($msg, 0, $msg.Length)
+                Write-Host "  404  $($request.HttpMethod)  /$rel" -ForegroundColor Yellow
             }
-            $bytes = [IO.File]::ReadAllBytes($file)
-            $response.ContentLength64 = $bytes.Length
-            $response.StatusCode = 200
-            $response.OutputStream.Write($bytes, 0, $bytes.Length)
-            Write-Host "  200  $($request.HttpMethod)  /$rel" -ForegroundColor DarkGray
-        } else {
-            $response.StatusCode = 404
-            $msg = [Text.Encoding]::UTF8.GetBytes('404 Not Found')
-            $response.ContentLength64 = $msg.Length
-            $response.OutputStream.Write($msg, 0, $msg.Length)
-            Write-Host "  404  $($request.HttpMethod)  /$rel" -ForegroundColor Yellow
+        } catch {
+            # Client disconnect / aborted write must not kill the listener loop
+            Write-Host "  warn  $($_.Exception.Message)" -ForegroundColor DarkYellow
+        } finally {
+            try { $response.Close() } catch {}
         }
-        $response.Close()
     }
 } finally {
     $listener.Stop()
