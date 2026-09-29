@@ -1,5 +1,5 @@
-// armazem.js v1.0.41
-const ARMAZEM_JS_VERSION = '1.0.41';
+// armazem.js v1.0.42 — soft company reset; free pack base64 after parse
+const ARMAZEM_JS_VERSION = '1.0.42';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 const ARM_NF_RATE = 0.055;
@@ -2244,7 +2244,9 @@ async function persistArmPack(pack, opts = {}) {
 function parseArmPackFromRec(rec) {
   if (!rec?.file_data || typeof base64ToArrayBuffer !== 'function') return null;
   try {
-    const pack = JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(rec.file_data)));
+    const b64 = rec.file_data;
+    rec.file_data = null; // free base64 ASAP
+    const pack = JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(b64)));
     if (pack?.months) {
       if (!pack.customServices) pack.customServices = [];
       pack.months.forEach(m => {
@@ -3280,6 +3282,25 @@ async function reloadArmazemForCompany() {
   renderArmDfbGate();
   if (armInited) renderArmActiveTab();
 }
+
+/** Soft reset on company switch — no cloud pull until Armazém tab opens. */
+function resetArmazemForCompany() {
+  armPack = null;
+  armPendingFiles = [];
+  armLancamentoDraft = null;
+  armNfUploadRows = [];
+  armLastPersistedJson = '';
+  armInvalidateVendasCache();
+  loadCatalogOverrides();
+  updateArmFileZone();
+  renderArmDfbGate();
+  if (armInited && document.getElementById('page-armazem')?.classList.contains('active')) {
+    loadSavedArmazem(true).then(() => {
+      if (armInited) renderArmActiveTab();
+    }).catch(() => {});
+  }
+}
+window.resetArmazemForCompany = resetArmazemForCompany;
 
 function initArmazem() {
   armSetProcessing(false);

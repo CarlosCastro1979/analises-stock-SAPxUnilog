@@ -507,7 +507,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.79 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.81 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -560,7 +560,8 @@ select.cad-inp{cursor:pointer;}
         </div>
       </div>
     </div>
-    <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
+    <p style="font-size:12px;color:var(--muted);margin:14px 0 0;">Ao abrir a app só carrega a shell — stock / Fretes / Armazém entram sob pedido (aba ou «Carregar último»). Evita Out of Memory no Chrome.</p>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;">
       <button class="btn bp" id="procBtn" onclick="processAll()" disabled>⚡ Processar e Guardar</button>
       <button class="btn bg" id="stockLoadLastBtn" onclick="loadLastSaved()">☁️ Carregar último guardado</button>
       <span id="procSpin" hidden style="display:none"><span class="spin"></span></span>
@@ -2410,27 +2411,44 @@ async function yieldToUI(label){
   });
 }
 window.yieldToUI=yieldToUI;
+/** Drop Excel ArrayBuffers / raw sheet copies — keep only parsed sapData/uniData. */
+function releaseStockExcelBuffers(reason){
+  stockSapBuffer=null;
+  stockUniBuffer=null;
+  try{window._rawSapRows=null;window._rawUniRows=null;}catch(_){}
+  if(reason)console.log('[stock] released excel buffers',reason);
+}
+window.releaseStockExcelBuffers=releaseStockExcelBuffers;
+
 async function loadSavedStockExcelFiles(silent=false,parseIntoMemory=true){
   try{
     syncCompanyDepotMap();
+    // Labels only — never pull multi-MB base64 when we will not parse.
+    if(!parseIntoMemory){
+      await applyStockFileLabelsFromMeta();
+      checkBtn();
+      return !!(stockSapFileName||stockUniFileName);
+    }
     const meta=await fetchExcelFiles([EXCEL_SLOTS.STOCK_SAP,EXCEL_SLOTS.STOCK_UNILOG]);
     const sapRec=meta[EXCEL_SLOTS.STOCK_SAP];
     const uniRec=meta[EXCEL_SLOTS.STOCK_UNILOG];
     let loaded=false;
     if(sapRec?.file_data){
-      stockSapBuffer=base64ToArrayBuffer(sapRec.file_data);
+      const b64=sapRec.file_data;
+      sapRec.file_data=null; // free base64 string ASAP (duplicate of ArrayBuffer)
+      stockSapBuffer=base64ToArrayBuffer(b64);
       stockSapFileName=sapRec.file_name||'sap.xlsx';
       document.getElementById('sapFn').textContent='✓ '+stockSapFileName;
       document.getElementById('sapZone').classList.add('loaded');
-      if(parseIntoMemory){
-        await yieldToUI('A parsear Excel SAP…');
-        const rows=xlsxRowsFromArrayBuffer(stockSapBuffer);
-        await yieldToUI('A normalizar SAP…');
-        window._rawSapRows=rows;
-        sapData=normSap(rows);
-        invalidateSapMaps();
-        invalidateReconExclEANs();
-      }
+      await yieldToUI('A parsear Excel SAP…');
+      const rows=xlsxRowsFromArrayBuffer(stockSapBuffer);
+      await yieldToUI('A normalizar SAP…');
+      window._rawSapRows=rows;
+      sapData=normSap(rows);
+      invalidateSapMaps();
+      invalidateReconExclEANs();
+      // Buffer no longer needed after parse — re-upload if user wants to re-save Excel.
+      stockSapBuffer=null;
       loaded=true;
     }else if(sapRec?.file_name){
       stockSapFileName=sapRec.file_name;
@@ -2439,18 +2457,19 @@ async function loadSavedStockExcelFiles(silent=false,parseIntoMemory=true){
       if(!silent)toast('SAP: metadados sem ficheiro — volta a Processar e Guardar.','error');
     }
     if(uniRec?.file_data){
-      stockUniBuffer=base64ToArrayBuffer(uniRec.file_data);
+      const b64=uniRec.file_data;
+      uniRec.file_data=null;
+      stockUniBuffer=base64ToArrayBuffer(b64);
       stockUniFileName=uniRec.file_name||'unilog.xlsx';
       document.getElementById('uniFn').textContent='✓ '+stockUniFileName;
       document.getElementById('uniZone').classList.add('loaded');
-      if(parseIntoMemory){
-        await yieldToUI('A parsear Excel Unilog…');
-        const rows=xlsxRowsFromArrayBuffer(stockUniBuffer);
-        await yieldToUI('A normalizar Unilog…');
-        window._rawUniRows=rows;
-        uniData=filterUniForCompany(normUni(rows));
-        invalidateReconExclEANs();
-      }
+      await yieldToUI('A parsear Excel Unilog…');
+      const rows=xlsxRowsFromArrayBuffer(stockUniBuffer);
+      await yieldToUI('A normalizar Unilog…');
+      window._rawUniRows=rows;
+      uniData=filterUniForCompany(normUni(rows));
+      invalidateReconExclEANs();
+      stockUniBuffer=null;
       loaded=true;
     }else if(uniRec?.file_name){
       stockUniFileName=uniRec.file_name;
@@ -2467,39 +2486,63 @@ async function loadSavedStockExcelFiles(silent=false,parseIntoMemory=true){
     return false;
   }
 }
-async function autoLoadLastExcelFiles(){
-  const hadDb=await loadFromDB(true);
-  if(hadDb){
-    await loadSavedStockExcelFiles(true,false);
-    if(stockUniBuffer&&refreshUniFromRaw()){
-      buildRecon();buildSoUnilog();buildPosClasse();buildVencidoForaDep();
-      invalidatePageRenderCache();
+
+/** Single-flight stock cloud restore — never auto on boot (OOM). */
+let _stockLoadedCompany=null;
+let _stockLoadPromise=null;
+function stockCloudIsLoaded(){
+  return _stockLoadedCompany===company&&!!(sapData&&uniData);
+}
+/**
+ * Lazy stock restore for Conciliação / Alertas / Ocupação / Cadastro / Carregar último.
+ * Prefer logistica_stock JSON (parsed rows) — NEVER also pull Excel binaries on that path.
+ */
+async function ensureStockCloudLoaded(opts={}){
+  const silent=opts.silent!==false;
+  if(stockCloudIsLoaded())return true;
+  if(_stockLoadPromise)return _stockLoadPromise;
+  _stockLoadPromise=(async()=>{
+    try{
+      const ok=await loadLastSaved(silent);
+      if(ok&&sapData&&uniData)_stockLoadedCompany=company;
+      return!!ok;
+    }finally{
+      _stockLoadPromise=null;
+      try{window._stockLoadPromise=null;}catch(_){}
     }
-    refreshOccIfVisible();
-    return;
-  }
-  const hadExcel=await loadSavedStockExcelFiles(true,true);
-  if(hadExcel&&sapData&&uniData)await processAll();
-  refreshOccIfVisible();
+  })();
+  try{window._stockLoadPromise=_stockLoadPromise;}catch(_){}
+  return _stockLoadPromise;
+}
+window.ensureStockCloudLoaded=ensureStockCloudLoaded;
+
+async function autoLoadLastExcelFiles(){
+  // Kept for switchCompany / legacy callers — same rules as loadLastSaved (no Excel if DB ok).
+  return loadLastSaved(true);
 }
 async function loadLastSaved(silent=false){
   syncCompanyDepotMap();
   if(!silent)setStockProcessing(true,'A carregar da cloud…');
   try{
+  // Cap: never run stock restore concurrent with Fretes full restore.
+  if(typeof window._fteLoadSavedPromise!=='undefined'&&window._fteLoadSavedPromise){
+    try{await window._fteLoadSavedPromise;}catch(_){}
+  }
   const hadDb=await loadFromDB(true);
   if(hadDb){
-    if(!silent)setStockProcessing(true,'A carregar Excels…');
-    await loadSavedStockExcelFiles(true,false);
-    if(stockUniBuffer&&refreshUniFromRaw()){
-      buildRecon();buildSoUnilog();buildPosClasse();buildVencidoForaDep();
-      invalidatePageRenderCache();
-    }
+    // Metadata labels only — do NOT download SAP/Unilog Excel packs (OOM duplicate).
+    releaseStockExcelBuffers('after-db-json');
+    await applyStockFileLabelsFromMeta();
+    _stockLoadedCompany=company;
     if(!silent)toast('Carregado: '+company,'success');
     return true;
   }
+  if(!silent)setStockProcessing(true,'A carregar Excels…');
   const hadExcel=await loadSavedStockExcelFiles(silent,true);
   if(hadExcel&&sapData&&uniData){
     await processAll({manageUi:!silent,label:'A processar ficheiros guardados…'});
+    releaseStockExcelBuffers('after-excel-process');
+    _stockLoadedCompany=company;
     if(!silent)toast('Excel carregado e processado.','success');
     return true;
   }
@@ -2848,18 +2891,30 @@ async function init(){
       if(pageEl)pageEl.classList.add('active');
 
       if(t.dataset.page==='recon'){
-        if(pageNeedsRender('recon')){renderReconPage();markPageRendered('recon');}
-        if(typeof renderMapaAcertosPage==='function'&&document.getElementById('recon-acerto')?.style.display!=='none')renderMapaAcertosPage();
-        if(typeof renderInventarioAcertoPage==='function'&&document.getElementById('recon-inventario')?.style.display!=='none')renderInventarioAcertoPage();
+        ensureStockCloudLoaded({silent:true}).then(()=>{
+          if(pageNeedsRender('recon')){renderReconPage();markPageRendered('recon');}
+          if(typeof renderMapaAcertosPage==='function'&&document.getElementById('recon-acerto')?.style.display!=='none')renderMapaAcertosPage();
+          if(typeof renderInventarioAcertoPage==='function'&&document.getElementById('recon-inventario')?.style.display!=='none')renderInventarioAcertoPage();
+          loadReconNotas().catch(()=>{});
+        }).catch(e=>console.warn('[nav] recon stock',e));
       }
       if(t.dataset.page==='alertas'){
-        if(pageNeedsRender('alertas')){renderAlertPage();markPageRendered('alertas');}
+        ensureStockCloudLoaded({silent:true}).then(()=>{
+          if(pageNeedsRender('alertas')){renderAlertPage();markPageRendered('alertas');}
+        }).catch(e=>console.warn('[nav] alertas stock',e));
       }
       if(t.dataset.page==='cadastro'){
-        if(pageNeedsRender('cadastro')){renderCadastro();markPageRendered('cadastro');}
+        ensureStockCloudLoaded({silent:true}).then(()=>{
+          if(pageNeedsRender('cadastro')){renderCadastro();markPageRendered('cadastro');}
+        }).catch(e=>console.warn('[nav] cadastro stock',e));
       }
       if(t.dataset.page==='occupation'){
-        if(pageNeedsRender('occupation')){renderOccView();renderOccPkPk();renderOccBase();markPageRendered('occupation');}
+        ensureStockCloudLoaded({silent:true}).then(()=>{
+          if(pageNeedsRender('occupation')){renderOccView();renderOccPkPk();renderOccBase();markPageRendered('occupation');}
+        }).catch(e=>console.warn('[nav] occupation stock',e));
+      }
+      if(t.dataset.page==='upload'){
+        applyStockFileLabelsFromMeta().catch(()=>{});
       }
       if(t.dataset.page==='reclamacoes'){
         if(pageNeedsRender('reclamacoes')||!reclamacoes.length){
@@ -2905,21 +2960,9 @@ async function init(){
     const{error}=await db.from('logistica_stock').select('id').limit(1);
     setDB(!error);
     if(!error){
-      // Parallel lightweight cloud meta — NOT Fretes (large CT-e/ZFACT in RAM
-      // before stock Excel parse OOMs the tab → blank white screen).
-      await Promise.all([
-        loadSuspValidados().catch(e=>console.warn('[boot] susp',e)),
-        loadOccParams().catch(e=>console.warn('[boot] occ',e)),
-        loadReconNotas().catch(e=>console.warn('[boot] notas',e)),
-        loadPecasData().catch(e=>console.warn('[boot] pecas',e))
-      ]);
-      // Do NOT await stock Excel parse — it blocks the main thread and freezes all menus.
-      // Fire-and-forget with progress; nav stays clickable while SAP/Unilog restore.
-      autoLoadLastExcelFiles().then(()=>{
-        if(typeof refreshArmazemSapValidation==='function')refreshArmazemSapValidation();
-      }).catch(e=>console.warn('[boot] stock',e));
-      // Do NOT silent-load Fretes on boot — QZ→CT-e rebuild freezes the main thread
-      // (clicks appear dead). Cobranças / Fretes tabs load on demand via fteNeedsCloudReload.
+      // Shell only on boot — NO stock JSON, Excel packs, Fretes, Peças snapshots, or occ tables.
+      // Heavy data loads when the user opens that tab / clicks «Carregar último» (avoids Chrome OOM).
+      applyStockFileLabelsFromMeta().catch(e=>console.warn('[boot] stock labels',e));
     }
   }catch(e){console.warn('[boot]',e);setDB(false);}
   scheduleColResize();
@@ -5489,6 +5532,8 @@ async function processAll(opts={}){
       if(stockUniBuffer&&stockUniFileName)await upsertExcelBinary(EXCEL_SLOTS.STOCK_UNILOG,stockUniFileName,stockUniBuffer);
       else if(stockUniFileName)await upsertExcelMeta(EXCEL_SLOTS.STOCK_UNILOG,stockUniFileName);
       await updateStockFileStatus();
+      // Drop binaries after persist — JSON in logistica_stock is the restore source of truth.
+      releaseStockExcelBuffers('after-processAll-persist');
     }catch(e){console.warn('[stock] excel persist',e);toast('Aviso: não foi possível guardar ficheiros Excel na cloud.','error');}
   }catch(e){toast('Offline — dados em memória','error');}
   updateLoadBanner(procAt);
@@ -5650,6 +5695,9 @@ function switchCompany(){
   // Reset all data
   sapData=null;uniData=null;reconData={};suspData=[];soUnilogData=[];posClasseData=[];vencidoForaDepData=[];vencidoForaDepSapData=[];semValidadeData=[];semValidadeStats=null;valConflData=[];valConflStats=null;validCurtaData=[];validCurtaStats=null;validCurtaEstadoFlt='';prodBomVencData=[];prodBomVencStats=null;vencForaDepStats=null;vencForaDepSapStats=null;suspValidados=new Set();suspValidadosOcultos=0;
   stockSapFileName='';stockUniFileName='';stockSapBuffer=null;stockUniBuffer=null;
+  try{window._rawSapRows=null;window._rawUniRows=null;}catch(_){}
+  _stockLoadedCompany=null;_stockLoadPromise=null;
+  pecasData=[];
   transData={ecommerce:[],qbrasil:[]};
   // Reset UI
   document.getElementById('sapFn').textContent='';document.getElementById('uniFn').textContent='';
@@ -5669,11 +5717,25 @@ function switchCompany(){
   const valConflBadge=document.getElementById('valConflBadge');if(valConflBadge){valConflBadge.textContent='';valConflBadge.style.display='none';}
   const validCurtaBadge=document.getElementById('validCurtaBadge');if(validCurtaBadge){validCurtaBadge.textContent='';validCurtaBadge.style.display='none';}
   const alertBadge=document.getElementById('alertBadge');if(alertBadge){alertBadge.textContent='';alertBadge.style.display='none';}
-  // Try to load saved data for the new company
+  // Labels only — do NOT auto-restore stock/Fretes packs on company switch (OOM).
   if(typeof reloadFretesForCompany==='function')reloadFretesForCompany();
-  if(typeof reloadArmazemForCompany==='function')reloadArmazemForCompany();
+  if(typeof window.resetArmazemForCompany==='function')window.resetArmazemForCompany();
+  else if(typeof reloadArmazemForCompany==='function'&&document.getElementById('page-armazem')?.classList.contains('active')){
+    reloadArmazemForCompany();
+  }
   refreshOccIfVisible();
-  autoLoadLastExcelFiles().then(()=>refreshOccIfVisible());
+  applyStockFileLabelsFromMeta().catch(()=>{});
+  // If user is already on a stock-dependent page, restore for the new company on demand
+  const activePage=document.querySelector('.page.active')?.id||'';
+  if(['page-recon','page-alertas','page-occupation','page-cadastro'].includes(activePage)){
+    ensureStockCloudLoaded({silent:true}).then(()=>{
+      invalidatePageRenderCache();
+      if(activePage==='page-recon'){renderReconPage();markPageRendered('recon');}
+      if(activePage==='page-alertas'){renderAlertPage();markPageRendered('alertas');}
+      if(activePage==='page-occupation'){renderOccView();renderOccPkPk();renderOccBase();markPageRendered('occupation');}
+      if(activePage==='page-cadastro'){renderCadastro();markPageRendered('cadastro');}
+    }).catch(()=>{});
+  }
   if(typeof syncInventarioAcertoNav==='function')syncInventarioAcertoNav();
   if(typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
   if(typeof renderMapaAcertosPage==='function')renderMapaAcertosPage();
@@ -5694,7 +5756,9 @@ async function loadFromDB(silent=false){
     invalidateSapMaps();
     // Load occParams first so MUIM category filtering works in buildRecon
     await loadOccParams();await loadSuspValidados();
-    buildRecon();buildSusp();buildSoUnilog();buildPosClasse();buildVencidoForaDep();checkDuplicadosAlert();await processPecas();await loadPecasData();renderUpKpis();updateChip();
+    buildRecon();buildSusp();buildSoUnilog();buildPosClasse();buildVencidoForaDep();checkDuplicadosAlert();
+    // Peças snapshots are heavy — load only when opening Peças AT tab (not on every stock restore).
+    renderUpKpis();updateChip();
     invalidatePageRenderCache();
     logUniClasseCounts('loadFromDB');
     auditEanCoverage();
@@ -9758,9 +9822,9 @@ function applyResizable(){scheduleColResize();}
       load('inventario-acerto.js', 'v=1.0.10');
     });
   }
-  load('fretes.js', 'v=1.8.79', function () {
+  load('fretes.js', 'v=1.8.81', function () {
     loadInventarioAcerto();
-    load('armazem.js', 'v=1.0.41', bootApp, function () {
+    load('armazem.js', 'v=1.0.42', bootApp, function () {
       var e = document.getElementById('arm-initErr');
       if (e) e.style.display = 'block';
       bootApp();

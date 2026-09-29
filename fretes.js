@@ -1,7 +1,7 @@
-// fretes.js v1.8.79 — ZFACT NF total from col AP (Val.total incl.imp.), not Valor líquido
-const FRETES_JS_VERSION = '1.8.79';
+// fretes.js v1.8.81 — ZFACT AP (Val.total incl.imp.) once per NF; never SUM document totals
+const FRETES_JS_VERSION = '1.8.81';
 /** Bump when ZFACT valorNF column semantics change — stale cloud maps must re-parse Excel. */
-const SAP_NF_MAP_PARSER_VERSION = 2;
+const SAP_NF_MAP_PARSER_VERSION = 3;
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -236,8 +236,10 @@ function quinzenalExcelStatusPart(rec) {
 function parseQuinzenalPackFromRec(rec) {
   if (!rec?.file_data || typeof base64ToArrayBuffer !== 'function') return null;
   try {
-    const pack = JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(rec.file_data)));
-    if (pack?.fileBinaries) delete pack.fileBinaries;
+    const b64 = rec.file_data;
+    rec.file_data = null; // drop base64 ASAP — pack JSON stays in quinzenalPack
+    const pack = JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(b64)));
+    if (pack?.fileBinaries) delete pack.fileBinaries; // never keep 38 xlsx binaries in RAM
     return pack;
   } catch (err) {
     console.error('[fretes] parse quinzenal pack', err);
@@ -766,6 +768,11 @@ function sapHeaderMatchesField(hdr, aliases) {
 function sapHeaderIsExcluded(hdr) {
   const h = normCol(hdr);
   if (!h) return false;
+  // AP / Val.total incl.imp. must never be excluded just because the label contains "imposto(s)".
+  if (h.includes('incl.imp') || h.includes('incl imp') || h.includes('incluindo imposto')
+      || h.includes('incluindo imp') || h.includes('total incl') || h.includes('com imposto')) {
+    return false;
+  }
   // Only header-contains-alias (not alias-contains-header) — avoids excluding bare "Valor"
   // because exclude list has "valor liquido".
   return SAP_VALOR_EXCLUDE_ALIASES.some(alias => h === alias || h.includes(alias));
@@ -1279,7 +1286,8 @@ function applySapColPositionalFallback(row, line, headerRow, standardLayout, col
   if (picked.doc != null && picked.doc !== '') {
     if (!row.valorDoc || !looksLikeSapValorCell(row.valorDoc, { trustColumn: true })) row.valorDoc = picked.doc;
   }
-  row.valorNF = row.valorLine ?? row.valorDoc ?? row.valorNF;
+  // Doc total (AP) is the Unilog-matching NF value — prefer over line bruto.
+  row.valorNF = row.valorDoc ?? row.valorLine ?? row.valorNF;
   row._sapPositionalLayout = true;
   return row;
 }
@@ -1557,45 +1565,37 @@ function finalizeSapNfValor(acc) {
   const lineSum = acc.lineSum;
   const doc = acc.docVal > 0 ? acc.docVal : 0;
 
-  // User spec: GROUP BY NF, SUM valor bruto — every billable line counts.
-  // But Unilog "Valor NF" is the document total: when a reliable doc total exists
-  // (e.g. repeating "4 992,26 BRL") and line nets diverge, prefer doc once — never
-  // treat partial líquido lines (354,45…) as the NF value for SAP↔Unilog.
+  // ZFACT col AP "Val.total incl.imp." (and other doc totals) repeat the NF total on
+  // every item line — take ONE value per NF. Never SUM(AP).
+  if (doc > 0) return doc;
+
+  // No doc total: fall back to valor bruto lines (legacy / narrow exports).
   if (vals.length > 0) {
     const allIdentical = vals.every(v => sapValoresClose(v, vals[0]));
 
-    // Doc total repeated as line bruto on every row.
-    if (allIdentical && doc > 0 && sapValoresClose(vals[0], doc)) return doc;
-
-    if (doc > 0) {
-      if (sapValoresClose(lineSum, doc, 0.05)) return doc;
-      const ref = Math.max(Math.abs(doc), Math.abs(lineSum), 1);
-      // Large gap ⇒ lines are partial nets / wrong column; doc is the NF total.
-      if (Math.abs(lineSum - doc) / ref > 0.02) return doc;
-    }
+    // Positional export without material column: same NF total on each row.
+    if (allIdentical && vals.length > 1 && !acc.hasMaterialCol) return vals[0];
 
     // ZFACT with material/item lines: SUM every billable line (even equal bruto / same SKU).
     if (acc.hasMaterialCol) return lineSum;
 
-    // Positional export without material column: same NF total on each row.
     if (allIdentical && vals.length > 1) return vals[0];
 
     return lineSum;
   }
 
-  if (doc > 0) return doc;
-
   if (acc.fallbackVals.length) {
     const fb = acc.fallbackVals;
+    // Repeating document-level fallback on every line — once, never sum.
     if (fb.every(v => sapValoresClose(v, fb[0]))) return fb[0];
-    return fb.reduce((a, b) => a + b, 0);
+    return Math.max(...fb);
   }
   return 0;
 }
 
-const SAP_NF_DEBUG_KEYS = new Set(['99635', '99636', '99641', '99642', '99633', '18596', '2223', '18591']);
+const SAP_NF_DEBUG_KEYS = new Set(['99635', '99636', '99641', '99642', '99633', '18596', '2223', '18591', '99977']);
 
-/** GROUP BY NF key → SUM valor bruto of every billable material line (incl. negative reversals; skip material-empty headers). */
+/** GROUP BY NF key → doc total (AP) once per NF; else SUM valor bruto of billable lines. */
 function buildSapNfMap(rows) {
   const map = {};
 
@@ -1847,10 +1847,40 @@ function _debugBuildSapNfMapAggregation() {
     'Val.total incl.imp.': '6 673,50'
   })]);
   const ok100934ap = Math.abs((map100934['100934']?.valorNF || 0) - 6673.5) < 0.01;
+  // NF 99977: AP Val.total incl.imp. repeats on every item line — take once, never ×N.
+  const rows99977 = [];
+  for (let i = 0; i < 25; i++) {
+    rows99977.push({
+      nf: '99977',
+      _hasMaterialCol: true,
+      material: 'SKU-' + i,
+      valorDoc: '442.314,49',
+      valorLine: String(1000 + i * 10) + ',00'
+    });
+  }
+  const map99977 = buildSapNfMap(rows99977);
+  const ok99977apOnce = Math.abs((map99977['99977']?.valorNF || 0) - 442314.49) < 0.01;
+  const map99977normalize = buildSapNfMap(Array.from({ length: 25 }, (_, i) => normalizeSapRow({
+    'Nº da nota fiscal eletrônica': '99977',
+    Nome: 'ARC TRANSPORTE',
+    Material: 'MAT-' + i,
+    'Valor Bruto': '1.000,00',
+    'Val.total incl.imp.': '442.314,49'
+  })));
+  const ok99977norm = Math.abs((map99977normalize['99977']?.valorNF || 0) - 442314.49) < 0.01;
+  // Header with "impostos" must still count as AP doc total (not excluded).
+  const map99977imp = buildSapNfMap([normalizeSapRow({
+    'Nº da nota fiscal eletrônica': '99977',
+    Nome: 'ARC',
+    Material: 'X',
+    'Val.total incluindo impostos': '442.314,49'
+  })]);
+  const ok99977impHdr = Math.abs((map99977imp['99977']?.valorNF || 0) - 442314.49) < 0.01;
   if (!ok97723 || !ok88888 || !ok99999 || !ok99635lines || !ok99635doc || !ok99635repeat || !ok99635dupPos
       || !ok99635lineDoc || !ok99635inflate || !ok99635brutoZfact || !ok99635feeLines || !ok99636bruto
       || !ok99636lineDoc || !ok2223 || !ok18591 || !ok99641 || !ok99641sameMat || !ok99642
-      || !ok18596 || !ok18596multi || !ok100796brl || !ok100796lines || !ok100796partial || !ok100934ap) {
+      || !ok18596 || !ok18596multi || !ok100796brl || !ok100796lines || !ok100796partial || !ok100934ap
+      || !ok99977apOnce || !ok99977norm || !ok99977impHdr) {
     console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
       ok97723, got97723: map['97723']?.valorNF,
       ok88888, got88888: map['88888']?.valorNF,
@@ -1875,7 +1905,10 @@ function _debugBuildSapNfMapAggregation() {
       ok100796brl, got100796brl: map100796brl['100796']?.valorNF,
       ok100796lines, got100796lines: map100796lines['100796']?.valorNF,
       ok100796partial, got100796partial: map100796partial['100796']?.valorNF,
-      ok100934ap, got100934ap: map100934['100934']?.valorNF
+      ok100934ap, got100934ap: map100934['100934']?.valorNF,
+      ok99977apOnce, got99977: map99977['99977']?.valorNF,
+      ok99977norm, got99977norm: map99977normalize['99977']?.valorNF,
+      ok99977impHdr, got99977impHdr: map99977imp['99977']?.valorNF
     });
   } else {
     console.debug('[SAP NF] buildSapNfMap aggregation OK');
@@ -2159,7 +2192,9 @@ async function persistSapNfMap(map, opts = {}) {
 function parseSapNfMapFromRec(rec) {
   if (!rec?.file_data || typeof base64ToArrayBuffer !== 'function') return null;
   try {
-    const buf = base64ToArrayBuffer(rec.file_data);
+    const b64 = rec.file_data;
+    rec.file_data = null;
+    const buf = base64ToArrayBuffer(b64);
     const text = new TextDecoder().decode(buf);
     const parsed = JSON.parse(text);
     if (!parsed) return null;
@@ -4064,14 +4099,17 @@ async function restoreSapFromRec(sapRec, silent = false) {
   if (!sapRec?.file_data || typeof base64ToArrayBuffer !== 'function') return false;
   try {
     await fteYield('A descodificar ZFACT…');
-    const buf = base64ToArrayBuffer(sapRec.file_data);
+    const b64 = sapRec.file_data;
+    sapRec.file_data = null;
+    const buf = base64ToArrayBuffer(b64);
     const ok = await processArrayBufferSapAsync(buf, sapRec.file_name || 'sap.xlsx', {
       silent: true,
       yieldLabel: 'A processar ZFACT…'
     });
     if (!ok) return false;
     fteSapFileName = sapRec.file_name || '';
-    fteSapBuffer = buf;
+    // Do not retain ArrayBuffer after map is built — re-upload from disk if needed.
+    fteSapBuffer = null;
     setSapZoneLoaded(sapRec.file_name);
     return true;
   } catch (err) {
@@ -4094,7 +4132,9 @@ async function restoreCteFromRec(cteRec, sapRec, silent = false) {
   try {
     // Keep accumulated sapNfMap — Excel merge updates keys; does not wipe history
     await fteYield('A descodificar CT-e…');
-    const cteBuf = base64ToArrayBuffer(cteRec.file_data);
+    const b64 = cteRec.file_data;
+    cteRec.file_data = null;
+    const cteBuf = base64ToArrayBuffer(b64);
     const ok = await processArrayBufferCteAsync(cteBuf, cteRec.file_name || 'cte.xlsx', { silent: true, autosave: false });
     if (!ok) return false;
     if (sapRec?.file_data && !isSapLoaded()) {
@@ -4102,7 +4142,7 @@ async function restoreCteFromRec(cteRec, sapRec, silent = false) {
     }
     _fteLoadedCompany = co;
     fteCteFileName = cteRec.file_name || '';
-    fteCteBuffer = cteBuf;
+    fteCteBuffer = null; // parsed currentNFs are enough
     setCteZoneLoaded(cteRec.file_name);
     if (sapRec?.file_name && !fteSapFileName) {
       fteSapFileName = sapRec.file_name || '';
@@ -4135,12 +4175,18 @@ async function ensureCteLoadedForQz(silent = true) {
 
 async function loadSavedFretesFiles(silent = false) {
   if (_fteLoadSavedPromise) return _fteLoadSavedPromise;
+  // Cap concurrent restores with stock — wait if stock is mid-load.
+  if (typeof window._stockLoadPromise !== 'undefined' && window._stockLoadPromise) {
+    try { await window._stockLoadPromise; } catch (_) {}
+  }
   // Always show spinner — silent only suppresses success toasts (menus must not look "dead").
   fteSetProcessing(true, 'A carregar Fretes da cloud…');
   _fteLoadSavedPromise = _loadSavedFretesFilesImpl(silent).finally(() => {
     fteSetProcessing(false);
     _fteLoadSavedPromise = null;
+    try { window._fteLoadSavedPromise = null; } catch (_) {}
   });
+  try { window._fteLoadSavedPromise = _fteLoadSavedPromise; } catch (_) {}
   return _fteLoadSavedPromise;
 }
 
@@ -4167,11 +4213,11 @@ async function _loadSavedFretesFilesImpl(silent = false) {
     return true;
   }
 
-  let meta;
+  let meta = {};
   try {
-    await fteYield('A descarregar Fretes…');
-    // QZ + SAP map + SAP Excel first (structured path). CTE Excel is legacy Conciliacao only.
-    meta = await fetchExcelFiles([fteQuinzenalSlot(), fteSapMapSlot(), fteSapSlot(), fteCteSlot()]);
+    await fteYield('A descarregar Fretes (QZ + mapa)…');
+    // Slim first: quinzenal pack JSON + SAP NF map only — NOT ZFACT/CTE Excel binaries.
+    meta = await fetchExcelFiles([fteQuinzenalSlot(), fteSapMapSlot()]);
   } catch (err) {
     console.error('[fretes] load saved', co, err);
     if (!silent) {
@@ -4184,8 +4230,8 @@ async function _loadSavedFretesFilesImpl(silent = false) {
     return false;
   }
 
-  const cteRec = meta[fteCteSlot()];
-  const sapRec = meta[fteSapSlot()];
+  let cteRec = null;
+  let sapRec = null;
   const hadCteInMem = _fteLoadedCompany === co && currentNFs.length;
   const hadQzInMem = !!quinzenalPack?.files?.length;
 
@@ -4193,6 +4239,8 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   await fteYield('A restaurar quinzenais…');
   const qzLoaded = await loadSavedQuinzenalPack(silent, meta, { deferCompare: true, skipRender: true });
   if (qzLoaded) console.log('[fretes] restore quinzenal', co, quinzenalPack?.files?.length || 0, 'files');
+  // Free QZ base64 slot from meta after parse
+  if (meta[fteQuinzenalSlot()]) meta[fteQuinzenalSlot()].file_data = null;
 
   // 2) Build Análise CT-e from QZ B2B (Conciliacao removed) — yield before heavy sync
   let qzCteBuilt = false;
@@ -4204,10 +4252,20 @@ async function _loadSavedFretesFilesImpl(silent = false) {
 
   // 3) Legacy CTE Excel only if QZ path did not produce analysis
   let cteOk = !!(qzCteBuilt || currentNFs.length);
+  if (!cteOk) {
+    try {
+      await fteYield('A descarregar CT-e legado…');
+      const legacy = await fetchExcelFiles([fteCteSlot()]);
+      cteRec = legacy[fteCteSlot()];
+      meta[fteCteSlot()] = cteRec;
+    } catch (e) { console.warn('[fretes] cte fetch', e); }
+  }
   if (!cteOk && cteRec?.file_data) {
     await fteYield('A processar CT-e Excel…');
+    const cteDataLen = cteRec.file_data.length;
     cteOk = await restoreCteFromRec(cteRec, null, silent);
-    console.log('[fretes] restore cte', co, cteRec.file_name, 'dataLen', cteRec.file_data.length, 'ok', cteOk);
+    cteRec.file_data = null;
+    console.log('[fretes] restore cte', co, cteRec.file_name, 'dataLen', cteDataLen, 'ok', cteOk);
   } else if (!cteOk && hadCteInMem) {
     cteOk = true;
     console.log('[fretes] restore cte from memory', co, currentNFs.length, 'NFs');
@@ -4221,12 +4279,20 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   // 4) ZFACT / SAP NF map — prefer accumulated JSON (fast). Only parse Excel when map missing.
   await fteYield('A restaurar mapa SAP…');
   const mapHad = await loadSavedSapNfMap(meta, { silent: true });
+  if (meta[fteSapMapSlot()]) meta[fteSapMapSlot()].file_data = null;
   if (mapHad && Object.keys(sapNfMap).length) {
-    // Skip multi-MB sync XLSX.read of ZFACT on restore — map JSON is source of truth.
-    if (sapRec?.file_name) {
-      fteSapFileName = sapRec.file_name || fteSapFileName;
-      setSapZoneLoaded(sapRec.file_name);
-    }
+    // Labels for ZFACT name without downloading the Excel binary.
+    try {
+      const fetchMeta = typeof fetchExcelFileMeta === 'function' ? fetchExcelFileMeta : null;
+      if (fetchMeta) {
+        const labels = await fetchMeta([fteSapSlot()]);
+        sapRec = labels[fteSapSlot()];
+        if (sapRec?.file_name) {
+          fteSapFileName = sapRec.file_name || fteSapFileName;
+          setSapZoneLoaded(sapRec.file_name);
+        }
+      }
+    } catch (_) {}
     if (qzCteBuilt || cteAnalysisSource === 'quinzenal' || currentNFs.length) {
       await fteYield('A cruzar SAP…');
       reEnrichAfterSapLoad();
@@ -4237,26 +4303,38 @@ async function _loadSavedFretesFilesImpl(silent = false) {
       }
     }
     console.log('[fretes] restore sap from map JSON', co, 'mapSize', Object.keys(sapNfMap).length,
-      'skippedZfactExcel', !!sapRec?.file_data);
-  } else if (sapRec?.file_data) {
-    await fteYield('A processar ZFACT…');
-    const sapOnlyOk = await restoreSapFromRec(sapRec, silent);
-    console.log('[fretes] restore sap', co, sapRec.file_name, 'ok', sapOnlyOk,
-      'mapHad', mapHad, 'mapSize', Object.keys(sapNfMap).length);
-    const nAfter = Object.keys(sapNfMap).length;
-    // Bootstrap cloud map when Excel was the only source
-    if (nAfter > 0) {
-      await persistSapNfMap(sapNfMap, { silent: true });
-    }
-  } else if (mapHad && (qzCteBuilt || cteAnalysisSource === 'quinzenal' || currentNFs.length)) {
-    await fteYield('A cruzar SAP…');
-    reEnrichAfterSapLoad();
-    if (typeof window.refreshArmazemSapValidation === 'function') {
-      try { window.refreshArmazemSapValidation(); } catch (armErr) {
-        console.warn('[SAP] refreshArmazemSapValidation', armErr);
+      'skippedZfactExcel', true);
+  } else {
+    // Map missing — fetch ZFACT Excel only now
+    try {
+      await fteYield('A descarregar ZFACT…');
+      const sapMeta = await fetchExcelFiles([fteSapSlot()]);
+      sapRec = sapMeta[fteSapSlot()];
+    } catch (e) { console.warn('[fretes] sap excel fetch', e); }
+    if (sapRec?.file_data) {
+      await fteYield('A processar ZFACT…');
+      const sapOnlyOk = await restoreSapFromRec(sapRec, silent);
+      sapRec.file_data = null;
+      console.log('[fretes] restore sap', co, sapRec.file_name, 'ok', sapOnlyOk,
+        'mapHad', mapHad, 'mapSize', Object.keys(sapNfMap).length);
+      const nAfter = Object.keys(sapNfMap).length;
+      if (nAfter > 0) {
+        await persistSapNfMap(sapNfMap, { silent: true });
+      }
+    } else if (mapHad && (qzCteBuilt || cteAnalysisSource === 'quinzenal' || currentNFs.length)) {
+      await fteYield('A cruzar SAP…');
+      reEnrichAfterSapLoad();
+      if (typeof window.refreshArmazemSapValidation === 'function') {
+        try { window.refreshArmazemSapValidation(); } catch (armErr) {
+          console.warn('[SAP] refreshArmazemSapValidation', armErr);
+        }
       }
     }
   }
+  // Free any leftover Fretes Excel buffers after restore
+  fteCteBuffer = null;
+  fteSapBuffer = null;
+  if (quinzenalPack?.fileBinaries) delete quinzenalPack.fileBinaries;
 
   await fteYield('A calcular confrontos…');
   refreshQuinzenalCompare();
@@ -4264,14 +4342,14 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   updateQzFileNote();
   updateFretesFileStatus(meta);
 
-  const freshCte = !!(cteRec?.file_data && cteOk && !hadCteInMem && !qzCteBuilt);
+  const freshCte = !!(cteOk && !hadCteInMem && !qzCteBuilt && cteRec);
   const freshQz = !!(qzLoaded && !hadQzInMem);
 
   if (!cteOk && !qzCteBuilt && !silent && !qzLoaded && !cteRec) {
     fteToastError('Sem ficheiros CT-e guardados para ' + co + '.');
   } else if ((freshCte || freshQz || qzCteBuilt) && !silent) {
     const parts = [];
-    if (freshCte) parts.push('CT-e' + (sapRec?.file_data ? ' + SAP' : ''));
+    if (freshCte) parts.push('CT-e');
     if (freshQz) parts.push('quinzenais');
     if (qzCteBuilt && !freshCte) parts.push('Análise CT-e via QZ');
     fteToast('Ficheiros fretes restaurados: ' + parts.join(', ') + ' (' + co + ').');
@@ -5388,16 +5466,19 @@ async function persistQuinzenalPack(pack, opts = {}) {
     counts.b2c, 'B2C', counts.b2b, 'B2B', 'jsonBytes', jsonBytes);
   try {
     await upsertExcelBinary(slot, fileName, buf);
-    if (typeof fetchExcelFiles === 'function') {
-      const verify = await fetchExcelFiles([slot]);
+    if (typeof fetchExcelFileMeta === 'function') {
+      const verify = await fetchExcelFileMeta([slot]);
       const rec = verify[slot];
-      if (!rec?.file_data || rec.file_data.length < 16) {
-        const msg = `Quinzenais: guardado não confirmado na cloud (${fteCompany()}) — o servidor não devolveu dados.`;
+      if (!rec?.file_name) {
+        const msg = `Quinzenais: guardado não confirmado na cloud (${fteCompany()}) — o servidor não devolveu metadados.`;
         console.error('[fretes] persist quinzenal verify failed', fteCompany(), slot, rec);
         fteToastError(msg);
         return false;
       }
     }
+    // Never keep raw xlsx binaries after persist — slim JSON is enough for restore.
+    if (pack?.fileBinaries) delete pack.fileBinaries;
+    if (quinzenalPack?.fileBinaries) delete quinzenalPack.fileBinaries;
     syncQzUploadZone();
     updateQzFileNote();
     updateQzProcessStatus();
