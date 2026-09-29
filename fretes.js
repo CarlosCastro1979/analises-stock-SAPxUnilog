@@ -1,5 +1,5 @@
-// fretes.js v1.8.81 — ZFACT AP (Val.total incl.imp.) once per NF; never SUM document totals
-const FRETES_JS_VERSION = '1.8.81';
+// fretes.js v1.8.82 — coverage summary Unilog×ZFACT on Carregamento
+const FRETES_JS_VERSION = '1.8.82';
 /** Bump when ZFACT valorNF column semantics change — stale cloud maps must re-parse Excel. */
 const SAP_NF_MAP_PARSER_VERSION = 3;
 
@@ -209,6 +209,7 @@ async function applyFretesFileLabelsFromMeta() {
     syncQzUploadZone();
     updateQzFileNote();
     updateFretesFileStatus(m);
+    renderLoadCoverageSummary();
   } catch (e) { /* offline */ }
 }
 
@@ -403,6 +404,176 @@ function updateFretesFileStatus(meta) {
   fetchMeta([fteCteSlot(), fteSapSlot(), fteQuinzenalSlot()]).then(apply).catch(() => {
     el.style.display = 'none';
   });
+}
+
+/** Cached ZFACT month keys derived from sapNfMap dtEmissao — invalidate on map change. */
+let _zfactMonthsCache = null;
+
+function invalidateZfactMonthsCache() {
+  _zfactMonthsCache = null;
+}
+
+function mesKeyFromDtEmissao(dt) {
+  if (!dt) return null;
+  let d = dt;
+  if (!(d instanceof Date)) {
+    d = (typeof parseSapBrDate === 'function' ? parseSapBrDate(dt) : null)
+      || (typeof dt === 'string' || typeof dt === 'number' ? new Date(dt) : null);
+  }
+  if (!d || isNaN(d.getTime())) return null;
+  const k = monthKey(d);
+  return k && k !== 'sem-data' ? k : null;
+}
+
+function getZfactMonthsSet() {
+  if (_zfactMonthsCache) return _zfactMonthsCache;
+  const set = new Set();
+  const map = sapNfMap || {};
+  const keys = Object.keys(map);
+  for (let i = 0; i < keys.length; i++) {
+    const k = mesKeyFromDtEmissao(map[keys[i]]?.dtEmissao);
+    if (k) set.add(k);
+  }
+  // Fallback: currentNFs with SAP / analysis dates when map empty
+  if (!set.size && currentNFs?.length) {
+    currentNFs.forEach(nf => {
+      const k = mesKeyFromDtEmissao(nf.dtNF || nf.dtEmissao)
+        || (nf.mesRef && nf.mesRef !== 'sem-data' ? nf.mesRef : null);
+      if (k) set.add(k);
+    });
+  }
+  _zfactMonthsCache = set;
+  return set;
+}
+
+function enumerateMesKeysInclusive(minKey, maxKey) {
+  const a = String(minKey || '').match(/^(\d{4})-(\d{2})$/);
+  const b = String(maxKey || '').match(/^(\d{4})-(\d{2})$/);
+  if (!a || !b) return [];
+  let y = +a[1], m = +a[2];
+  const y2 = +b[1], m2 = +b[2];
+  const out = [];
+  // Safety: never synthesize more than 36 months
+  for (let i = 0; i < 36; i++) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    if (y === y2 && m === m2) break;
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+function covQzMark(qs) {
+  if (!qs || !qs.size) return { text: '—', cls: 'cov-miss', title: 'Sem quinzenal' };
+  const has1 = qs.has(1);
+  const has2 = qs.has(2);
+  const hasUnk = [...qs].some(q => q !== 1 && q !== 2);
+  if (has1 && has2) return { text: '✓', cls: 'cov-ok', title: '1ªQ + 2ªQ' };
+  if (has1 && !has2) return { text: '1ªQ', cls: 'cov-partial', title: 'Só 1ª quinzena' };
+  if (has2 && !has1) return { text: '2ªQ', cls: 'cov-partial', title: 'Só 2ª quinzena' };
+  if (hasUnk) return { text: '✓', cls: 'cov-ok', title: 'Ficheiro(s) no mês' };
+  return { text: '—', cls: 'cov-miss', title: 'Sem quinzenal' };
+}
+
+function quinzenaFromFileMeta(f) {
+  if (!f) return 0;
+  const q = Number(f.quinzena);
+  if (q === 1 || q === 2) return q;
+  const qk = String(f.quinzenaKey || '');
+  const m = qk.match(/-Q([12])$/i);
+  if (m) return Number(m[1]);
+  const label = String(f.quinzenaLabel || '');
+  if (/1\s*ª?\s*Q/i.test(label)) return 1;
+  if (/2\s*ª?\s*Q/i.test(label)) return 2;
+  return 0;
+}
+
+function buildLoadCoverageRows() {
+  const b2b = new Map(); // mesKey -> Set(quinzena)
+  const b2c = new Map();
+  const addQz = (mesKey, canal, quinzena) => {
+    if (!mesKey || mesKey === 'sem-mes') return;
+    const map = canal === 'B2B' ? b2b : (canal === 'B2C' ? b2c : null);
+    if (!map) return;
+    if (!map.has(mesKey)) map.set(mesKey, new Set());
+    const q = Number(quinzena);
+    map.get(mesKey).add(Number.isFinite(q) && q > 0 ? q : 0);
+  };
+  (quinzenalPack?.files || []).forEach(f => {
+    addQz(f.mesKey, f.canal, quinzenaFromFileMeta(f));
+  });
+  (fteQzPendingFiles || []).forEach(file => {
+    const meta = parseQuinzenalFileName(file.name || file.fileName || '');
+    addQz(meta.mesKey, meta.canal, meta.quinzena);
+  });
+  const zfact = getZfactMonthsSet();
+  const allKeys = new Set([...b2b.keys(), ...b2c.keys(), ...zfact]);
+  if (!allKeys.size) return [];
+  const sorted = [...allKeys].filter(k => /^\d{4}-\d{2}$/.test(k)).sort();
+  if (!sorted.length) return [];
+  const span = enumerateMesKeysInclusive(sorted[0], sorted[sorted.length - 1]);
+  const keys = span.length && span.length <= 36 ? span : sorted;
+  return keys.map(mesKey => {
+    const b2bMark = covQzMark(b2b.get(mesKey));
+    const b2cMark = covQzMark(b2c.get(mesKey));
+    const hasZ = zfact.has(mesKey);
+    const zMark = hasZ
+      ? { text: '✓', cls: 'cov-ok', title: 'NFs ZFACT neste mês' }
+      : { text: '—', cls: 'cov-miss', title: 'Sem ZFACT neste mês' };
+    const hasQz = b2bMark.text !== '—' || b2cMark.text !== '—';
+    const partialQz = b2bMark.cls === 'cov-partial' || b2cMark.cls === 'cov-partial';
+    const canalGap = (b2bMark.text !== '—') !== (b2cMark.text !== '—');
+    const crossGap = hasQz !== hasZ;
+    return {
+      mesKey,
+      mesLabel: fmtMesLabel(mesKey),
+      year: mesKey.slice(0, 4),
+      b2b: b2bMark,
+      b2c: b2cMark,
+      zfact: zMark,
+      gap: canalGap || crossGap || partialQz
+    };
+  });
+}
+
+function renderLoadCoverageSummary() {
+  const el = $('coverageSummary');
+  if (!el) return;
+  const rows = buildLoadCoverageRows();
+  if (!rows.length) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  const gaps = rows.filter(r => r.gap).length;
+  let lastYear = '';
+  const body = rows.map(r => {
+    let yearRow = '';
+    if (r.year !== lastYear) {
+      lastYear = r.year;
+      yearRow = `<tr class="cov-year"><td colspan="4">${r.year}</td></tr>`;
+    }
+    const cell = (m) => `<td class="cov-cell ${m.cls}" title="${m.title || ''}">${m.text}</td>`;
+    return `${yearRow}<tr class="${r.gap ? 'cov-gap' : ''}">
+      <td class="cov-mes">${r.mesLabel}</td>
+      ${cell(r.b2b)}${cell(r.b2c)}${cell(r.zfact)}
+    </tr>`;
+  }).join('');
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div class="fte-cov-head">
+      <div class="fte-cov-title">Cobertura por mês</div>
+      <div class="fte-cov-hint">${rows.length} mês(es)${gaps ? ` · ${gaps} com lacuna` : ' · completo'}</div>
+    </div>
+    <div class="fte-cov-tbl-wrap">
+      <table class="fte-cov-tbl">
+        <thead><tr>
+          <th>Mês</th><th style="text-align:center">B2B</th><th style="text-align:center">B2C</th><th style="text-align:center">ZFACT</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    <div class="fte-cov-foot">Linhas a amarelo: falta B2B ou B2C, só uma quinzena, ou Unilog sem ZFACT (e vice-versa). ✓ = 1ª+2ªQ ou mês ZFACT presente.</div>`;
 }
 
 async function persistFretesFile(slot, fileName, arrayBuffer) {
@@ -2237,6 +2408,7 @@ async function loadSavedSapNfMap(meta, opts = {}) {
       return false;
     }
     sapNfMap = mergeSapNfMaps(sapNfMap, revived);
+    invalidateZfactMonthsCache();
     if (parsed.files?.length) {
       const byName = new Map((sapMapSourceFiles || []).map(f => [f.fileName, f]));
       parsed.files.forEach(f => {
@@ -2257,6 +2429,7 @@ function applySapProcessResult(incoming, fileName, rowsLen, opts = {}) {
   const nIncoming = Object.keys(incoming).length;
   const nBefore = Object.keys(sapNfMap).length;
   sapNfMap = mergeSapNfMaps(sapNfMap, incoming);
+  invalidateZfactMonthsCache();
   trackSapMapSourceFile(fileName, nIncoming);
   const nMapped = Object.keys(sapNfMap).length;
   const nWithValor = Object.values(sapNfMap).filter(e => parseSapNum(e.valorNF) > 0).length;
@@ -2295,6 +2468,7 @@ function applySapProcessResult(incoming, fileName, rowsLen, opts = {}) {
       fteToast('Dados SAP mesclados (' + nMapped + ' NFs acumuladas, ' + nIncoming + ' neste ficheiro).');
     }
   }
+  renderLoadCoverageSummary();
   return true;
 }
 
@@ -2495,6 +2669,7 @@ async function processAndSaveFretes() {
     syncQzUploadZone();
     updateQzFileNote();
     updateFretesFileStatus();
+    renderLoadCoverageSummary();
 
     if (errors.length) {
       fteToastError('Processado em memória, mas falhou guardar na cloud: ' + errors.join(', ') + ' — verifica a consola.');
@@ -4204,6 +4379,7 @@ async function _loadSavedFretesFilesImpl(silent = false) {
     syncQzUploadZone();
     updateQzFileNote();
     updateFretesFileStatus();
+    renderLoadCoverageSummary();
     const activeTab = document.querySelector('.fte-tab.active')?.dataset?.tab;
     if (activeTab === 'analise-cte') renderCteSubPanels();
     else if (activeTab === 'analise-b2c') renderB2cAnalysisTab();
@@ -4341,6 +4517,7 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   syncQzUploadZone();
   updateQzFileNote();
   updateFretesFileStatus(meta);
+  renderLoadCoverageSummary();
 
   const freshCte = !!(cteOk && !hadCteInMem && !qzCteBuilt && cteRec);
   const freshQz = !!(qzLoaded && !hadQzInMem);
@@ -5433,6 +5610,7 @@ function syncQzUploadZone() {
     if (list) { list.style.display = 'none'; list.innerHTML = ''; }
   }
   checkFteBtn();
+  renderLoadCoverageSummary();
 }
 
 function setQzZoneLoaded(count) {
@@ -6185,6 +6363,7 @@ function reloadFretesForCompany() {
   currentUploadId = null;
   sapNfMap = {};
   sapMapSourceFiles = [];
+  invalidateZfactMonthsCache();
   lastCtePack = null;
   cteAnalysisSource = null;
   activeSubPanel = null;

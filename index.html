@@ -308,6 +308,23 @@ tr.occ-product-row--opt+tr.occ-moves-sub td{background:#fffbeb;}
 #page-fretes .qz-subtab.active{color:var(--red);border-color:var(--red);background:#fff5f5;}
 #page-fretes .qz-file-list{font-size:11px;color:var(--muted);max-height:120px;overflow-y:auto;margin-top:8px;text-align:left;}
 #page-fretes .qz-file-list div{padding:2px 0;font-family:var(--mono);}
+#page-fretes .fte-cov{margin:16px 0 0;background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+#page-fretes .fte-cov-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
+#page-fretes .fte-cov-title{font-size:12px;font-weight:700;color:var(--text);}
+#page-fretes .fte-cov-hint{font-size:11px;color:var(--muted);}
+#page-fretes .fte-cov-tbl-wrap{max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:6px;}
+#page-fretes .fte-cov-tbl{width:100%;border-collapse:collapse;font-size:12px;background:#fff;}
+#page-fretes .fte-cov-tbl th{text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;position:sticky;top:0;background:#fff;z-index:1;}
+#page-fretes .fte-cov-tbl td{padding:6px 10px;border-bottom:1px solid var(--bg4);vertical-align:middle;}
+#page-fretes .fte-cov-tbl td.cov-mes{font-family:var(--mono);font-weight:600;white-space:nowrap;}
+#page-fretes .fte-cov-tbl td.cov-cell{text-align:center;font-family:var(--mono);font-size:11px;}
+#page-fretes .fte-cov-tbl .cov-ok{color:var(--green);font-weight:700;}
+#page-fretes .fte-cov-tbl .cov-miss{color:#94a3b8;}
+#page-fretes .fte-cov-tbl .cov-partial{color:#c2410c;font-weight:600;}
+#page-fretes .fte-cov-tbl tr.cov-gap{background:#fffbeb;}
+#page-fretes .fte-cov-tbl tr.cov-gap:hover{background:#fef3c7;}
+#page-fretes .fte-cov-tbl tr.cov-year td{background:var(--bg3);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.04em;padding:5px 10px;}
+#page-fretes .fte-cov-foot{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.45;}
 #page-fretes tr.qz-diff-row td{background:#fff8f0;}
 #page-fretes tr.qz-only-row td{background:#fef2f2;}
 #page-fretes .qz-subtabs{display:flex;gap:6px;margin:12px 0;}
@@ -507,7 +524,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.81 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.82 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1751,6 +1768,7 @@ select.cad-inp{cursor:pointer;}
           </div>
         </div>
       </div>
+      <div id="fte-coverageSummary" class="fte-cov" style="display:none;" aria-live="polite"></div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;">
         <button class="btn bp" id="fte-procBtn" type="button" disabled>⚡ Processar e Guardar</button>
         <button class="btn bg" id="fte-loadLastBtn" type="button">☁️ Carregar último guardado</button>
@@ -9822,7 +9840,7 @@ function applyResizable(){scheduleColResize();}
       load('inventario-acerto.js', 'v=1.0.10');
     });
   }
-  load('fretes.js', 'v=1.8.81', function () {
+  load('fretes.js', 'v=1.8.82', function () {
     loadInventarioAcerto();
     load('armazem.js', 'v=1.0.42', bootApp, function () {
       var e = document.getElementById('arm-initErr');
