@@ -1,5 +1,7 @@
-// fretes.js v1.8.82 — coverage summary Unilog×ZFACT on Carregamento
-const FRETES_JS_VERSION = '1.8.82';
+// fretes.js v1.8.83 — coverage: ignore pre-Nov; Nov 2ªQ-only OK
+const FRETES_JS_VERSION = '1.8.83';
+/** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
+const FRETES_OPS_START_MES = '2025-11';
 /** Bump when ZFACT valorNF column semantics change — stale cloud maps must re-parse Excel. */
 const SAP_NF_MAP_PARSER_VERSION = 3;
 
@@ -463,14 +465,26 @@ function enumerateMesKeysInclusive(minKey, maxKey) {
   return out;
 }
 
-function covQzMark(qs) {
+function resolveFretesOpsStartMes(allKeys) {
+  // Prefer earliest Nov in loaded data at/after default ops start; else constant.
+  const novs = [...(allKeys || [])].filter(k => /^\d{4}-11$/.test(k)).sort();
+  const fromData = novs.find(k => k >= FRETES_OPS_START_MES);
+  return fromData || FRETES_OPS_START_MES;
+}
+
+function covQzMark(qs, opts) {
   if (!qs || !qs.size) return { text: '—', cls: 'cov-miss', title: 'Sem quinzenal' };
   const has1 = qs.has(1);
   const has2 = qs.has(2);
   const hasUnk = [...qs].some(q => q !== 1 && q !== 2);
   if (has1 && has2) return { text: '✓', cls: 'cov-ok', title: '1ªQ + 2ªQ' };
   if (has1 && !has2) return { text: '1ªQ', cls: 'cov-partial', title: 'Só 1ª quinzena' };
-  if (has2 && !has1) return { text: '2ªQ', cls: 'cov-partial', title: 'Só 2ª quinzena' };
+  if (has2 && !has1) {
+    if (opts?.allowSecondQuinzenaOnly) {
+      return { text: '2ªQ', cls: 'cov-ok', title: 'Só 2ªQ — esperado (ops desde 10 Nov)' };
+    }
+    return { text: '2ªQ', cls: 'cov-partial', title: 'Só 2ª quinzena' };
+  }
   if (hasUnk) return { text: '✓', cls: 'cov-ok', title: 'Ficheiro(s) no mês' };
   return { text: '—', cls: 'cov-miss', title: 'Sem quinzenal' };
 }
@@ -509,13 +523,18 @@ function buildLoadCoverageRows() {
   const zfact = getZfactMonthsSet();
   const allKeys = new Set([...b2b.keys(), ...b2c.keys(), ...zfact]);
   if (!allKeys.size) return [];
-  const sorted = [...allKeys].filter(k => /^\d{4}-\d{2}$/.test(k)).sort();
+  const opsStart = resolveFretesOpsStartMes(allKeys);
+  const sorted = [...allKeys]
+    .filter(k => /^\d{4}-\d{2}$/.test(k) && k >= opsStart)
+    .sort();
   if (!sorted.length) return [];
   const span = enumerateMesKeysInclusive(sorted[0], sorted[sorted.length - 1]);
-  const keys = span.length && span.length <= 36 ? span : sorted;
+  const keys = (span.length && span.length <= 36 ? span : sorted).filter(k => k >= opsStart);
   return keys.map(mesKey => {
-    const b2bMark = covQzMark(b2b.get(mesKey));
-    const b2cMark = covQzMark(b2c.get(mesKey));
+    // Ops-start Nov only: Unilog 2ªQ-only is expected (not later Novembers)
+    const allow2qOnly = mesKey === FRETES_OPS_START_MES;
+    const b2bMark = covQzMark(b2b.get(mesKey), { allowSecondQuinzenaOnly: allow2qOnly });
+    const b2cMark = covQzMark(b2c.get(mesKey), { allowSecondQuinzenaOnly: allow2qOnly });
     const hasZ = zfact.has(mesKey);
     const zMark = hasZ
       ? { text: '✓', cls: 'cov-ok', title: 'NFs ZFACT neste mês' }
@@ -573,7 +592,7 @@ function renderLoadCoverageSummary() {
         <tbody>${body}</tbody>
       </table>
     </div>
-    <div class="fte-cov-foot">Linhas a amarelo: falta B2B ou B2C, só uma quinzena, ou Unilog sem ZFACT (e vice-versa). ✓ = 1ª+2ªQ ou mês ZFACT presente.</div>`;
+    <div class="fte-cov-foot">Cobertura desde ${fmtMesLabel(FRETES_OPS_START_MES)} (início da operação ~10 Nov). Linhas a amarelo: falta B2B ou B2C, só uma quinzena (excepto Nov inicial: só 2ªQ é esperado), ou Unilog sem ZFACT (e vice-versa).</div>`;
 }
 
 async function persistFretesFile(slot, fileName, arrayBuffer) {
