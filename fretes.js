@@ -1,9 +1,9 @@
-// fretes.js v1.8.86 — fix QZ restore crash after file_data=null; never OOM-reparse ZFACT on map v bump
-const FRETES_JS_VERSION = '1.8.86';
+// fretes.js v1.8.87 — SAP NF: never sum repeating doc/face × lines; prefer Unilog-magnitude face
+const FRETES_JS_VERSION = '1.8.87';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
 /** Bump when ZFACT valorNF/dtEmissao column semantics change — stale cloud maps must re-parse Excel. */
-const SAP_NF_MAP_PARSER_VERSION = 5;
+const SAP_NF_MAP_PARSER_VERSION = 6;
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -1925,12 +1925,17 @@ function finalizeSapNfValor(acc) {
   // Unilog "Valor NF" = invoice face (gross). ZFACT may expose:
   // - lineSum = SUM valor bruto (face) OR partial líquido lines
   // - docVal  = AP incl.imp. / repeating "N BRL" (often face, sometimes net without tax)
-  // Rule: partial lines (sum << doc) → doc once (never SUM AP); bruto > net doc → lineSum.
+  // Rule: partial lines (sum << doc) → doc once (never SUM AP); modest bruto > net → lineSum.
+  // NEVER sum identical repeating doc/face amounts × line count (NF 99977: 442k × 25 ≈ 11M).
   if (vals.length > 0) {
     const allIdentical = vals.every(v => sapValoresClose(v, vals[0]));
+    const nearDocCount = doc > 0
+      ? vals.filter(v => sapValoresClose(v, doc, Math.max(0.05, Math.abs(doc) * 0.002))).length
+      : 0;
 
     // Doc total repeated as line bruto on every row — take once.
     if (allIdentical && doc > 0 && sapValoresClose(vals[0], doc)) return doc;
+    if (nearDocCount >= 2 && nearDocCount === vals.length) return doc;
 
     if (doc > 0) {
       if (sapValoresClose(lineSum, doc, 0.05)) return doc;
@@ -1939,16 +1944,25 @@ function finalizeSapNfValor(acc) {
       if (gap > 0.02) {
         // Partial líquido lines (e.g. 354+620 vs 4 992 BRL) → doc is the NF face.
         if (lineSum < doc) return doc;
+        // Inflated: identical (or near-doc) "lines" summed ×N — take doc once.
+        // Real bruto>net premium is small (NF 101267 ~6%); ×1.5+ is classic doc×lines bug.
+        if (lineSum > doc * 1.5) {
+          if (allIdentical || nearDocCount >= 2) return doc;
+          if (lineSum > doc * 3) return doc;
+        }
         // Bruto/line face > smaller net/BRL doc (NF 101267: 2259,34 vs 2121,44) → lineSum.
         return lineSum;
       }
     }
 
+    // Identical values on every row without a usable doc — repeating face, take once.
+    // Keep summing short material lists (2 equal billable lines / same-price SKUs).
+    if (allIdentical && vals.length > 1) {
+      if (!(acc.hasMaterialCol && vals.length <= 2)) return vals[0];
+    }
+
     // ZFACT with material/item lines: SUM every billable line (even equal bruto / same SKU).
     if (acc.hasMaterialCol) return lineSum;
-
-    // Positional export without material column: same NF total on each row.
-    if (allIdentical && vals.length > 1) return vals[0];
 
     return lineSum;
   }
@@ -1990,6 +2004,20 @@ function pickSapValorNearUnilog(sap, unilogVal) {
       best = c;
       bestDiff = d;
     }
+  }
+  // Inflated sum (doc×lines): if |sap| > 3×|unilog| and a once-doc candidate is near Unilog, use it.
+  if (Math.abs(best) > 3 * Math.abs(u)) {
+    let nearBest = null;
+    let nearDiff = Infinity;
+    for (const c of candidates) {
+      if (Math.abs(c) > 3 * Math.abs(u)) continue;
+      const d = Math.abs(c - u);
+      if (d <= Math.abs(u) * 0.5 && d < nearDiff) {
+        nearBest = c;
+        nearDiff = d;
+      }
+    }
+    if (nearBest != null) return nearBest;
   }
   return best;
 }
@@ -2057,9 +2085,13 @@ function buildSapNfMap(rows) {
       acc.docVal = Math.max(acc.docVal, docValor);
     }
     if (lineValor !== 0) {
-      acc.lineSum += lineValor;
-      acc.lineCount++;
-      acc.lineVals.push(lineValor);
+      // Never accumulate a line that duplicates the NF doc total (repeats on every item row).
+      const docRef = docValor > 0 ? docValor : acc.docVal;
+      if (!(docRef > 0 && sapValoresClose(lineValor, docRef))) {
+        acc.lineSum += lineValor;
+        acc.lineCount++;
+        acc.lineVals.push(lineValor);
+      }
     } else if (!r.valorLine && !r.valorDoc && r.valorNF) {
       const fb = sapParsedValor(r.valorNF);
       if (fb > 0) acc.fallbackVals.push(fb);
@@ -2272,6 +2304,37 @@ function _debugBuildSapNfMapAggregation() {
   }
   const map99977 = buildSapNfMap(rows99977);
   const ok99977apOnce = Math.abs((map99977['99977']?.valorNF || 0) - 442314.49) < 0.01;
+  // Screenshot bug: Valor Bruto = full face on every material line (×25 → ~11M). Take once.
+  const map99977brutoFaceRepeat = buildSapNfMap(Array.from({ length: 25 }, (_, i) => ({
+    nf: '99977',
+    _hasMaterialCol: true,
+    material: 'SKU-' + i,
+    valorLine: '442.314,49',
+    valorDoc: '442.314,49'
+  })));
+  const ok99977brutoFace = Math.abs((map99977brutoFaceRepeat['99977']?.valorNF || 0) - 442314.49) < 0.01;
+  // Same pattern with slightly different repeating line face vs Unilog/doc (11244900/25 = 449796).
+  const map99977lineInflate = buildSapNfMap(Array.from({ length: 25 }, (_, i) => ({
+    nf: '99977',
+    _hasMaterialCol: true,
+    material: 'SKU-' + i,
+    valorLine: '449.796,00',
+    valorDoc: '442.314,49'
+  })));
+  const ok99977lineInflate = Math.abs((map99977lineInflate['99977']?.valorNF || 0) - 442314.49) < 0.01;
+  const near99977 = pickSapValorNearUnilog(
+    { valorNF: 11244900, lineSum: 11244900, docVal: 442314.49 },
+    442314.49
+  );
+  const ok99977near = Math.abs((near99977 || 0) - 442314.49) < 0.01;
+  // Repeating face without doc column — still take once when ≥3 identical material lines.
+  const map99977noDoc = buildSapNfMap(Array.from({ length: 25 }, (_, i) => ({
+    nf: '99977',
+    _hasMaterialCol: true,
+    material: 'SKU-' + i,
+    valorLine: '442.314,49'
+  })));
+  const ok99977noDoc = Math.abs((map99977noDoc['99977']?.valorNF || 0) - 442314.49) < 0.01;
   const map99977normalize = buildSapNfMap(Array.from({ length: 25 }, (_, i) => normalizeSapRow({
     'Nº da nota fiscal eletrônica': '99977',
     Nome: 'ARC TRANSPORTE',
@@ -2300,7 +2363,8 @@ function _debugBuildSapNfMapAggregation() {
       || !ok99635lineDoc || !ok99635inflate || !ok99635brutoZfact || !ok99635feeLines || !ok99636bruto
       || !ok99636lineDoc || !ok2223 || !ok18591 || !ok99641 || !ok99641sameMat || !ok99642
       || !ok18596 || !ok18596multi || !ok100796brl || !ok100796lines || !ok100796partial || !ok100934ap
-      || !ok99977apOnce || !ok99977norm || !ok99977impHdr
+      || !ok99977apOnce || !ok99977brutoFace || !ok99977lineInflate || !ok99977near || !ok99977noDoc
+      || !ok99977norm || !ok99977impHdr
       || !ok101267 || !ok101267near || !ok101267netOnly) {
     console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
       ok97723, got97723: map['97723']?.valorNF,
@@ -2328,6 +2392,10 @@ function _debugBuildSapNfMapAggregation() {
       ok100796partial, got100796partial: map100796partial['100796']?.valorNF,
       ok100934ap, got100934ap: map100934['100934']?.valorNF,
       ok99977apOnce, got99977: map99977['99977']?.valorNF,
+      ok99977brutoFace, got99977brutoFace: map99977brutoFaceRepeat['99977']?.valorNF,
+      ok99977lineInflate, got99977lineInflate: map99977lineInflate['99977']?.valorNF,
+      ok99977near, got99977near: near99977,
+      ok99977noDoc, got99977noDoc: map99977noDoc['99977']?.valorNF,
       ok99977norm, got99977norm: map99977normalize['99977']?.valorNF,
       ok99977impHdr, got99977impHdr: map99977imp['99977']?.valorNF,
       ok101267, got101267: map101267['101267']?.valorNF,
@@ -2515,7 +2583,9 @@ function mergeSapNfMaps(prev, next) {
       cliente: (inc?.cliente && String(inc.cliente).trim()) || old.cliente || '',
       // Never wipe a known emissão date with a blank incoming parse (wide ZFACT layout bugs).
       dtEmissao: inc?.dtEmissao || old.dtEmissao || null,
-      valorNF: incValor > 0 ? inc.valorNF : (oldValor > 0 ? old.valorNF : (inc?.valorNF ?? old.valorNF))
+      valorNF: incValor > 0 ? inc.valorNF : (oldValor > 0 ? old.valorNF : (inc?.valorNF ?? old.valorNF)),
+      lineSum: num(inc?.lineSum) > 0 ? inc.lineSum : (num(old?.lineSum) || 0),
+      docVal: num(inc?.docVal) > 0 ? inc.docVal : (num(old?.docVal) || 0)
     };
   });
   return out;
@@ -5131,8 +5201,11 @@ function aggregateQzB2BRows(rows, fileMeta) {
     }
     const g = byNf[key];
     if (num(r.valorNF) > g.valorNF) g.valorNF = num(r.valorNF);
+    const cteKey = r.numCte != null && String(r.numCte).trim() !== '' ? String(r.numCte).trim() : null;
+    // Duplicate QZ rows for the same CT-e — do not double-count pago / CT-e list.
+    if (cteKey && g.nCteSet.has(cteKey)) return;
+    if (cteKey) g.nCteSet.add(cteKey);
     g.pago += num(r.pago);
-    if (r.numCte) g.nCteSet.add(String(r.numCte).trim());
     if (r.transportador && g.transportador === '') g.transportador = r.transportador;
     if (r.modalidade && !g.modalidade) g.modalidade = r.modalidade;
     if (r.dtNF) {
@@ -5142,7 +5215,7 @@ function aggregateQzB2BRows(rows, fileMeta) {
     }
     const isDev = isDevolucaoFlag(r.devolucao);
     g.ctes.push({
-      numCte: r.numCte != null && String(r.numCte).trim() !== '' ? String(r.numCte).trim() : null,
+      numCte: cteKey,
       dtCte: persistDateValue(r.dtCte) || r.dtCte || null,
       pago: num(r.pago),
       devolucao: isDev,
