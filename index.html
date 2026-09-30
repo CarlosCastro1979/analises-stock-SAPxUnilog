@@ -524,7 +524,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.87 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.88 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1745,6 +1745,10 @@ select.cad-inp{cursor:pointer;}
     <!-- Tab 1: Carregamento de dados -->
     <div id="fte-tab-carregamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
+      <div class="data-warn" style="display:block;margin:0 0 14px;">
+        <strong>Atualização v1.8.88 — valor SAP (ZFACT):</strong> o total da NF usa <strong>Val.total incl.imp.</strong> (e face) <em>uma vez por NF</em> — nunca soma o total repetido em cada linha de material.
+        Depois desta atualização, clica <strong>Processar e Guardar</strong> uma vez (ZFACT já seleccionado ou último guardado) para reconstruir o mapa SAP e limpar Δ inflacionados (ex.: NF 99977).
+      </div>
       <div class="upload-grid">
         <div>
           <div class="sl">Relatórios quinzenais Unilog (B2B + B2C)</div>
@@ -1762,7 +1766,7 @@ select.cad-inp{cursor:pointer;}
           <div class="uz" id="fte-sapZone">
             <div style="font-size:26px;margin-bottom:8px">🗄️</div>
             <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel SAP (ZFACT)</div>
-            <div style="font-size:11px;color:var(--muted)">NF · data emissão · cliente · valor — merge acumulado por NF (não apaga histórico). Partilhado com Armazém.</div>
+            <div style="font-size:11px;color:var(--muted)">NF · data emissão · cliente · <strong>Val.total incl.imp.</strong> (1× por NF, nunca somar linhas). Merge acumulado por NF. Partilhado com Armazém.</div>
             <div id="fte-sapFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
             <input type="file" id="fte-sapFileInput" accept=".xlsx,.xls">
           </div>
@@ -9840,7 +9844,7 @@ function applyResizable(){scheduleColResize();}
       load('inventario-acerto.js', 'v=1.0.10');
     });
   }
-  load('fretes.js', 'v=1.8.87', function () {
+  load('fretes.js', 'v=1.8.88', function () {
     loadInventarioAcerto();
     load('armazem.js', 'v=1.0.42', bootApp, function () {
       var e = document.getElementById('arm-initErr');

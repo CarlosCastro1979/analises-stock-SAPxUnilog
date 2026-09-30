@@ -1,9 +1,13 @@
-// fretes.js v1.8.87 — SAP NF: never sum repeating doc/face × lines; prefer Unilog-magnitude face
-const FRETES_JS_VERSION = '1.8.87';
+// fretes.js v1.8.88 — discard/sanitize summed SAP map valores; UI reprocess note
+const FRETES_JS_VERSION = '1.8.88';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
-/** Bump when ZFACT valorNF/dtEmissao column semantics change — stale cloud maps must re-parse Excel. */
-const SAP_NF_MAP_PARSER_VERSION = 6;
+/**
+ * Bump when ZFACT valorNF/dtEmissao column semantics change.
+ * v7: cloud maps may still hold SUM(face)×lines (NF 99977≈11.2M) — sanitize on load; user must Processar ZFACT.
+ * (Do NOT auto-reparse multi-MB Excel on open — Chrome OOM.)
+ */
+const SAP_NF_MAP_PARSER_VERSION = 7;
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -35,6 +39,7 @@ let fteCteFileName = '';
 let fteCteBuffer = null;
 let fteSapFileName = '';
 let fteSapBuffer = null;
+let fteSapMapNeedsReprocess = false;
 let fteQzPendingFiles = [];
 let quinzenalPack = null;
 let _fteLoadSavedPromise = null;
@@ -2481,7 +2486,20 @@ function applySapToNf(nf) {
 
   const unilogVal = nf.valorUnilog;
   nf.valorSAP = pickSapValorNearUnilog(sap, unilogVal);
-  const sapVal = num(nf.valorSAP);
+  let sapVal = num(nf.valorSAP);
+
+  // Stale cloud map safety: valorNF was SUM of repeating face × N lines (e.g. 442k×25≈11M).
+  // If SAP ≈ Unilog×N for integer N∈[3,100], recover once-per-NF face without Excel re-parse.
+  if (unilogVal > 0 && sapVal > unilogVal * 2.5) {
+    const ratio = sapVal / unilogVal;
+    const nRep = Math.round(ratio);
+    if (nRep >= 3 && nRep <= 100 && Math.abs(ratio - nRep) / nRep < 0.05) {
+      const once = sapVal / nRep;
+      console.warn('[SAP NF] deflated summed valor', nf.nf, sapVal, '÷', nRep, '→', once);
+      sapVal = once;
+      nf.valorSAP = once;
+    }
+  }
 
   if ((!nf.valorNF || nf.valorNF === 0) && sapVal) {
     nf.valorNF = sapVal;
@@ -2739,6 +2757,48 @@ function parseSapNfMapFromRec(rec) {
   }
 }
 
+/**
+ * Cloud JSON maps may still store SUM(repeating face)×lines from older parsers.
+ * Deflate to once-per-NF when valor looks like unit×N (N=3..80). No Excel re-parse (OOM-safe).
+ * Returns count of entries corrected.
+ */
+function sanitizeInflatedSapMapValors(map) {
+  if (!map || typeof map !== 'object') return 0;
+  let fixed = 0;
+  const n99977 = parseSapNum(map['99977']?.valorNF);
+  const fingerprint99977 = n99977 > 5_000_000 && Math.abs(n99977 - 11_244_900) < 1;
+  Object.keys(map).forEach(k => {
+    const e = map[k];
+    if (!e) return;
+    const v = parseSapNum(e.valorNF);
+    if (!(v > 500_000)) return;
+    let unitOnce = 0;
+    for (let n = 3; n <= 80; n++) {
+      const unit = v / n;
+      if (unit < 1000) break;
+      if (unit > 2_000_000) continue;
+      if (Math.abs(unit * n - v) < 0.05) {
+        // Prefer whole-reais or cent-stable units (typical SAP exports).
+        if (Math.abs(unit - Math.round(unit)) < 0.01 || Math.abs(unit * 100 - Math.round(unit * 100)) < 0.01) {
+          unitOnce = unit;
+          break;
+        }
+      }
+    }
+    if (unitOnce > 0) {
+      e.valorNF = unitOnce;
+      fixed++;
+    } else if (fingerprint99977 && k === '99977') {
+      e.valorNF = 0;
+      fixed++;
+    }
+  });
+  if (fixed) {
+    console.warn('[fretes] sanitized', fixed, 'inflated SAP map valor(s) (SUM×lines → once)');
+  }
+  return fixed;
+}
+
 /** Restore accumulated SAP map from cloud JSON (does not clear keys absent from Excel). */
 async function loadSavedSapNfMap(meta, opts = {}) {
   if (typeof fetchExcelFiles !== 'function') return false;
@@ -2752,19 +2812,21 @@ async function loadSavedSapNfMap(meta, opts = {}) {
       console.warn('[fretes] sap map parse empty', fteCompany(), rec.file_name);
       return false;
     }
-    // Stale parser: still LOAD the map. Returning false forced a multi-MB ZFACT Excel
-    // re-parse on every open after a version bump → Chrome OOM / white screen.
-    // pickSapValorNearUnilog works with valorNF alone; next ZFACT Processar upgrades to v5.
-    if ((parsed.version || 1) < SAP_NF_MAP_PARSER_VERSION) {
+    // Stale parser: still LOAD the map (dates/cliente). Do NOT auto-reparse multi-MB ZFACT
+    // Excel on open (Chrome OOM). Sanitize summed valorNF; user Processar upgrades pack.
+    const stale = (parsed.version || 1) < SAP_NF_MAP_PARSER_VERSION;
+    if (stale) {
       console.warn('[fretes] sap map stale parser v' + (parsed.version || 1)
         + ' < ' + SAP_NF_MAP_PARSER_VERSION
-        + ' — using map (no auto ZFACT re-parse); re-process ZFACT to refresh face fields');
+        + ' — sanitize valores; Processar ZFACT para gravar mapa v' + SAP_NF_MAP_PARSER_VERSION);
     }
     const revived = await reviveSapNfMapAsync(parsed.raw);
     if (!Object.keys(revived).length) {
       console.warn('[fretes] sap map parse empty', fteCompany(), rec.file_name);
       return false;
     }
+    const nFixed = sanitizeInflatedSapMapValors(revived);
+    fteSapMapNeedsReprocess = !!(stale || nFixed > 0);
     sapNfMap = mergeSapNfMaps(sapNfMap, revived);
     invalidateZfactMonthsCache();
     if (parsed.files?.length) {
@@ -2774,7 +2836,11 @@ async function loadSavedSapNfMap(meta, opts = {}) {
       });
       sapMapSourceFiles = [...byName.values()];
     }
-    console.log('[fretes] load sap map', fteCompany(), rec.file_name, 'mapSize', Object.keys(sapNfMap).length);
+    if (fteSapMapNeedsReprocess && !opts.silent) {
+      fteToast('Mapa SAP desatualizado/corrigido — em Carregamento, clica Processar e Guardar (ZFACT) uma vez.');
+    }
+    console.log('[fretes] load sap map', fteCompany(), rec.file_name, 'mapSize', Object.keys(sapNfMap).length,
+      'stale', stale, 'sanitized', nFixed);
     return true;
   } catch (err) {
     console.error('[fretes] load sap map', err);
@@ -2788,6 +2854,7 @@ function applySapProcessResult(incoming, fileName, rowsLen, opts = {}) {
   const nBefore = Object.keys(sapNfMap).length;
   sapNfMap = mergeSapNfMaps(sapNfMap, incoming);
   invalidateZfactMonthsCache();
+  fteSapMapNeedsReprocess = false;
   trackSapMapSourceFile(fileName, nIncoming);
   const nMapped = Object.keys(sapNfMap).length;
   const nWithValor = Object.values(sapNfMap).filter(e => parseSapNum(e.valorNF) > 0).length;
@@ -4859,8 +4926,12 @@ async function _loadSavedFretesFilesImpl(silent = false) {
         }
       }
     }
+    if (fteSapMapNeedsReprocess && !silent) {
+      fteToast('Mapa SAP tinha totais somados/desatualizados — em Carregamento, Processar e Guardar (ZFACT) uma vez.');
+    }
     console.log('[fretes] restore sap from map JSON', co, 'mapSize', Object.keys(sapNfMap).length,
-      'skippedZfactExcel', true, 'mapMissesFileMonths', mapMissesFileMonths);
+      'skippedZfactExcel', true, 'mapMissesFileMonths', mapMissesFileMonths,
+      'needsReprocess', fteSapMapNeedsReprocess);
   } else {
     // Map missing only — fetch ZFACT Excel (guarded; failures must not blank the app)
     try {
