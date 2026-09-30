@@ -1,5 +1,5 @@
-// fretes.js v1.8.85 — SAP NF face (bruto/line over net) + ZFACT Jul/Ago coverage dates
-const FRETES_JS_VERSION = '1.8.85';
+// fretes.js v1.8.86 — fix QZ restore crash after file_data=null; never OOM-reparse ZFACT on map v bump
+const FRETES_JS_VERSION = '1.8.86';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
 /** Bump when ZFACT valorNF/dtEmissao column semantics change — stale cloud maps must re-parse Excel. */
@@ -157,7 +157,8 @@ function switchFteTab(tab) {
         else if (tab === 'analise-b2c') renderB2cAnalysisTab();
         else if (tab === 'cte-vs-qz') renderB2bCompareTab();
         else if (tab === 'resumo-total') renderResumoTotal();
-      }).catch(e => console.warn('[fretes] lazy tab load', e));
+      }).catch(e => console.warn('[fretes] lazy tab load', e))
+        .finally(() => { try { fteSetProcessing(false); } catch (_) {} });
     };
     try { requestAnimationFrame(() => setTimeout(paintThenLoad, 0)); }
     catch (_) { setTimeout(paintThenLoad, 0); }
@@ -2681,10 +2682,13 @@ async function loadSavedSapNfMap(meta, opts = {}) {
       console.warn('[fretes] sap map parse empty', fteCompany(), rec.file_name);
       return false;
     }
+    // Stale parser: still LOAD the map. Returning false forced a multi-MB ZFACT Excel
+    // re-parse on every open after a version bump → Chrome OOM / white screen.
+    // pickSapValorNearUnilog works with valorNF alone; next ZFACT Processar upgrades to v5.
     if ((parsed.version || 1) < SAP_NF_MAP_PARSER_VERSION) {
       console.warn('[fretes] sap map stale parser v' + (parsed.version || 1)
-        + ' < ' + SAP_NF_MAP_PARSER_VERSION + ' — will re-parse ZFACT Excel');
-      return false;
+        + ' < ' + SAP_NF_MAP_PARSER_VERSION
+        + ' — using map (no auto ZFACT re-parse); re-process ZFACT to refresh face fields');
     }
     const revived = await reviveSapNfMapAsync(parsed.raw);
     if (!Object.keys(revived).length) {
@@ -4762,13 +4766,17 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   });
   const fileMonths = collectZfactFilenameMonthHints();
   const mapMissesFileMonths = [...fileMonths].some(m => !mapMonths.has(m));
+  // Never auto-force multi-MB ZFACT Excel re-parse on restore (Chrome OOM → white tab).
+  // Coverage gaps: keep map + warn; user re-processes ZFACT from Carregamento when needed.
   if (mapHad && mapMissesFileMonths) {
-    console.warn('[fretes] sap map months incomplete vs filename', {
+    console.warn('[fretes] sap map months incomplete vs filename (keeping map, no auto re-parse)', {
       mapMonths: [...mapMonths].sort(),
       fileMonths: [...fileMonths].sort(),
       file: fteSapFileName
     });
-    mapHad = false; // force Excel re-parse with fixed date-column detection
+    if (!silent) {
+      fteToast('Cobertura ZFACT incompleta vs nome do ficheiro — em Carregamento, processa de novo o ZFACT.');
+    }
   }
 
   if (mapHad && Object.keys(sapNfMap).length) {
@@ -4782,23 +4790,29 @@ async function _loadSavedFretesFilesImpl(silent = false) {
       }
     }
     console.log('[fretes] restore sap from map JSON', co, 'mapSize', Object.keys(sapNfMap).length,
-      'skippedZfactExcel', true);
+      'skippedZfactExcel', true, 'mapMissesFileMonths', mapMissesFileMonths);
   } else {
-    // Map missing / stale / incomplete vs filename — fetch ZFACT Excel
+    // Map missing only — fetch ZFACT Excel (guarded; failures must not blank the app)
     try {
       await fteYield('A descarregar ZFACT…');
       const sapMeta = await fetchExcelFiles([fteSapSlot()]);
       sapRec = sapMeta[fteSapSlot()];
     } catch (e) { console.warn('[fretes] sap excel fetch', e); }
     if (sapRec?.file_data) {
-      await fteYield('A processar ZFACT…');
-      const sapOnlyOk = await restoreSapFromRec(sapRec, silent);
-      sapRec.file_data = null;
-      console.log('[fretes] restore sap', co, sapRec.file_name, 'ok', sapOnlyOk,
-        'mapHad', mapHad, 'mapSize', Object.keys(sapNfMap).length);
-      const nAfter = Object.keys(sapNfMap).length;
-      if (nAfter > 0) {
-        await persistSapNfMap(sapNfMap, { silent: true });
+      try {
+        await fteYield('A processar ZFACT…');
+        const sapOnlyOk = await restoreSapFromRec(sapRec, silent);
+        sapRec.file_data = null;
+        console.log('[fretes] restore sap', co, sapRec.file_name, 'ok', sapOnlyOk,
+          'mapHad', mapHad, 'mapSize', Object.keys(sapNfMap).length);
+        const nAfter = Object.keys(sapNfMap).length;
+        if (nAfter > 0) {
+          await persistSapNfMap(sapNfMap, { silent: true });
+        }
+      } catch (e) {
+        console.error('[fretes] restore sap excel failed (kept UI alive)', e);
+        try { sapRec.file_data = null; } catch (_) {}
+        if (!silent) fteToastError('Falha ao processar ZFACT guardado — tenta Processar de novo em Carregamento.');
       }
     } else if (Object.keys(sapNfMap).length && (qzCteBuilt || cteAnalysisSource === 'quinzenal' || currentNFs.length)) {
       await fteYield('A cruzar SAP…');
@@ -6000,16 +6014,19 @@ async function loadSavedQuinzenalPack(silent, meta, opts = {}) {
       updateQzProcessStatus();
       return true;
     }
+    // Capture length BEFORE parse — parseQuinzenalPackFromRec nulls rec.file_data to free RAM.
+    const dataLen = rec.file_data?.length || 0;
     await fteYield('A descodificar quinzenais…');
     const parsed = parseQuinzenalPackFromRec(rec);
     if (!parsed?.files?.length) {
-      console.warn('[fretes] quinzenal parse empty', fteCompany(), rec.file_name, 'dataLen', rec.file_data?.length || 0);
+      console.warn('[fretes] quinzenal parse empty', fteCompany(), rec.file_name, 'dataLen', dataLen);
       if (!silent) fteToastError('Quinzenais guardados corrompidos — volta a carregar os ficheiros e clica Processar e Guardar.');
       return false;
     }
     quinzenalPack = parsed;
     const c = quinzenalPackCounts(quinzenalPack);
-    console.log('[fretes] load quinzenal', fteCompany(), rec.file_name, 'dataLen', rec.file_data.length, 'files', c.total, c.b2c, 'B2C', c.b2b, 'B2B');
+    console.log('[fretes] load quinzenal', fteCompany(), rec.file_name, 'dataLen', dataLen,
+      'files', c?.total || 0, c?.b2c || 0, 'B2C', c?.b2b || 0, 'B2B');
     if (!opts?.deferCompare) {
       await fteYield('A calcular confrontos QZ…');
       refreshQuinzenalCompare();
@@ -6017,7 +6034,7 @@ async function loadSavedQuinzenalPack(silent, meta, opts = {}) {
     syncQzUploadZone();
     updateQzFileNote();
     updateQzProcessStatus();
-    if (!silent) fteToast(`Quinzenais restaurados: ${c.b2c} B2C · ${c.b2b} B2B`);
+    if (!silent) fteToast(`Quinzenais restaurados: ${c?.b2c || 0} B2C · ${c?.b2b || 0} B2B`);
     if (!opts?.skipRender) {
       const activeTab = document.querySelector('.fte-tab.active')?.dataset?.tab;
       if (activeTab === 'analise-b2c') renderB2cAnalysisTab();
