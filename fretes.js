@@ -1,11 +1,12 @@
-// fretes.js v1.8.91 — restore: FORCE AP + scrub shared ghost faces + persist; multi-CT-e pago once
-const FRETES_JS_VERSION = '1.8.91';
+// fretes.js v1.8.92 — scrub ghosts fully (zero lineSum); no lineSum resurrect; pago once
+const FRETES_JS_VERSION = '1.8.92';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
 /**
  * Bump when ZFACT valorNF/dtEmissao column semantics change.
- * v9: on restore, FORCE AP from stored docVal + scrub shared ghost faces (docVal=0, same face on ≥3 NFs);
+ * v9: on restore, FORCE AP from stored docVal + scrub shared/repeating ghost faces (no AP);
  *     auto-persist corrected map (no manual Processar). Multi-CT-e: identical pago rows → take once.
+ *     Also zero lineSum on scrub so pick/×N deflate cannot resurrect ghosts.
  * v8: FORCE valorNF = Val.total incl.imp. once/NF (never lose to modest lineSum gap, e.g. 449796 vs 442314).
  * v7: cloud maps may still hold SUM(face)×lines (NF 99977≈11.2M) — sanitize on load; user must Processar ZFACT.
  * (Do NOT auto-reparse multi-MB Excel on open — Chrome OOM.)
@@ -2097,11 +2098,15 @@ function pickSapValorNearUnilog(sap, unilogVal) {
   if (!sap) return null;
   const u = num(unilogVal);
   const docN = num(sap.docVal);
+  const valorN = num(sap.valorNF);
 
   // Programmed AP / Val.total incl.imp. — always wins (Unilog face).
   if (sap.docFromInclImp && docN > 0) return docN;
   // Doc matches Unilog within cent tolerance → Δ=0 candidate.
   if (u > 0 && docN > 0 && Math.abs(docN - u) <= SAP_VALOR_NEAR_EPS) return docN;
+
+  // No trusted face (ghost scrubbed / empty AP) — do NOT invent from inflated lineSum.
+  if (!(valorN > 0) && !(docN > 0)) return null;
 
   const candidates = [];
   const add = (v) => {
@@ -2111,7 +2116,8 @@ function pickSapValorNearUnilog(sap, unilogVal) {
     candidates.push(n);
   };
   add(sap.valorNF);
-  add(sap.lineSum);
+  // lineSum only when we already have a usable valor/doc (never alone — resurrects ghosts).
+  if (valorN > 0 || docN > 0) add(sap.lineSum);
   add(sap.docVal);
   if (!candidates.length) return sap.valorNF ?? null;
   if (!(u > 0)) return sap.valorNF ?? candidates[0];
@@ -2566,9 +2572,26 @@ function _debugBuildSapNfMapAggregation() {
   const nGhost = scrubSharedGhostSapFaces(ghostMap);
   const okGhostScrub = nGhost >= 6
     && parseSapNum(ghostMap['99977'].valorNF) === 0
+    && parseSapNum(ghostMap['99977'].lineSum) === 0
     && parseSapNum(ghostMap['97767'].valorNF) === 0
     && parseSapNum(ghostMap['100934'].valorNF) === 6673.5;
   if (!okGhostScrub) console.warn('[SAP NF] ghost scrub failed', nGhost, ghostMap['99977'], ghostMap['100934']);
+
+  // Unique NF repeating face without AP (lineSum = valor×N) must also clear.
+  const alone = {
+    '98019': { valorNF: 447886, lineSum: 8061948, docVal: 0, docFromInclImp: false }
+  };
+  const nAlone = scrubRepeatingNoApFaces(alone);
+  const okAlone = nAlone === 1 && parseSapNum(alone['98019'].valorNF) === 0;
+  if (!okAlone) console.warn('[SAP NF] repeating no-AP scrub failed', alone['98019']);
+
+  // pick must not resurrect from lineSum when valorNF scrubbed.
+  const nearGhost = pickSapValorNearUnilog(
+    { valorNF: 0, lineSum: 11244900, docVal: 0, docFromInclImp: false },
+    442314.49
+  );
+  const okNoResurrect = nearGhost == null;
+  if (!okNoResurrect) console.warn('[SAP NF] lineSum resurrected scrubbed ghost', nearGhost);
 
   // FORCE refinalize from stored docVal when AP present but valorNF still bruto.
   const refMap = {
@@ -2662,8 +2685,8 @@ function applySapToNf(nf) {
   }
 
   // Stale cloud map safety: valorNF was SUM of repeating face × N lines (e.g. 442k×25≈11M).
-  // If SAP ≈ Unilog×N for integer N∈[3,100], recover once-per-NF face without Excel re-parse.
-  if (unilogVal > 0 && sapVal > unilogVal * 2.5) {
+  // Only deflate when AP/doc exists OR valorNF itself is the inflated sum — never invent face from bare lineSum.
+  if (unilogVal > 0 && sapVal > unilogVal * 2.5 && (num(sap.docVal) > 0 || num(sap.valorNF) > unilogVal * 2.5)) {
     const ratio = sapVal / unilogVal;
     const nRep = Math.round(ratio);
     if (nRep >= 3 && nRep <= 100 && Math.abs(ratio - nRep) / nRep < 0.05) {
@@ -2777,7 +2800,7 @@ function mergeSapNfMaps(prev, next) {
       dtEmissao: inc?.dtEmissao || old.dtEmissao || null,
       // Ghost scrub sets valorNF=0 on purpose — do not resurrect old bogus face.
       valorNF: scrubbed ? 0 : (incValor > 0 ? inc.valorNF : (oldValor > 0 ? old.valorNF : (inc?.valorNF ?? old.valorNF))),
-      lineSum: num(inc?.lineSum) > 0 ? inc.lineSum : (num(old?.lineSum) || 0),
+      lineSum: scrubbed ? 0 : (num(inc?.lineSum) > 0 ? inc.lineSum : (num(old?.lineSum) || 0)),
       docVal: num(inc?.docVal) > 0 ? inc.docVal : (num(old?.docVal) || 0),
       docFromInclImp: !!(inc?.docFromInclImp || old?.docFromInclImp)
     };
@@ -3048,7 +3071,7 @@ function scrubSharedGhostSapFaces(map, minShare = 3) {
       const doc = parseSapNum(e.docVal);
       if (doc > 0 && e.docFromInclImp) return;
       e.valorNF = 0;
-      // Keep lineSum for debug; do not use as face without AP.
+      e.lineSum = 0; // prevent pickSapValorNearUnilog / ×N deflate from resurrecting the ghost
       e._ghostFaceScrubbed = parseSapNum(faceKey);
       fixed++;
     });
@@ -3059,13 +3082,43 @@ function scrubSharedGhostSapFaces(map, minShare = 3) {
   return fixed;
 }
 
+/**
+ * Even a unique NF can have unreliable face when there is no AP and lineSum = valorNF×N (N≥3):
+ * classic repeating bruto-once without Val.total (e.g. NF 98019: 447886 × 18).
+ */
+function scrubRepeatingNoApFaces(map) {
+  if (!map || typeof map !== 'object') return 0;
+  let fixed = 0;
+  Object.keys(map).forEach(k => {
+    const e = map[k];
+    if (!e) return;
+    const doc = parseSapNum(e.docVal);
+    if (doc > 0 && e.docFromInclImp) return;
+    const v = parseSapNum(e.valorNF);
+    const ls = parseSapNum(e.lineSum);
+    if (!(v > 1000) || !(ls > v * 2.5)) return;
+    const n = Math.round(ls / v);
+    if (n < 3 || n > 200) return;
+    if (Math.abs(ls - v * n) / ls > 0.02) return;
+    e._ghostFaceScrubbed = v;
+    e.valorNF = 0;
+    e.lineSum = 0;
+    fixed++;
+  });
+  if (fixed) {
+    console.warn('[fretes] scrubbed', fixed, 'repeating no-AP SAP face(s) (lineSum≈valor×N)');
+  }
+  return fixed;
+}
+
 /** Run all OOM-safe map repairs. Returns total entries changed. */
 function repairSapNfMapInPlace(map) {
   if (!map || typeof map !== 'object') return 0;
   const n1 = sanitizeInflatedSapMapValors(map);
   const n2 = refinalizeSapMapFromStoredFields(map);
   const n3 = scrubSharedGhostSapFaces(map);
-  return n1 + n2 + n3;
+  const n4 = scrubRepeatingNoApFaces(map);
+  return n1 + n2 + n3 + n4;
 }
 
 /** Restore accumulated SAP map from cloud JSON (does not clear keys absent from Excel). */
@@ -7446,6 +7499,7 @@ window.FretesSAP = {
   loadSavedSapNfMap,
   repairSapNfMapInPlace,
   scrubSharedGhostSapFaces,
+  scrubRepeatingNoApFaces,
   refinalizeSapMapFromStoredFields,
   aggregateNfPago
 };
