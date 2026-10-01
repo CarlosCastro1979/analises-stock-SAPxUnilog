@@ -1,5 +1,5 @@
-// fretes.js v1.8.89 — FORCE Valor SAP = Val.total incl.imp. once/NF (never lose to lineSum)
-const FRETES_JS_VERSION = '1.8.89';
+// fretes.js v1.8.90 — cloud restore: never skip QZ when only SAP map in RAM; visible tab loading
+const FRETES_JS_VERSION = '1.8.90';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
 /**
@@ -74,8 +74,53 @@ function fteMarkCompanyLoaded() {
   _fteLoadedCompany = fteCompany();
 }
 
+/** QZ pack and/or Análise CT-e rows — Resumo/Análise need this; SAP map alone is not enough. */
+function fteHasAnalysisData() {
+  return !!(quinzenalPack?.files?.length || currentNFs.length);
+}
+
 function fteCompany() {
   return typeof company !== 'undefined' ? company : 'DFB';
+}
+
+/** Wait until Supabase probe finished (avoid silent empty restore while still "conectando…"). */
+async function fteWaitForDb(maxMs = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    const lbl = document.getElementById('dbLbl')?.textContent || '';
+    if (/Supabase OK/i.test(lbl)) return true;
+    if (/offline/i.test(lbl)) return false;
+    await fteYield();
+  }
+  const lbl = document.getElementById('dbLbl')?.textContent || '';
+  return /Supabase OK/i.test(lbl);
+}
+
+/** Show loading inside the visible analysis empty panel (Carregamento spinner is hidden when tab≠carregamento). */
+function fteShowAnalysisLoading(tab, label) {
+  const msg = label || 'A carregar Fretes da cloud…';
+  const html = `<div class="empty-i"><span class="spin" style="width:22px;height:22px;border-width:3px"></span></div><div><strong>${msg}</strong></div><div style="font-size:11px;margin-top:8px">Quinzenais + mapa SAP — não é preciso voltar a carregar os Excels.</div>`;
+  const map = {
+    'analise-cte': 'cteEmpty',
+    'analise-b2c': 'b2cEmpty',
+    'cte-vs-qz': 'b2bEmpty',
+    'resumo-total': 'resumoEmpty'
+  };
+  const emptyId = map[tab];
+  if (!emptyId) return;
+  const empty = $(emptyId);
+  const contentMap = {
+    cteEmpty: 'cteContent',
+    b2cEmpty: 'b2cContent',
+    b2bEmpty: 'b2bContent',
+    resumoEmpty: 'resumoContent'
+  };
+  const content = $(contentMap[emptyId]);
+  if (empty) {
+    empty.style.display = 'block';
+    empty.innerHTML = html;
+  }
+  if (content) content.style.display = 'none';
 }
 
 function fteCteSlot() {
@@ -157,13 +202,21 @@ function switchFteTab(tab) {
   // Analysis tabs need cloud data — lazy restore (never on Carregamento alone).
   if (FTE_ANALYSIS_TABS.has(tab) && typeof fteNeedsCloudReload === 'function' && fteNeedsCloudReload()) {
     fteSetProcessing(true, 'A carregar Fretes…');
+    fteShowAnalysisLoading(tab, 'A carregar Fretes da cloud…');
     const paintThenLoad = () => {
       loadSavedFretesFiles(true).then(() => {
         if (tab === 'analise-cte') renderCteSubPanels();
         else if (tab === 'analise-b2c') renderB2cAnalysisTab();
         else if (tab === 'cte-vs-qz') renderB2bCompareTab();
         else if (tab === 'resumo-total') renderResumoTotal();
-      }).catch(e => console.warn('[fretes] lazy tab load', e))
+        // SAP map alone is not enough for Resumo/Análise — surface failure even if ok===true.
+        if (!fteHasAnalysisData()) {
+          fteToastError('Quinzenais não restaurados da cloud — usa «Carregar último guardado» em Carregamento.');
+        }
+      }).catch(e => {
+        console.warn('[fretes] lazy tab load', e);
+        fteToastError('Erro ao carregar Fretes: ' + (e?.message || e));
+      })
         .finally(() => { try { fteSetProcessing(false); } catch (_) {} });
     };
     try { requestAnimationFrame(() => setTimeout(paintThenLoad, 0)); }
@@ -4900,8 +4953,9 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   const co = fteCompany();
   console.log('[fretes] load saved', co);
 
-  // Instant path: already restored for this company — paint from RAM, no re-parse.
-  if (_fteLoadedCompany === co && (currentNFs.length || quinzenalPack?.files?.length || isSapLoaded())) {
+  // Instant path: already have QZ/CTE for this company — paint from RAM.
+  // SAP map alone (Armazém / partial) must NOT skip quinzenal restore.
+  if (_fteLoadedCompany === co && fteHasAnalysisData()) {
     syncQzUploadZone();
     updateQzFileNote();
     updateFretesFileStatus();
@@ -4913,6 +4967,14 @@ async function _loadSavedFretesFilesImpl(silent = false) {
     else if (activeTab === 'resumo-total') renderResumoTotal();
     refreshCustoUnilogIfVisible();
     return true;
+  }
+
+  await fteYield('A aguardar ligação…');
+  const dbOk = await fteWaitForDb(8000);
+  if (!dbOk) {
+    console.warn('[fretes] load saved aborted — Supabase not ready', co);
+    if (!silent) fteToastError('Cloud offline / a ligar — espera «Supabase OK» e tenta de novo.');
+    return false;
   }
 
   let meta = {};
@@ -5091,7 +5153,8 @@ async function _loadSavedFretesFilesImpl(silent = false) {
     fteToast('Ficheiros fretes restaurados: ' + parts.join(', ') + ' (' + co + ').');
   }
 
-  if (qzLoaded || cteOk || qzCteBuilt || isSapLoaded() || currentNFs.length) {
+  // Only mark company loaded when analysis data exists — SAP map alone must not block retry.
+  if (qzLoaded || cteOk || qzCteBuilt || fteHasAnalysisData()) {
     fteMarkCompanyLoaded();
   }
 
@@ -5102,7 +5165,7 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   else if (activeTab === 'cte-vs-qz') renderB2bCompareTab();
   else if (activeTab === 'resumo-total') renderResumoTotal();
   refreshCustoUnilogIfVisible();
-  return cteOk || qzLoaded || qzCteBuilt || currentNFs.length > 0 || isSapLoaded();
+  return cteOk || qzLoaded || qzCteBuilt || fteHasAnalysisData() || isSapLoaded();
 }
 
 // ── QUINZENAL UNILOG (B2B diff vs CT-e · B2C vendas/fretes) ──
@@ -6591,7 +6654,12 @@ function renderResumoTotal() {
   const hasData = r.hasCte || r.hasB2c || r.hasB2bQz;
   const empty = $('resumoEmpty');
   const content = $('resumoContent');
-  if (empty) empty.style.display = hasData ? 'none' : 'block';
+  if (empty) {
+    empty.style.display = hasData ? 'none' : 'block';
+    if (!hasData) {
+      empty.innerHTML = '<div class="empty-i">📈</div><div>Sem dados em memória. Abre esta aba para restaurar da cloud, ou clica <strong>Carregar último guardado</strong> em <strong>Carregamento de dados</strong>.</div>';
+    }
+  }
   if (content) content.style.display = hasData ? 'block' : 'none';
   if (!hasData) return;
 
@@ -7104,14 +7172,15 @@ function initFretes() {
   applyFretesFileLabelsFromMeta().catch(() => {});
 }
 
-/** True when this company has no fretes data in memory yet (needs cloud load). */
+/** True when this company has no Fretes analysis data in memory yet (needs cloud load). */
 function fteNeedsCloudReload() {
   const co = fteCompany();
-  if (_fteLoadedCompany === co && (currentNFs.length || isSapLoaded() || quinzenalPack?.files?.length)) {
+  // SAP map alone is shared with Armazém — never treat it as "Fretes already restored".
+  if (_fteLoadedCompany === co && fteHasAnalysisData()) {
     return false;
   }
-  // Also trust in-memory QZ/CTE even if mark was missed (pre-1.8.67 bug)
-  if (quinzenalPack?.files?.length || currentNFs.length || isSapLoaded()) {
+  // Trust in-memory QZ/CTE even if mark was missed (pre-1.8.67 bug)
+  if (fteHasAnalysisData()) {
     if (_fteLoadedCompany === co || _fteLoadedCompany == null) {
       fteMarkCompanyLoaded();
       return false;
