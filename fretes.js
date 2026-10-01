@@ -1,14 +1,16 @@
-// fretes.js v1.8.90 — cloud restore: never skip QZ when only SAP map in RAM; visible tab loading
-const FRETES_JS_VERSION = '1.8.90';
+// fretes.js v1.8.91 — restore: FORCE AP + scrub shared ghost faces + persist; multi-CT-e pago once
+const FRETES_JS_VERSION = '1.8.91';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
 /**
  * Bump when ZFACT valorNF/dtEmissao column semantics change.
+ * v9: on restore, FORCE AP from stored docVal + scrub shared ghost faces (docVal=0, same face on ≥3 NFs);
+ *     auto-persist corrected map (no manual Processar). Multi-CT-e: identical pago rows → take once.
  * v8: FORCE valorNF = Val.total incl.imp. once/NF (never lose to modest lineSum gap, e.g. 449796 vs 442314).
  * v7: cloud maps may still hold SUM(face)×lines (NF 99977≈11.2M) — sanitize on load; user must Processar ZFACT.
  * (Do NOT auto-reparse multi-MB Excel on open — Chrome OOM.)
  */
-const SAP_NF_MAP_PARSER_VERSION = 8;
+const SAP_NF_MAP_PARSER_VERSION = 9;
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -2550,6 +2552,31 @@ function _debugBuildSapNfMapAggregation() {
   } else {
     console.debug('[SAP NF] buildSapNfMap aggregation OK');
   }
+
+  // Ghost faces: same bruto-once on ≥3 NFs without AP must be scrubbed (screenshot 12 Δ).
+  const ghostMap = {
+    '99977': { valorNF: 449796, lineSum: 11244900, docVal: 0, docFromInclImp: false },
+    '100070': { valorNF: 449796, lineSum: 9895512, docVal: 0, docFromInclImp: false },
+    '100476': { valorNF: 449796, lineSum: 6297144, docVal: 0, docFromInclImp: false },
+    '97767': { valorNF: 194644.25, lineSum: 4671462, docVal: 0, docFromInclImp: false },
+    '97830': { valorNF: 194644.25, lineSum: 4671462, docVal: 0, docFromInclImp: false },
+    '101466': { valorNF: 194644.25, lineSum: 8564347, docVal: 0, docFromInclImp: false },
+    '100934': { valorNF: 6673.5, lineSum: 6673.5, docVal: 6673.5, docFromInclImp: true }
+  };
+  const nGhost = scrubSharedGhostSapFaces(ghostMap);
+  const okGhostScrub = nGhost >= 6
+    && parseSapNum(ghostMap['99977'].valorNF) === 0
+    && parseSapNum(ghostMap['97767'].valorNF) === 0
+    && parseSapNum(ghostMap['100934'].valorNF) === 6673.5;
+  if (!okGhostScrub) console.warn('[SAP NF] ghost scrub failed', nGhost, ghostMap['99977'], ghostMap['100934']);
+
+  // FORCE refinalize from stored docVal when AP present but valorNF still bruto.
+  const refMap = {
+    '99977': { valorNF: 449796, lineSum: 449796, docVal: 442314.49, docFromInclImp: true }
+  };
+  const nRef = refinalizeSapMapFromStoredFields(refMap);
+  const okRefinalize = nRef === 1 && Math.abs(parseSapNum(refMap['99977'].valorNF) - 442314.49) < 0.01;
+  if (!okRefinalize) console.warn('[SAP NF] refinalize stored AP failed', refMap['99977']);
 }
 _debugBuildSapNfMapAggregation();
 
@@ -2625,6 +2652,14 @@ function applySapToNf(nf) {
   const unilogVal = nf.valorUnilog;
   nf.valorSAP = pickSapValorNearUnilog(sap, unilogVal);
   let sapVal = num(nf.valorSAP);
+
+  // No usable SAP face (ghost scrubbed / empty AP) — NF exists but valor unknown; not a Δ.
+  if (!(sapVal > 0)) {
+    nf.valorSAP = null;
+    nf.valorDiff = null;
+    nf.sapValorMismatch = false;
+    return nf;
+  }
 
   // Stale cloud map safety: valorNF was SUM of repeating face × N lines (e.g. 442k×25≈11M).
   // If SAP ≈ Unilog×N for integer N∈[3,100], recover once-per-NF face without Excel re-parse.
@@ -2734,12 +2769,14 @@ function mergeSapNfMaps(prev, next) {
     }
     const incValor = parseSapNum(inc?.valorNF);
     const oldValor = parseSapNum(old?.valorNF);
+    const scrubbed = inc && Object.prototype.hasOwnProperty.call(inc, '_ghostFaceScrubbed');
     out[k] = {
       nf: inc?.nf != null && String(inc.nf).trim() !== '' ? inc.nf : old.nf,
       cliente: (inc?.cliente && String(inc.cliente).trim()) || old.cliente || '',
       // Never wipe a known emissão date with a blank incoming parse (wide ZFACT layout bugs).
       dtEmissao: inc?.dtEmissao || old.dtEmissao || null,
-      valorNF: incValor > 0 ? inc.valorNF : (oldValor > 0 ? old.valorNF : (inc?.valorNF ?? old.valorNF)),
+      // Ghost scrub sets valorNF=0 on purpose — do not resurrect old bogus face.
+      valorNF: scrubbed ? 0 : (incValor > 0 ? inc.valorNF : (oldValor > 0 ? old.valorNF : (inc?.valorNF ?? old.valorNF))),
       lineSum: num(inc?.lineSum) > 0 ? inc.lineSum : (num(old?.lineSum) || 0),
       docVal: num(inc?.docVal) > 0 ? inc.docVal : (num(old?.docVal) || 0),
       docFromInclImp: !!(inc?.docFromInclImp || old?.docFromInclImp)
@@ -2953,6 +2990,84 @@ function sanitizeInflatedSapMapValors(map) {
   return fixed;
 }
 
+/**
+ * FORCE re-finalize from stored map fields (no Excel): valorNF = docVal when AP/doc is reliable.
+ * Covers stale packs where lineSum/bruto won before v8 FORCE, but docVal was persisted.
+ */
+function refinalizeSapMapFromStoredFields(map) {
+  if (!map || typeof map !== 'object') return 0;
+  let fixed = 0;
+  Object.keys(map).forEach(k => {
+    const e = map[k];
+    if (!e) return;
+    const doc = parseSapNum(e.docVal);
+    const v = parseSapNum(e.valorNF);
+    const ls = parseSapNum(e.lineSum);
+    if (!(doc > 0)) return;
+    const forceAp = !!e.docFromInclImp
+      || (ls > 0 && ls > doc * 1.5)
+      || (v > 0 && ls > 0 && sapValoresClose(v, ls) && Math.abs(v - doc) > SAP_VALOR_NEAR_EPS);
+    if (!forceAp) return;
+    if (Math.abs(v - doc) <= SAP_VALOR_NEAR_EPS) {
+      if (!e.docFromInclImp) e.docFromInclImp = true;
+      return;
+    }
+    e.valorNF = doc;
+    e.docFromInclImp = true;
+    fixed++;
+  });
+  if (fixed) console.warn('[fretes] refinalized', fixed, 'SAP map valor(s) from stored docVal/AP');
+  return fixed;
+}
+
+/**
+ * ZFACT rows without Val.total often leave the same bogus "face" (repeating bruto) on many NFs
+ * (e.g. 449796 on 99977/100070/…, 194644.25 on 97767/97830/…). Those are not real NF totals —
+ * clear valor so we do not invent SAP≠Unilog Δ. Keep cliente/dates (NF still "found").
+ */
+function scrubSharedGhostSapFaces(map, minShare = 3) {
+  if (!map || typeof map !== 'object') return 0;
+  const byFace = new Map();
+  Object.keys(map).forEach(k => {
+    const e = map[k];
+    if (!e) return;
+    const doc = parseSapNum(e.docVal);
+    if (doc > 0 && e.docFromInclImp) return; // trusted AP
+    const v = parseSapNum(e.valorNF);
+    if (!(v > 1000)) return;
+    const faceKey = String(Math.round(v * 100) / 100);
+    if (!byFace.has(faceKey)) byFace.set(faceKey, []);
+    byFace.get(faceKey).push(k);
+  });
+  let fixed = 0;
+  byFace.forEach((keys, faceKey) => {
+    if (keys.length < minShare) return;
+    keys.forEach(k => {
+      const e = map[k];
+      if (!e) return;
+      const doc = parseSapNum(e.docVal);
+      if (doc > 0 && e.docFromInclImp) return;
+      e.valorNF = 0;
+      // Keep lineSum for debug; do not use as face without AP.
+      e._ghostFaceScrubbed = parseSapNum(faceKey);
+      fixed++;
+    });
+  });
+  if (fixed) {
+    console.warn('[fretes] scrubbed', fixed, 'shared ghost SAP face(s) (same valor on ≥' + minShare + ' NFs, no AP)');
+  }
+  return fixed;
+}
+
+/** Run all OOM-safe map repairs. Returns total entries changed. */
+function repairSapNfMapInPlace(map) {
+  if (!map || typeof map !== 'object') return 0;
+  const n1 = sanitizeInflatedSapMapValors(map);
+  const n2 = refinalizeSapMapFromStoredFields(map);
+  const n3 = scrubSharedGhostSapFaces(map);
+  return n1 + n2 + n3;
+}
+
 /** Restore accumulated SAP map from cloud JSON (does not clear keys absent from Excel). */
 async function loadSavedSapNfMap(meta, opts = {}) {
   if (typeof fetchExcelFiles !== 'function') return false;
@@ -2967,21 +3082,24 @@ async function loadSavedSapNfMap(meta, opts = {}) {
       return false;
     }
     // Stale parser: still LOAD the map (dates/cliente). Do NOT auto-reparse multi-MB ZFACT
-    // Excel on open (Chrome OOM). Sanitize summed valorNF; user Processar upgrades pack.
+    // Excel on open (Chrome OOM). Repair from stored fields + scrub ghosts; persist silently.
     const stale = (parsed.version || 1) < SAP_NF_MAP_PARSER_VERSION;
     if (stale) {
       console.warn('[fretes] sap map stale parser v' + (parsed.version || 1)
         + ' < ' + SAP_NF_MAP_PARSER_VERSION
-        + ' — sanitize valores; Processar ZFACT para gravar mapa v' + SAP_NF_MAP_PARSER_VERSION);
+        + ' — repair from stored docVal/ghost scrub; persist mapa v' + SAP_NF_MAP_PARSER_VERSION);
     }
     const revived = await reviveSapNfMapAsync(parsed.raw);
     if (!Object.keys(revived).length) {
       console.warn('[fretes] sap map parse empty', fteCompany(), rec.file_name);
       return false;
     }
-    const nFixed = sanitizeInflatedSapMapValors(revived);
-    fteSapMapNeedsReprocess = !!(stale || nFixed > 0);
+    const nFixed = repairSapNfMapInPlace(revived);
+    fteSapMapNeedsReprocess = !!(stale && nFixed === 0);
     sapNfMap = mergeSapNfMaps(sapNfMap, revived);
+    // Re-run repair on merged map (incoming may revive ghosts wiped in revived-only pass).
+    const nMergedFix = repairSapNfMapInPlace(sapNfMap);
+    const totalFixed = nFixed + nMergedFix;
     invalidateZfactMonthsCache();
     if (parsed.files?.length) {
       const byName = new Map((sapMapSourceFiles || []).map(f => [f.fileName, f]));
@@ -2990,11 +3108,28 @@ async function loadSavedSapNfMap(meta, opts = {}) {
       });
       sapMapSourceFiles = [...byName.values()];
     }
-    if (fteSapMapNeedsReprocess && !opts.silent) {
-      fteToast('Mapa SAP desatualizado/corrigido — em Carregamento, clica Processar e Guardar (ZFACT) uma vez.');
+    if (totalFixed > 0 || stale) {
+      // Auto-persist corrected map — user must not remember to Processar ZFACT.
+      try {
+        await persistSapNfMap(sapNfMap, { silent: true });
+        fteSapMapNeedsReprocess = false;
+        if (!opts.silent) {
+          fteToast(totalFixed > 0
+            ? `Mapa SAP corrigido na cloud (${totalFixed} valor(es)).`
+            : 'Mapa SAP actualizado na cloud (parser v' + SAP_NF_MAP_PARSER_VERSION + ').');
+        }
+      } catch (persistErr) {
+        console.warn('[fretes] persist repaired sap map', persistErr);
+        fteSapMapNeedsReprocess = true;
+        if (!opts.silent) {
+          fteToast('Mapa SAP corrigido em memória — Processar ZFACT se o restore falhar a gravar.');
+        }
+      }
+    } else if (fteSapMapNeedsReprocess && !opts.silent) {
+      fteToast('Mapa SAP desatualizado — em Carregamento, clica Processar e Guardar (ZFACT) uma vez.');
     }
     console.log('[fretes] load sap map', fteCompany(), rec.file_name, 'mapSize', Object.keys(sapNfMap).length,
-      'stale', stale, 'sanitized', nFixed);
+      'stale', stale, 'repaired', totalFixed);
     return true;
   } catch (err) {
     console.error('[fretes] load sap map', err);
@@ -3004,9 +3139,11 @@ async function loadSavedSapNfMap(meta, opts = {}) {
 }
 
 function applySapProcessResult(incoming, fileName, rowsLen, opts = {}) {
+  repairSapNfMapInPlace(incoming);
   const nIncoming = Object.keys(incoming).length;
   const nBefore = Object.keys(sapNfMap).length;
   sapNfMap = mergeSapNfMaps(sapNfMap, incoming);
+  repairSapNfMapInPlace(sapNfMap);
   invalidateZfactMonthsCache();
   fteSapMapNeedsReprocess = false;
   trackSapMapSourceFile(fileName, nIncoming);
@@ -3414,18 +3551,66 @@ function analyzeCteEntry(cte, idx, valorNF, nCteTotal) {
   };
 }
 
+/**
+ * Quinzenal B2B often repeats the NF-level "Total fatura" on every CT-e row.
+ * Summing identical pagos × N (e.g. 91×R$26.703) explodes % pago to 500%+.
+ * Take once when all positive pagos match; or when every row is ~6% of the full NF (≥3 CT-e).
+ */
+function aggregateNfPago(ctes, valorNF) {
+  const pagos = (ctes || []).map(c => num(c.pago));
+  const positive = pagos.filter(p => p > 0);
+  if (!positive.length) return { pago: 0, coalescedOnce: false };
+  if (positive.length === 1) return { pago: positive[0], coalescedOnce: false };
+
+  const first = positive[0];
+  const eps = Math.max(0.05, Math.abs(first) * 0.002);
+  const allClose = positive.every(p => Math.abs(p - first) <= eps);
+  if (allClose) return { pago: first, coalescedOnce: true };
+
+  const v = num(valorNF);
+  if (v > 0 && positive.length >= 3) {
+    const allNearFullPct = positive.every(p => {
+      const pct = p / v;
+      return pct >= (CTE_PCT_LOW - 0.005) && pct <= (CTE_PCT_HIGH + 0.02);
+    });
+    if (allNearFullPct) return { pago: Math.max(...positive), coalescedOnce: true };
+  }
+
+  return { pago: positive.reduce((s, p) => s + p, 0), coalescedOnce: false };
+}
+
+(function _debugAggregateNfPago() {
+  const pagoOnce = aggregateNfPago(
+    Array.from({ length: 91 }, () => ({ pago: 26703.87 })),
+    442314.49
+  );
+  const okPagoOnce = pagoOnce.coalescedOnce && Math.abs(pagoOnce.pago - 26703.87) < 0.01;
+  const pagoSum = aggregateNfPago(
+    [{ pago: 100 }, { pago: 200 }, { pago: 50 }],
+    10000
+  );
+  const okSum = !pagoSum.coalescedOnce && Math.abs(pagoSum.pago - 350) < 0.01;
+  if (!okPagoOnce || !okSum) console.warn('[SAP NF] aggregateNfPago failed', { pagoOnce, pagoSum });
+  else console.debug('[SAP NF] aggregateNfPago OK');
+})();
+
 function buildNfRecord(g) {
   const ctesRaw = g.ctes || [];
   const nCte = resolveNfCteCount(ctesRaw, g.qtdCteFromSource);
   const ctes = ctesRaw.map((c, i) => analyzeCteEntry(c, i, g.valorNF, nCte));
-  const pago = ctes.reduce((s, c) => s + c.pago, 0);
+  const { pago, coalescedOnce } = aggregateNfPago(ctes, g.valorNF);
   const esperado = g.valorNF * CTE_PCT_TARGET;
   const diff = pago - esperado;
   const pct = g.valorNF > 0 ? pago / g.valorNF : 0;
 
   let status, motivo;
-  if (nCte === 1) {
+  // Identical NF-level frete repeated on every CT-e row → classify like a single logical charge.
+  if (nCte === 1 || (coalescedOnce && !g.temDevolucao)) {
     ({ status, motivo } = analyzeSingleCteMotivo(pago, esperado, pct));
+    if (coalescedOnce && nCte > 1) {
+      motivo = `${nCte} CT-e com total fatura repetido nas linhas quinzenais — pago ${fmtMoney(pago)} (1×, não ×${nCte}). `
+        + motivo;
+    }
   } else {
     const nDev = ctes.filter(c => c.devolucao).length;
     const pendente = ctes.filter(c => c.validacao === 'pendente').length;
@@ -3447,6 +3632,7 @@ function buildNfRecord(g) {
     temDevolucao: g.temDevolucao, dtNF: g.dtNF,
     dtNFQz: g.dtNFQz || g.dtNF || null,
     qtdCteFromSource: g.qtdCteFromSource || 0,
+    pagoCoalescedOnce: !!coalescedOnce,
     mesKey: g.mesKey || g.qzMesKey || null,
     qzMesKey: g.qzMesKey || g.mesKey || null
   };
@@ -5080,6 +5266,12 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   }
 
   if (mapHad && Object.keys(sapNfMap).length) {
+    // Ensure RAM map is repaired even if loadSavedSapNfMap ran earlier in session.
+    const nFix = repairSapNfMapInPlace(sapNfMap);
+    if (nFix > 0) {
+      try { await persistSapNfMap(sapNfMap, { silent: true }); fteSapMapNeedsReprocess = false; }
+      catch (e) { console.warn('[fretes] persist repaired map on restore', e); }
+    }
     if (qzCteBuilt || cteAnalysisSource === 'quinzenal' || currentNFs.length) {
       await fteYield('A cruzar SAP…');
       reEnrichAfterSapLoad();
@@ -5090,11 +5282,11 @@ async function _loadSavedFretesFilesImpl(silent = false) {
       }
     }
     if (fteSapMapNeedsReprocess && !silent) {
-      fteToast('Mapa SAP tinha totais somados/desatualizados — em Carregamento, Processar e Guardar (ZFACT) uma vez.');
+      fteToast('Mapa SAP ainda incompleto em algumas NFs (sem Val.total) — Processar ZFACT completo se quiseres regravar AP.');
     }
     console.log('[fretes] restore sap from map JSON', co, 'mapSize', Object.keys(sapNfMap).length,
       'skippedZfactExcel', true, 'mapMissesFileMonths', mapMissesFileMonths,
-      'needsReprocess', fteSapMapNeedsReprocess);
+      'needsReprocess', fteSapMapNeedsReprocess, 'repaired', nFix);
   } else {
     // Map missing only — fetch ZFACT Excel (guarded; failures must not blank the app)
     try {
@@ -7251,6 +7443,10 @@ window.FretesSAP = {
   ensureLoaded: (silent = true) => loadSavedFretesFiles(silent).then(() => isSapLoaded()),
   restoreSapFromRec,
   persistSapNfMap,
-  loadSavedSapNfMap
+  loadSavedSapNfMap,
+  repairSapNfMapInPlace,
+  scrubSharedGhostSapFaces,
+  refinalizeSapMapFromStoredFields,
+  aggregateNfPago
 };
 window.fteNeedsCloudReload = fteNeedsCloudReload;
