@@ -3096,6 +3096,12 @@ function scrubRepeatingNoApFaces(map) {
     if (doc > 0 && e.docFromInclImp) return;
     const v = parseSapNum(e.valorNF);
     const ls = parseSapNum(e.lineSum);
+    // Older scrub left valorNF=0 but kept lineSum — clear so pick cannot resurrect.
+    if (!(v > 0) && ls > 0) {
+      e.lineSum = 0;
+      fixed++;
+      return;
+    }
     if (!(v > 1000) || !(ls > v * 2.5)) return;
     const n = Math.round(ls / v);
     if (n < 3 || n > 200) return;
