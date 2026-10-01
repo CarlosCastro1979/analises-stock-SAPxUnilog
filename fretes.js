@@ -1,13 +1,14 @@
-// fretes.js v1.8.88 — discard/sanitize summed SAP map valores; UI reprocess note
-const FRETES_JS_VERSION = '1.8.88';
+// fretes.js v1.8.89 — FORCE Valor SAP = Val.total incl.imp. once/NF (never lose to lineSum)
+const FRETES_JS_VERSION = '1.8.89';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
 /**
  * Bump when ZFACT valorNF/dtEmissao column semantics change.
+ * v8: FORCE valorNF = Val.total incl.imp. once/NF (never lose to modest lineSum gap, e.g. 449796 vs 442314).
  * v7: cloud maps may still hold SUM(face)×lines (NF 99977≈11.2M) — sanitize on load; user must Processar ZFACT.
  * (Do NOT auto-reparse multi-MB Excel on open — Chrome OOM.)
  */
-const SAP_NF_MAP_PARSER_VERSION = 7;
+const SAP_NF_MAP_PARSER_VERSION = 8;
 
 /** Max JSON bytes before base64 (~6 MB raw → ~8 MB b64 in Supabase text column). */
 const QZ_PERSIST_MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -1091,9 +1092,41 @@ function findSapField(row, field) {
   return findSapFieldByAliases(row, SAP_ALIASES[field]);
 }
 
+/** Prefer exact / strong "Val.total incl.imp." headers over fuzzy alias.includes(short name). */
+function findSapInclImpFieldKey(row) {
+  const entries = Object.entries(row || {});
+  for (const [k, v] of entries) {
+    if (v === null || v === undefined || v === '') continue;
+    if (isSapTotalInclImpHeader(k)) return k;
+  }
+  // Exact alias match first (avoid "Total" / short keys matching via alias.includes).
+  for (const alias of SAP_NF_TOTAL_INCL_IMP_ALIASES) {
+    const hit = entries.find(([k, v]) => {
+      if (v === null || v === undefined || v === '') return false;
+      return normCol(k) === alias;
+    });
+    if (hit) return hit[0];
+  }
+  for (const alias of SAP_NF_TOTAL_INCL_IMP_ALIASES) {
+    if (alias.length < 10) continue; // skip short aliases like 'vnf' for fuzzy
+    const hit = entries.find(([k, v]) => {
+      if (v === null || v === undefined || v === '') return false;
+      if (sapHeaderIsExcluded(k) && !isSapTotalInclImpHeader(k)) return false;
+      const nk = normCol(k);
+      if (nk.includes(alias)) return true;
+      // Only allow alias⊇header when header itself looks like an incl.imp. / NF total label.
+      if (alias.includes(nk) && (nk.includes('incl') || nk.includes('imp') || nk.includes('val.total')
+          || nk.includes('valor total') || nk.length >= 14)) return true;
+      return false;
+    });
+    if (hit) return hit[0];
+  }
+  return null;
+}
+
 function findSapValorFields(row) {
   // Prefer Unilog-matching total (AP / Val.total incl.imp.) over generic doc aliases.
-  const preferredDocKey = findSapFieldKeyByAliases(row, SAP_NF_TOTAL_INCL_IMP_ALIASES);
+  const preferredDocKey = findSapInclImpFieldKey(row);
   const docKey = preferredDocKey || findSapFieldKeyByAliases(row, SAP_DOC_VALOR_ALIASES);
   const doc = docKey ? row[docKey] : null;
   let lineKey = findSapFieldKeyByAliases(row, SAP_LINE_VALOR_ALIASES);
@@ -1101,7 +1134,13 @@ function findSapValorFields(row) {
   const line = lineKey ? row[lineKey] : null;
   const fallback = !line && !doc ? findSapFieldByAliases(row, SAP_VALOR_FALLBACK_ALIASES) : null;
   // Doc total (AP) is the NF billing base when present — primary must not be líquido/bruto alone.
-  return { line, doc, fallback, primary: doc || line || fallback };
+  return {
+    line,
+    doc,
+    fallback,
+    primary: doc || line || fallback,
+    fromInclImp: !!(preferredDocKey && doc != null && doc !== '')
+  };
 }
 
 function isSapTotalInclImpHeader(hdr) {
@@ -1264,6 +1303,8 @@ function looksLikeSapNfCell(v) {
 
 /** Max plausible NF billing amount in ZFACT warehouse exports (R$). */
 const SAP_VALOR_MAX = 5_000_000;
+/** Near-equal Unilog vs SAP (cent rounding) — do not show / flag as Δ. */
+const SAP_VALOR_NEAR_EPS = 0.05;
 
 function hasSapValorFormatting(v) {
   const raw = String(v).trim();
@@ -1399,7 +1440,7 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
   if (!idx || !Array.isArray(line)) return { line: null, doc: null };
 
   const headerValor = resolveSapValorColFromHeader(headerRow);
-  const out = { line: null, doc: null };
+  const out = { line: null, doc: null, fromInclImp: false };
   const nfKey = normNFKey(line[idx.nf]);
   const isSameNf = (v) => nfKey && normNFKey(v) === nfKey;
   const colExcluded = (j) => {
@@ -1421,11 +1462,17 @@ function pickSapValorFromLine(line, colIdx, headerRow) {
   };
 
   // Prefer Unilog-matching doc total (AP / Val.total incl.imp.) before line bruto.
-  if (headerValor.docCol != null && !colExcluded(headerValor.docCol)) tryDoc(line[headerValor.docCol]);
+  if (headerValor.docCol != null && !colExcluded(headerValor.docCol)) {
+    tryDoc(line[headerValor.docCol]);
+    if (out.doc != null && headerRow && isSapTotalInclImpHeader(headerRow[headerValor.docCol])) {
+      out.fromInclImp = true;
+    }
+  }
   if (!out.doc && line.length > SAP_ZFACT_TOTAL_INCL_IMP_COL && !colExcluded(SAP_ZFACT_TOTAL_INCL_IMP_COL)) {
     const apHdr = headerRow?.[SAP_ZFACT_TOTAL_INCL_IMP_COL];
     if (!headerRow?.length || isSapTotalInclImpHeader(apHdr)) {
       tryDoc(line[SAP_ZFACT_TOTAL_INCL_IMP_COL]);
+      if (out.doc != null) out.fromInclImp = true;
     }
   }
 
@@ -1569,6 +1616,7 @@ function applySapColPositionalFallback(row, line, headerRow, standardLayout, col
   }
   if (picked.doc != null && picked.doc !== '') {
     if (!row.valorDoc || !looksLikeSapValorCell(row.valorDoc, { trustColumn: true })) row.valorDoc = picked.doc;
+    if (picked.fromInclImp) row.docFromInclImp = true;
   }
   // Doc total (AP) is the Unilog-matching NF value — prefer over line bruto.
   row.valorNF = row.valorDoc ?? row.valorLine ?? row.valorNF;
@@ -1805,7 +1853,8 @@ function normalizeSapRow(row) {
     material: materialRaw != null && materialRaw !== '' ? String(materialRaw).trim() : '',
     valorLine: valores.line,
     valorDoc: valores.doc,
-    valorNF: valores.primary
+    valorNF: valores.primary,
+    docFromInclImp: !!valores.fromInclImp
   };
 }
 
@@ -1927,6 +1976,10 @@ function finalizeSapNfValor(acc) {
   const lineSum = acc.lineSum;
   const doc = acc.docVal > 0 ? acc.docVal : 0;
 
+  // FORCE: programmed ZFACT col "Val.total incl.imp." (AP) = Unilog face — once per NF.
+  // Never lose to SUM(valor bruto) even when the gap is modest (NF 99977: 449796 vs 442314.49).
+  if (acc.docFromInclImp && doc > 0) return doc;
+
   // Unilog "Valor NF" = invoice face (gross). ZFACT may expose:
   // - lineSum = SUM valor bruto (face) OR partial líquido lines
   // - docVal  = AP incl.imp. / repeating "N BRL" (often face, sometimes net without tax)
@@ -1988,6 +2041,13 @@ function finalizeSapNfValor(acc) {
 function pickSapValorNearUnilog(sap, unilogVal) {
   if (!sap) return null;
   const u = num(unilogVal);
+  const docN = num(sap.docVal);
+
+  // Programmed AP / Val.total incl.imp. — always wins (Unilog face).
+  if (sap.docFromInclImp && docN > 0) return docN;
+  // Doc matches Unilog within cent tolerance → Δ=0 candidate.
+  if (u > 0 && docN > 0 && Math.abs(docN - u) <= SAP_VALOR_NEAR_EPS) return docN;
+
   const candidates = [];
   const add = (v) => {
     const n = num(v);
@@ -2043,6 +2103,7 @@ function buildSapNfMap(rows) {
         lineCount: 0,
         lineVals: [],
         docVal: 0,
+        docFromInclImp: false,
         fallbackVals: [],
         hasMaterialCol: false,
         materialKeys: new Set()
@@ -2062,6 +2123,7 @@ function buildSapNfMap(rows) {
     if (docValor > 0) {
       const acc = ensureAcc(r, key);
       acc.docVal = Math.max(acc.docVal, docValor);
+      if (r.docFromInclImp) acc.docFromInclImp = true;
     }
   });
 
@@ -2088,6 +2150,7 @@ function buildSapNfMap(rows) {
 
     if (docValor > 0) {
       acc.docVal = Math.max(acc.docVal, docValor);
+      if (r.docFromInclImp) acc.docFromInclImp = true;
     }
     if (lineValor !== 0) {
       // Never accumulate a line that duplicates the NF doc total (repeats on every item row).
@@ -2132,7 +2195,8 @@ function buildSapNfMap(rows) {
       dtEmissao: acc.dtEmissao,
       valorNF,
       lineSum: acc.lineSum || 0,
-      docVal: acc.docVal || 0
+      docVal: acc.docVal || 0,
+      docFromInclImp: !!acc.docFromInclImp
     };
   });
   return map;
@@ -2304,6 +2368,7 @@ function _debugBuildSapNfMapAggregation() {
       _hasMaterialCol: true,
       material: 'SKU-' + i,
       valorDoc: '442.314,49',
+      docFromInclImp: true,
       valorLine: String(1000 + i * 10) + ',00'
     });
   }
@@ -2315,7 +2380,8 @@ function _debugBuildSapNfMapAggregation() {
     _hasMaterialCol: true,
     material: 'SKU-' + i,
     valorLine: '442.314,49',
-    valorDoc: '442.314,49'
+    valorDoc: '442.314,49',
+    docFromInclImp: true
   })));
   const ok99977brutoFace = Math.abs((map99977brutoFaceRepeat['99977']?.valorNF || 0) - 442314.49) < 0.01;
   // Same pattern with slightly different repeating line face vs Unilog/doc (11244900/25 = 449796).
@@ -2324,14 +2390,32 @@ function _debugBuildSapNfMapAggregation() {
     _hasMaterialCol: true,
     material: 'SKU-' + i,
     valorLine: '449.796,00',
-    valorDoc: '442.314,49'
+    valorDoc: '442.314,49',
+    docFromInclImp: true
   })));
   const ok99977lineInflate = Math.abs((map99977lineInflate['99977']?.valorNF || 0) - 442314.49) < 0.01;
+  // CRITICAL: SUM(bruto)=449796 vs AP 442314.49 (gap ~1.7% < 2%) must still FORCE AP — not lineSum.
+  const map99977modestGap = buildSapNfMap([
+    { nf: '99977', _hasMaterialCol: true, material: 'A', valorLine: '200.000,00', valorDoc: '442 314,49', docFromInclImp: true },
+    { nf: '99977', _hasMaterialCol: true, material: 'B', valorLine: '249.796,00', valorDoc: '442 314,49', docFromInclImp: true }
+  ]);
+  const ok99977modestGap = Math.abs((map99977modestGap['99977']?.valorNF || 0) - 442314.49) < 0.01
+    && Math.abs((map99977modestGap['99977']?.lineSum || 0) - 449796) < 0.01;
   const near99977 = pickSapValorNearUnilog(
-    { valorNF: 11244900, lineSum: 11244900, docVal: 442314.49 },
+    { valorNF: 449796, lineSum: 449796, docVal: 442314.49, docFromInclImp: true },
     442314.49
   );
   const ok99977near = Math.abs((near99977 || 0) - 442314.49) < 0.01;
+  // Space thousands in Val.total incl.imp. (Excel "442 314,49").
+  const map99977space = buildSapNfMap(Array.from({ length: 3 }, (_, i) => normalizeSapRow({
+    'Nº da nota fiscal eletrônica': '99977',
+    Nome: 'ARC',
+    Material: 'M' + i,
+    'Valor Bruto': String(100000 + i * 1000) + ',00',
+    'Val.total incl.imp.': '442 314,49'
+  })));
+  const ok99977space = Math.abs((map99977space['99977']?.valorNF || 0) - 442314.49) < 0.01
+    && !!map99977space['99977']?.docFromInclImp;
   // Repeating face without doc column — still take once when ≥3 identical material lines.
   const map99977noDoc = buildSapNfMap(Array.from({ length: 25 }, (_, i) => ({
     nf: '99977',
@@ -2347,7 +2431,8 @@ function _debugBuildSapNfMapAggregation() {
     'Valor Bruto': '1.000,00',
     'Val.total incl.imp.': '442.314,49'
   })));
-  const ok99977norm = Math.abs((map99977normalize['99977']?.valorNF || 0) - 442314.49) < 0.01;
+  const ok99977norm = Math.abs((map99977normalize['99977']?.valorNF || 0) - 442314.49) < 0.01
+    && !!map99977normalize['99977']?.docFromInclImp;
   // Header with "impostos" must still count as AP doc total (not excluded).
   const map99977imp = buildSapNfMap([normalizeSapRow({
     'Nº da nota fiscal eletrônica': '99977',
@@ -2368,8 +2453,8 @@ function _debugBuildSapNfMapAggregation() {
       || !ok99635lineDoc || !ok99635inflate || !ok99635brutoZfact || !ok99635feeLines || !ok99636bruto
       || !ok99636lineDoc || !ok2223 || !ok18591 || !ok99641 || !ok99641sameMat || !ok99642
       || !ok18596 || !ok18596multi || !ok100796brl || !ok100796lines || !ok100796partial || !ok100934ap
-      || !ok99977apOnce || !ok99977brutoFace || !ok99977lineInflate || !ok99977near || !ok99977noDoc
-      || !ok99977norm || !ok99977impHdr
+      || !ok99977apOnce || !ok99977brutoFace || !ok99977lineInflate || !ok99977modestGap || !ok99977near
+      || !ok99977space || !ok99977noDoc || !ok99977norm || !ok99977impHdr
       || !ok101267 || !ok101267near || !ok101267netOnly) {
     console.warn('[SAP NF] buildSapNfMap aggregation mismatches:', {
       ok97723, got97723: map['97723']?.valorNF,
@@ -2399,7 +2484,9 @@ function _debugBuildSapNfMapAggregation() {
       ok99977apOnce, got99977: map99977['99977']?.valorNF,
       ok99977brutoFace, got99977brutoFace: map99977brutoFaceRepeat['99977']?.valorNF,
       ok99977lineInflate, got99977lineInflate: map99977lineInflate['99977']?.valorNF,
+      ok99977modestGap, got99977modestGap: map99977modestGap['99977']?.valorNF,
       ok99977near, got99977near: near99977,
+      ok99977space, got99977space: map99977space['99977']?.valorNF,
       ok99977noDoc, got99977noDoc: map99977noDoc['99977']?.valorNF,
       ok99977norm, got99977norm: map99977normalize['99977']?.valorNF,
       ok99977impHdr, got99977impHdr: map99977imp['99977']?.valorNF,
@@ -2413,8 +2500,6 @@ function _debugBuildSapNfMapAggregation() {
 }
 _debugBuildSapNfMapAggregation();
 
-/** Near-equal Unilog vs SAP (cent rounding) — do not show / flag as Δ. */
-const SAP_VALOR_NEAR_EPS = 0.05;
 /** Relevant SAP vs Unilog NF value gap: abs diff > R$1 AND > 0.5% of the larger value. */
 const SAP_VALOR_DIFF_MIN_ABS = 1.0;
 const SAP_VALOR_DIFF_MIN_PCT = 0.005;
@@ -2603,7 +2688,8 @@ function mergeSapNfMaps(prev, next) {
       dtEmissao: inc?.dtEmissao || old.dtEmissao || null,
       valorNF: incValor > 0 ? inc.valorNF : (oldValor > 0 ? old.valorNF : (inc?.valorNF ?? old.valorNF)),
       lineSum: num(inc?.lineSum) > 0 ? inc.lineSum : (num(old?.lineSum) || 0),
-      docVal: num(inc?.docVal) > 0 ? inc.docVal : (num(old?.docVal) || 0)
+      docVal: num(inc?.docVal) > 0 ? inc.docVal : (num(old?.docVal) || 0),
+      docFromInclImp: !!(inc?.docFromInclImp || old?.docFromInclImp)
     };
   });
   return out;
@@ -2631,7 +2717,8 @@ function reviveSapNfMapEntry(e) {
     dtEmissao: dt,
     valorNF: e.valorNF,
     lineSum: e.lineSum || 0,
-    docVal: e.docVal || 0
+    docVal: e.docVal || 0,
+    docFromInclImp: !!e.docFromInclImp
   };
 }
 
@@ -2680,7 +2767,8 @@ function slimSapNfMapForPersist(map) {
       dtEmissao: dt,
       valorNF: e.valorNF,
       lineSum: e.lineSum || 0,
-      docVal: e.docVal || 0
+      docVal: e.docVal || 0,
+      docFromInclImp: !!e.docFromInclImp
     };
   });
   return out;
@@ -2771,6 +2859,13 @@ function sanitizeInflatedSapMapValors(map) {
     const e = map[k];
     if (!e) return;
     const v = parseSapNum(e.valorNF);
+    const doc = parseSapNum(e.docVal);
+    // Prefer stored AP / Val.total incl.imp. over a wrong inflated/deflated face.
+    if (e.docFromInclImp && doc > 0 && Math.abs(v - doc) > SAP_VALOR_NEAR_EPS) {
+      e.valorNF = doc;
+      fixed++;
+      return;
+    }
     if (!(v > 500_000)) return;
     let unitOnce = 0;
     for (let n = 3; n <= 80; n++) {
@@ -2786,10 +2881,16 @@ function sanitizeInflatedSapMapValors(map) {
       }
     }
     if (unitOnce > 0) {
-      e.valorNF = unitOnce;
+      // If we also have AP doc, prefer doc (449796 = 11244900/25 is a false face for NF 99977).
+      if (doc > 0 && Math.abs(unitOnce - doc) > 1) {
+        e.valorNF = doc;
+        if (e.docFromInclImp == null) e.docFromInclImp = true;
+      } else {
+        e.valorNF = unitOnce;
+      }
       fixed++;
     } else if (fingerprint99977 && k === '99977') {
-      e.valorNF = 0;
+      e.valorNF = doc > 0 ? doc : 0;
       fixed++;
     }
   });
