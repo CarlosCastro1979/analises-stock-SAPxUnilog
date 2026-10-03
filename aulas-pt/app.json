@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Aulas PT",
+    "slug": "aulas-pt",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "aulaspt",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F3D40"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.aulaspt.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0F3D40",
+        "foregroundImage": "./assets/adaptive-icon.png"
+      },
+      "package": "com.aulaspt.app",
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": ["expo-router", "expo-font"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
