@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0F3D40">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Aulas PT">
+<meta name="description" content="Aulas PT — marca horários feitos. Duas pessoas, um preço, a mesma casa.">
+<title>Aulas PT</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#EEF4F3;
+  --bg2:#ffffff;
+  --bg3:#DCEAE9;
+  --card:#ffffff;
+  --accent:#1F7A7D;
+  --accent2:#2A9A9E;
+  --accent-deep:#0F3D40;
+  --coral:#F28C48;
+  --coral-soft:#FFE4D1;
+  --text:#122426;
+  --text2:#3A5254;
+  --text3:#6A8082;
+  --green:#059669;
+  --green-bg:#D1FAE5;
+  --red:#C44B3A;
+  --red-bg:#FDE8E4;
+  --border:#C9DBDA;
+  --border2:#A8C4C3;
+  --radius:16px;
+  --shadow:0 2px 14px rgba(15,61,64,0.08);
+  --font:'Outfit',system-ui,sans-serif;
+  --nav-h:64px;
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font);font-size:15px}
+#app{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+
+/* Install banner */
+#installBanner{display:none;background:linear-gradient(135deg,#0F3D40,#1F7A7D);color:#fff;padding:12px 16px;align-items:center;gap:10px;flex-shrink:0}
+#installBanner p{font-size:13px;font-weight:600;flex:1;line-height:1.35}
+#installBanner .ib-btn{background:var(--coral);border:none;color:#fff;font-family:var(--font);font-size:12px;font-weight:700;padding:8px 14px;border-radius:20px;cursor:pointer}
+#installBanner .ib-x{background:none;border:none;color:rgba(255,255,255,0.75);font-size:18px;cursor:pointer;padding:0 4px}
+
+.header{background:linear-gradient(135deg,#0B3032 0%,#0F3D40 45%,#1F7A7D 100%);padding:14px 16px 12px;padding-top:max(14px,env(safe-area-inset-top));display:flex;align-items:center;gap:12px;flex-shrink:0;box-shadow:0 2px 16px rgba(15,61,64,0.35)}
+.header-mark{width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,0.12);border:1.5px solid rgba(255,255,255,0.35);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0}
+.header-mark img{width:100%;height:100%;object-fit:cover}
+.header-info h1{font-size:18px;font-weight:800;color:#fff;letter-spacing:-0.3px}
+.header-info p{font-size:12px;color:rgba(255,255,255,0.72);margin-top:1px;font-weight:500}
+.header-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.chip-btn{background:rgba(255,255,255,0.16);border:1.5px solid rgba(255,255,255,0.4);color:#fff;font-family:var(--font);font-size:12px;font-weight:700;padding:7px 12px;border-radius:20px;cursor:pointer}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:#86EFAC;box-shadow:0 0 0 3px rgba(134,239,172,0.25)}
+.sync-dot.busy{background:var(--coral);animation:pulse 1s infinite}
+.sync-dot.err{background:#FCA5A5}
+@keyframes pulse{50%{opacity:.45}}
+
+.nav{display:flex;background:#fff;border-top:1.5px solid var(--border);flex-shrink:0;box-shadow:0 -2px 12px rgba(15,61,64,0.07);padding-bottom:var(--safe-b);min-height:var(--nav-h)}
+.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px 10px;cursor:pointer;position:relative;transition:color .2s;background:none;border:none;color:var(--text3);font-family:var(--font)}
+.nav-btn.active{color:var(--accent)}
+.nav-btn.active::before{content:'';position:absolute;top:0;left:28%;right:28%;height:3px;background:linear-gradient(90deg,var(--accent),var(--coral));border-radius:0 0 4px 4px}
+.nav-icon{font-size:20px;margin-bottom:2px;line-height:1}
+.nav-label{font-size:10px;font-weight:700;letter-spacing:.3px}
+
+.content{flex:1;overflow-y:auto;overflow-x:hidden;padding:16px;display:none;background:var(--bg);-webkit-overflow-scrolling:touch}
+.content.active{display:block}
+
+.card{background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:var(--shadow)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:12px;font-family:var(--font);font-size:14px;font-weight:700;cursor:pointer;border:none;transition:transform .15s,opacity .15s}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:linear-gradient(135deg,#145457,#1F7A7D);color:#fff;box-shadow:0 4px 14px rgba(31,122,125,.35)}
+.btn-coral{background:linear-gradient(135deg,#E07A35,#F28C48);color:#fff;box-shadow:0 4px 14px rgba(242,140,72,.35)}
+.btn-wa{background:linear-gradient(135deg,#128C7E,#25D366);color:#fff}
+.btn-ghost{background:var(--bg3);color:var(--accent);border:1.5px solid var(--border2)}
+.btn-danger{background:var(--red-bg);color:var(--red);border:1.5px solid #F5C4BC}
+.btn-full{width:100%}
+.btn-sm{padding:8px 12px;font-size:12px;border-radius:10px}
+
+.input-group{margin-bottom:14px}
+.input-label{font-size:12px;color:var(--text2);font-weight:700;margin-bottom:6px;display:block}
+.input{width:100%;background:#fff;border:1.5px solid var(--border2);border-radius:10px;padding:12px 14px;color:var(--text);font-family:var(--font);font-size:15px;font-weight:500;outline:none}
+.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(31,122,125,.14)}
+
+.person-tabs{display:flex;gap:6px;background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:4px;margin-bottom:14px}
+.person-tab{flex:1;text-align:center;padding:11px 8px;border-radius:11px;font-weight:700;font-size:14px;color:var(--text3);cursor:pointer;border:none;background:transparent;font-family:var(--font);transition:all .18s}
+.person-tab.active{background:var(--accent);color:#fff;box-shadow:0 3px 10px rgba(31,122,125,.3)}
+
+.cal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.cal-nav-btn{background:var(--bg3);border:1.5px solid var(--border2);color:var(--accent);width:38px;height:38px;border-radius:50%;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:700}
+.cal-title{font-size:16px;font-weight:800}
+.cal-days-header{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;margin-bottom:6px}
+.cal-days-header span{font-size:11px;font-weight:700;color:var(--text3);padding:4px 0;text-transform:uppercase}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:11px;cursor:pointer;position:relative;font-size:13px;font-weight:600;border:1.5px solid transparent;color:var(--text);transition:transform .12s,background .15s}
+.cal-day:active{transform:scale(.92)}
+.cal-day.empty{opacity:0;pointer-events:none}
+.cal-day.today{border-color:var(--coral);color:var(--accent-deep)}
+.cal-day.has-a::after,.cal-day.has-b::after,.cal-day.has-both::after{content:'';position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%}
+.cal-day.has-a::after{background:var(--accent)}
+.cal-day.has-b::after{background:var(--coral)}
+.cal-day.has-both::after{background:linear-gradient(90deg,var(--accent),var(--coral));width:8px}
+.cal-day.selected{background:linear-gradient(135deg,#145457,#1F7A7D);color:#fff!important;border-color:transparent;box-shadow:0 3px 10px rgba(31,122,125,.35)}
+.cal-day.selected.has-a::after,.cal-day.selected.has-b::after,.cal-day.selected.has-both::after{background:#fff}
+
+.day-panel{margin-top:4px}
+.day-panel h3{font-size:15px;font-weight:800;margin-bottom:10px}
+.session-row{display:flex;align-items:center;gap:10px;background:var(--card);border:1.5px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;box-shadow:var(--shadow)}
+.session-row.done{background:linear-gradient(90deg,#E8F5F4,var(--card));border-color:rgba(31,122,125,.35)}
+.session-avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:14px;flex-shrink:0}
+.session-avatar.a{background:linear-gradient(135deg,#145457,#2A9A9E)}
+.session-avatar.b{background:linear-gradient(135deg,#E07A35,#F28C48)}
+.session-info{flex:1;min-width:0}
+.session-info h4{font-size:14px;font-weight:700}
+.session-info p{font-size:12px;color:var(--text3);font-weight:500;margin-top:2px}
+.toggle{width:52px;height:30px;border-radius:16px;background:var(--bg3);border:1.5px solid var(--border2);position:relative;cursor:pointer;flex-shrink:0;transition:background .2s}
+.toggle.on{background:var(--accent);border-color:var(--accent)}
+.toggle::after{content:'';position:absolute;top:2px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.15);transition:left .2s}
+.toggle.on::after{left:24px}
+
+.stats-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
+.stat-card{background:var(--card);border:1.5px solid var(--border);border-radius:12px;padding:14px 8px;text-align:center;box-shadow:var(--shadow)}
+.stat-value{font-size:22px;font-weight:800;color:var(--accent)}
+.stat-value.coral{color:var(--coral)}
+.stat-value.ink{color:var(--text)}
+.stat-label{font-size:10px;color:var(--text3);font-weight:700;margin-top:3px;text-transform:uppercase;letter-spacing:.4px}
+
+.summary-block{margin-bottom:10px}
+.summary-block h4{font-size:14px;font-weight:800;margin-bottom:4px}
+.summary-block p{font-size:13px;color:var(--text3);font-weight:500;line-height:1.45}
+.total-row{display:flex;justify-content:space-between;align-items:center;padding-top:12px;margin-top:8px;border-top:1.5px solid var(--border)}
+.total-row .label{font-size:13px;color:var(--text2);font-weight:600}
+.total-row .value{font-size:20px;font-weight:800;color:var(--accent)}
+
+.empty-state{text-align:center;padding:28px 16px;color:var(--text3)}
+.empty-state .ei{font-size:40px;display:block;margin-bottom:8px}
+.empty-state p{font-size:14px;font-weight:500;line-height:1.5}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(18,36,38,.55);z-index:1000;display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px)}
+.modal{background:#fff;border-radius:24px 24px 0 0;padding:20px 20px calc(28px + var(--safe-b));width:100%;max-width:560px;max-height:90vh;overflow-y:auto;animation:slideUp .28s ease-out;box-shadow:0 -8px 40px rgba(15,61,64,.2)}
+.modal-handle{width:44px;height:4px;background:var(--border2);border-radius:2px;margin:0 auto 18px}
+.modal-title{font-size:19px;font-weight:800;margin-bottom:14px}
+@keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
+
+.toast{position:fixed;top:76px;left:50%;transform:translateX(-50%);background:var(--accent-deep);color:#fff;border-radius:12px;padding:10px 20px;font-size:13px;font-weight:700;z-index:2000;animation:fadeToast 2.6s ease forwards;white-space:nowrap;box-shadow:0 8px 24px rgba(15,61,64,.3);pointer-events:none}
+@keyframes fadeToast{0%{opacity:0;top:66px}10%{opacity:1;top:76px}75%{opacity:1}100%{opacity:0}}
+
+/* Gate */
+#gate{position:fixed;inset:0;z-index:3000;background:linear-gradient(160deg,#0B3032 0%,#0F3D40 40%,#1F7A7D 100%);display:none;flex-direction:column;justify-content:center;padding:28px 22px;padding-top:max(28px,env(safe-area-inset-top))}
+#gate.show{display:flex}
+.gate-brand{font-size:42px;font-weight:800;color:#fff;letter-spacing:-1px;margin-bottom:8px}
+.gate-sub{font-size:16px;color:rgba(255,255,255,.85);line-height:1.45;max-width:320px;margin-bottom:28px;font-weight:500}
+.gate-card{background:#fff;border-radius:20px;padding:22px;box-shadow:0 12px 40px rgba(0,0,0,.2)}
+.gate-blob{position:absolute;border-radius:50%;pointer-events:none}
+.gate-blob.t{top:-60px;right:-40px;width:200px;height:200px;background:rgba(42,154,158,.35)}
+.gate-blob.b{bottom:40px;left:-50px;width:180px;height:180px;background:rgba(242,140,72,.18)}
+
+.save-hint{font-size:12px;font-weight:600;color:var(--text3);min-height:16px}
+.save-hint.ok{color:var(--green)}
+.save-hint.err{color:var(--red)}
+
+.section-title{font-size:18px;font-weight:800;margin-bottom:12px}
+.hint{font-size:13px;color:var(--text3);font-weight:500;line-height:1.45;margin-bottom:12px}
+.code-pill{display:inline-block;background:var(--bg3);border:1.5px solid var(--border2);padding:6px 12px;border-radius:10px;font-weight:800;color:var(--accent-deep);font-size:15px;margin-bottom:12px}
+
+@media print{
+  .nav,#installBanner,.header-actions,.btn,.modal-overlay,#gate{display:none!important}
+  body,#app{height:auto;overflow:visible;background:#fff}
+  .content{display:block!important;overflow:visible}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="installBanner">
+    <p>Instala a Aulas PT no ecrã inicial</p>
+    <button class="ib-btn" type="button" id="installBtn">Instalar</button>
+    <button class="ib-x" type="button" id="installDismiss">✕</button>
+  </div>
+
+  <div class="header">
+    <div class="header-mark"><img src="icon-192.png" alt=""></div>
+    <div class="header-info">
+      <h1>Aulas PT</h1>
+      <p id="headerSub">Horários feitos · preço fixo</p>
+    </div>
+    <div class="header-actions">
+      <span class="sync-dot" id="syncDot" title="Sincronizado"></span>
+      <button class="chip-btn" type="button" id="btnToday">Hoje</button>
+    </div>
+  </div>
+
+  <div class="content active" id="tab-agenda">
+    <div class="person-tabs">
+      <button class="person-tab active" type="button" data-person="a" id="tabPersonA">Pessoa 1</button>
+      <button class="person-tab" type="button" data-person="b" id="tabPersonB">Pessoa 2</button>
+    </div>
+    <div class="card">
+      <div class="cal-header">
+        <button class="cal-nav-btn" type="button" id="prevMonth">‹</button>
+        <div class="cal-title" id="calTitle">—</div>
+        <button class="cal-nav-btn" type="button" id="nextMonth">›</button>
+      </div>
+      <div class="cal-days-header">
+        <span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span><span>Dom</span>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+    <div class="day-panel card" id="dayPanel">
+      <h3 id="dayPanelTitle">Seleciona um dia</h3>
+      <div id="dayPanelBody"></div>
+    </div>
+  </div>
+
+  <div class="content" id="tab-resumo">
+    <div class="section-title">Resumo do mês</div>
+    <p class="hint" id="resumoMonthLabel">—</p>
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-value" id="statA">0</div><div class="stat-label" id="statALabel">Pessoa 1</div></div>
+      <div class="stat-card"><div class="stat-value coral" id="statB">0</div><div class="stat-label" id="statBLabel">Pessoa 2</div></div>
+      <div class="stat-card"><div class="stat-value ink" id="statTotal">0 €</div><div class="stat-label">Total</div></div>
+    </div>
+    <div class="card" id="resumoDetail">
+      <div class="empty-state"><span class="ei">📅</span><p>Ainda sem aulas este mês.<br>Marca dias na Agenda.</p></div>
+    </div>
+    <button class="btn btn-wa btn-full" type="button" id="btnWhatsApp">Enviar no WhatsApp</button>
+  </div>
+
+  <div class="content" id="tab-defs">
+    <div class="section-title">Definições</div>
+    <p class="hint">Nomes e preço gravam-se sozinhos cerca de 1 segundo depois de parares de escrever.</p>
+    <div class="card">
+      <div class="input-group">
+        <label class="input-label" for="nameA">Pessoa 1</label>
+        <input class="input" id="nameA" autocomplete="off">
+      </div>
+      <div class="input-group">
+        <label class="input-label" for="nameB">Pessoa 2</label>
+        <input class="input" id="nameB" autocomplete="off">
+      </div>
+      <div class="input-group">
+        <label class="input-label" for="priceInput">Preço por aula (€)</label>
+        <input class="input" id="priceInput" inputmode="decimal" autocomplete="off">
+      </div>
+      <div class="save-hint" id="saveHint"></div>
+    </div>
+    <div class="card">
+      <div class="input-label">Código da casa</div>
+      <div class="code-pill" id="codePill">—</div>
+      <p class="hint" style="margin:0">Os dois telemóveis usam o mesmo código para ver os mesmos dados.</p>
+      <button class="btn btn-danger btn-full" type="button" id="btnLeave" style="margin-top:14px">Usar outro código</button>
+    </div>
+  </div>
+
+  <nav class="nav">
+    <button class="nav-btn active" type="button" data-tab="agenda">
+      <span class="nav-icon">📅</span><span class="nav-label">Agenda</span>
+    </button>
+    <button class="nav-btn" type="button" data-tab="resumo">
+      <span class="nav-icon">📊</span><span class="nav-label">Resumo</span>
+    </button>
+    <button class="nav-btn" type="button" data-tab="defs">
+      <span class="nav-icon">⚙️</span><span class="nav-label">Definições</span>
+    </button>
+  </nav>
+</div>
+
+<div id="gate">
+  <div class="gate-blob t"></div>
+  <div class="gate-blob b"></div>
+  <div style="position:relative;z-index:1">
+    <div class="gate-brand">Aulas PT</div>
+    <p class="gate-sub">Marca os horários feitos. Os dois vêem o mesmo calendário.</p>
+    <div class="gate-card">
+      <div class="input-group">
+        <label class="input-label" for="gateCode">Código da casa</label>
+        <input class="input" id="gateCode" placeholder="ex.: casa-silva" autocomplete="off" autocapitalize="off">
+      </div>
+      <p class="hint">Escolham a mesma palavra nos dois telemóveis. Sem conta, sem link.</p>
+      <button class="btn btn-coral btn-full" type="button" id="gateEnter">Entrar</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const SB_URL = 'https://qnscwppgljobelplgbkp.supabase.co';
+  const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFuc2N3cHBnbGpvYmVscGxnYmtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxMDc3NzgsImV4cCI6MjA5MTY4Mzc3OH0.9ysq0ibsn3qDPHe5WYF-yyq9-vEKjc_hIn9BNKZccYY';
+  const HOUSE_KEY = 'aulas_pt_household_code';
+  const MONTHS = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  const WEEKDAYS_LONG = ['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
+
+  const db = supabase.createClient(SB_URL, SB_KEY);
+
+  const state = {
+    code: null,
+    settings: null,
+    sessions: [], // {person, day}
+    year: new Date().getFullYear(),
+    month: new Date().getMonth(),
+    selectedDay: new Date().getDate(),
+    person: 'a',
+    saveTimer: null,
+    channel: null,
+  };
+
+  const $ = (id) => document.getElementById(id);
+
+  function toast(msg) {
+    document.querySelectorAll('.toast').forEach((t) => t.remove());
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2700);
+  }
+
+  function setSync(mode) {
+    const d = $('syncDot');
+    d.classList.remove('busy', 'err');
+    if (mode === 'busy') d.classList.add('busy');
+    if (mode === 'err') d.classList.add('err');
+  }
+
+  function formatEuros(cents) {
+    return (cents / 100).toFixed(2).replace('.', ',') + ' €';
+  }
+
+  function parseEurosToCents(input) {
+    const t = String(input || '').trim().replace(/\s/g, '').replace('€', '');
+    if (!t) return null;
+    const n = t.replace(',', '.');
+    if (!/^\d+(\.\d{0,2})?$/.test(n)) return null;
+    return Math.round(Number(n) * 100);
+  }
+
+  function dayKey(y, m, d) {
+    return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  }
+
+  function monthTitle(y, m) {
+    const name = MONTHS[m];
+    return name.charAt(0).toUpperCase() + name.slice(1) + ' ' + y;
+  }
+
+  function nameOf(p) {
+    if (!state.settings) return p === 'a' ? 'Pessoa 1' : 'Pessoa 2';
+    return p === 'a' ? state.settings.name_a : state.settings.name_b;
+  }
+
+  function initials(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  function hasSession(person, y, m, d) {
+    const k = dayKey(y, m, d);
+    return state.sessions.some((s) => s.person === person && s.day === k);
+  }
+
+  function daysFor(person, y, m) {
+    const prefix = y + '-' + String(m + 1).padStart(2, '0') + '-';
+    return state.sessions
+      .filter((s) => s.person === person && s.day.startsWith(prefix))
+      .map((s) => Number(s.day.slice(8, 10)))
+      .filter((n) => Number.isFinite(n))
+      .sort((a, b) => a - b);
+  }
+
+  function buildWhatsAppText() {
+    const y = state.year, m = state.month;
+    const daysA = daysFor('a', y, m);
+    const daysB = daysFor('b', y, m);
+    const price = state.settings?.price_cents ?? 2500;
+    const total = daysA.length + daysB.length;
+    const listA = daysA.length ? daysA.join(', ') : '—';
+    const listB = daysB.length ? daysB.join(', ') : '—';
+    return [
+      'Aulas PT — ' + MONTHS[m] + ' ' + y,
+      '',
+      nameOf('a') + ': ' + daysA.length + ' aulas (' + listA + ')',
+      nameOf('b') + ': ' + daysB.length + ' aulas (' + listB + ')',
+      '',
+      total + ' aulas × ' + formatEuros(price) + ' = ' + formatEuros(total * price),
+    ].join('\n');
+  }
+
+  /* ── Persistence ── */
+  function loadCode() {
+    try { return (localStorage.getItem(HOUSE_KEY) || '').trim() || null; } catch { return null; }
+  }
+  function saveCode(code) {
+    localStorage.setItem(HOUSE_KEY, code);
+  }
+  function clearCode() {
+    localStorage.removeItem(HOUSE_KEY);
+  }
+
+  async function ensureSettings(code) {
+    const { data, error } = await db.from('aulas_pt_settings').select('*').eq('household_code', code).maybeSingle();
+    if (error) throw error;
+    if (data) return data;
+    const payload = {
+      household_code: code,
+      name_a: 'Pessoa 1',
+      name_b: 'Pessoa 2',
+      price_cents: 2500,
+      updated_at: new Date().toISOString(),
+    };
+    const { data: created, error: insErr } = await db.from('aulas_pt_settings').insert(payload).select('*').single();
+    if (insErr) throw insErr;
+    return created;
+  }
+
+  async function loadSessions(code) {
+    const { data, error } = await db.from('aulas_pt_sessions').select('household_code,person,day').eq('household_code', code);
+    if (error) throw error;
+    state.sessions = data || [];
+  }
+
+  function subscribeRealtime(code) {
+    if (state.channel) {
+      db.removeChannel(state.channel);
+      state.channel = null;
+    }
+    state.channel = db
+      .channel('aulas-pt-' + code)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'aulas_pt_settings', filter: 'household_code=eq.' + code }, (payload) => {
+        if (payload.eventType === 'DELETE') return;
+        state.settings = payload.new;
+        fillSettingsForm(false);
+        renderAll();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'aulas_pt_sessions', filter: 'household_code=eq.' + code }, (payload) => {
+        if (payload.eventType === 'DELETE') {
+          const old = payload.old;
+          state.sessions = state.sessions.filter((s) => !(s.person === old.person && s.day === old.day));
+        } else {
+          const row = payload.new;
+          state.sessions = state.sessions.filter((s) => !(s.person === row.person && s.day === row.day));
+          state.sessions.push(row);
+        }
+        renderAll();
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setSync('ok');
+      });
+  }
+
+  async function bootHousehold(code) {
+    setSync('busy');
+    try {
+      state.code = code;
+      state.settings = await ensureSettings(code);
+      await loadSessions(code);
+      subscribeRealtime(code);
+      $('gate').classList.remove('show');
+      fillSettingsForm(true);
+      renderAll();
+      setSync('ok');
+    } catch (e) {
+      console.error(e);
+      setSync('err');
+      toast('Erro ao ligar à casa');
+      throw e;
+    }
+  }
+
+  async function toggleSession(person, day) {
+    if (!state.code) return;
+    const k = dayKey(state.year, state.month, day);
+    const exists = hasSession(person, state.year, state.month, day);
+    setSync('busy');
+    if (exists) {
+      state.sessions = state.sessions.filter((s) => !(s.person === person && s.day === k));
+      renderAll();
+      const { error } = await db.from('aulas_pt_sessions').delete()
+        .eq('household_code', state.code).eq('person', person).eq('day', k);
+      if (error) {
+        setSync('err');
+        toast('Erro ao desmarcar');
+        await loadSessions(state.code);
+        renderAll();
+        return;
+      }
+      toast('Desmarcado');
+    } else {
+      const row = { household_code: state.code, person, day: k };
+      state.sessions = [...state.sessions, row];
+      renderAll();
+      const { error } = await db.from('aulas_pt_sessions').insert(row);
+      if (error) {
+        setSync('err');
+        toast('Erro ao marcar');
+        await loadSessions(state.code);
+        renderAll();
+        return;
+      }
+      toast('Horário feito');
+    }
+    setSync('ok');
+  }
+
+  function scheduleSettingsSave() {
+    const hint = $('saveHint');
+    hint.textContent = 'A guardar…';
+    hint.className = 'save-hint';
+    if (state.saveTimer) clearTimeout(state.saveTimer);
+    state.saveTimer = setTimeout(persistSettings, 1000);
+  }
+
+  async function persistSettings() {
+    if (!state.code || !state.settings) return;
+    const name_a = ($('nameA').value || '').trim() || 'Pessoa 1';
+    const name_b = ($('nameB').value || '').trim() || 'Pessoa 2';
+    const cents = parseEurosToCents($('priceInput').value);
+    if (cents == null) {
+      $('saveHint').textContent = 'Preço inválido';
+      $('saveHint').className = 'save-hint err';
+      return;
+    }
+    setSync('busy');
+    const payload = {
+      household_code: state.code,
+      name_a,
+      name_b,
+      price_cents: cents,
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await db.from('aulas_pt_settings').upsert(payload);
+    if (error) {
+      setSync('err');
+      $('saveHint').textContent = 'Erro ao guardar';
+      $('saveHint').className = 'save-hint err';
+      toast('Erro ao guardar');
+      return;
+    }
+    state.settings = { ...state.settings, ...payload };
+    $('saveHint').textContent = 'Guardado';
+    $('saveHint').className = 'save-hint ok';
+    setSync('ok');
+    renderAll();
+    setTimeout(() => {
+      if ($('saveHint').textContent === 'Guardado') {
+        $('saveHint').textContent = '';
+        $('saveHint').className = 'save-hint';
+      }
+    }, 1600);
+  }
+
+  function fillSettingsForm(force) {
+    if (!state.settings) return;
+    if (force || document.activeElement !== $('nameA')) $('nameA').value = state.settings.name_a;
+    if (force || document.activeElement !== $('nameB')) $('nameB').value = state.settings.name_b;
+    if (force || document.activeElement !== $('priceInput')) {
+      $('priceInput').value = (state.settings.price_cents / 100).toFixed(2).replace('.', ',');
+    }
+    $('codePill').textContent = state.code || '—';
+  }
+
+  /* ── Render ── */
+  function renderAll() {
+    $('tabPersonA').textContent = nameOf('a');
+    $('tabPersonB').textContent = nameOf('b');
+    $('headerSub').textContent = nameOf('a') + ' · ' + nameOf('b');
+    renderCalendar();
+    renderDayPanel();
+    renderResumo();
+  }
+
+  function renderCalendar() {
+    $('calTitle').textContent = monthTitle(state.year, state.month);
+    const grid = $('calGrid');
+    grid.innerHTML = '';
+    const first = new Date(state.year, state.month, 1);
+    const daysInMonth = new Date(state.year, state.month + 1, 0).getDate();
+    const startPad = (first.getDay() + 6) % 7;
+    const today = new Date();
+    const isCur = today.getFullYear() === state.year && today.getMonth() === state.month;
+
+    // clamp selected day
+    if (state.selectedDay > daysInMonth) state.selectedDay = daysInMonth;
+
+    for (let i = 0; i < startPad; i++) {
+      const e = document.createElement('div');
+      e.className = 'cal-day empty';
+      grid.appendChild(e);
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'cal-day';
+      el.textContent = String(d);
+      const a = hasSession('a', state.year, state.month, d);
+      const b = hasSession('b', state.year, state.month, d);
+      if (a && b) el.classList.add('has-both');
+      else if (a) el.classList.add('has-a');
+      else if (b) el.classList.add('has-b');
+      if (isCur && d === today.getDate()) el.classList.add('today');
+      if (d === state.selectedDay) el.classList.add('selected');
+      el.addEventListener('click', () => {
+        state.selectedDay = d;
+        renderCalendar();
+        renderDayPanel();
+      });
+      grid.appendChild(el);
+    }
+  }
+
+  function renderDayPanel() {
+    const d = state.selectedDay;
+    if (!d) {
+      $('dayPanelTitle').textContent = 'Seleciona um dia';
+      $('dayPanelBody').innerHTML = '';
+      return;
+    }
+    const date = new Date(state.year, state.month, d);
+    const wd = WEEKDAYS_LONG[date.getDay()];
+    $('dayPanelTitle').textContent = wd.charAt(0).toUpperCase() + wd.slice(1) + ', ' + d + ' ' + MONTHS[state.month];
+
+    const people = [
+      { p: 'a', active: hasSession('a', state.year, state.month, d) },
+      { p: 'b', active: hasSession('b', state.year, state.month, d) },
+    ];
+
+    $('dayPanelBody').innerHTML = people.map(({ p, active }) => {
+      const n = nameOf(p);
+      return (
+        '<div class="session-row' + (active ? ' done' : '') + '">' +
+          '<div class="session-avatar ' + p + '">' + initials(n) + '</div>' +
+          '<div class="session-info"><h4>' + escapeHtml(n) + '</h4>' +
+          '<p>' + (active ? 'Horário feito' : 'Por marcar') + '</p></div>' +
+          '<button type="button" class="toggle' + (active ? ' on' : '') + '" data-toggle="' + p + '" aria-label="Marcar"></button>' +
+        '</div>'
+      );
+    }).join('');
+
+    $('dayPanelBody').querySelectorAll('[data-toggle]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        void toggleSession(btn.getAttribute('data-toggle'), d);
+      });
+    });
+  }
+
+  function renderResumo() {
+    const y = state.year, m = state.month;
+    const daysA = daysFor('a', y, m);
+    const daysB = daysFor('b', y, m);
+    const price = state.settings?.price_cents ?? 2500;
+    const total = daysA.length + daysB.length;
+    $('resumoMonthLabel').textContent = monthTitle(y, m);
+    $('statA').textContent = String(daysA.length);
+    $('statB').textContent = String(daysB.length);
+    $('statALabel').textContent = nameOf('a');
+    $('statBLabel').textContent = nameOf('b');
+    $('statTotal').textContent = formatEuros(total * price);
+
+    const box = $('resumoDetail');
+    if (!total) {
+      box.innerHTML = '<div class="empty-state"><span class="ei">📅</span><p>Ainda sem aulas este mês.<br>Marca dias na Agenda.</p></div>';
+      return;
+    }
+    box.innerHTML =
+      '<div class="summary-block"><h4>' + escapeHtml(nameOf('a')) + ' — ' + daysA.length + ' aulas</h4>' +
+      '<p>Dias: ' + (daysA.length ? daysA.join(', ') : '—') + '</p></div>' +
+      '<div class="summary-block"><h4>' + escapeHtml(nameOf('b')) + ' — ' + daysB.length + ' aulas</h4>' +
+      '<p>Dias: ' + (daysB.length ? daysB.join(', ') : '—') + '</p></div>' +
+      '<div class="total-row"><span class="label">' + total + ' aulas × ' + formatEuros(price) + '</span>' +
+      '<span class="value">' + formatEuros(total * price) + '</span></div>';
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  /* ── UI wiring ── */
+  document.querySelectorAll('.nav-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.getAttribute('data-tab');
+      document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('.content').forEach((c) => c.classList.remove('active'));
+      $('tab-' + tab).classList.add('active');
+    });
+  });
+
+  document.querySelectorAll('.person-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.person = btn.getAttribute('data-person');
+      document.querySelectorAll('.person-tab').forEach((b) => b.classList.toggle('active', b === btn));
+      // Quick-mark selected day for active person on double-purpose: long press not needed;
+      // person tab only filters visual focus for quick toggle via day panel (both always shown).
+    });
+  });
+
+  // Double-tap calendar day while person tab active = quick toggle that person
+  // (also available via day panel toggles). Add quick action: hold selected + person tab label hint.
+  $('calGrid').addEventListener('dblclick', (e) => {
+    const dayBtn = e.target.closest('.cal-day:not(.empty)');
+    if (!dayBtn) return;
+    void toggleSession(state.person, state.selectedDay);
+  });
+
+  // Single tap already selects; add quick mark via long-press alternative: tap on selected day again toggles active person
+  let lastTapDay = null;
+  let lastTapTs = 0;
+  $('calGrid').addEventListener('click', (e) => {
+    const dayBtn = e.target.closest('.cal-day:not(.empty)');
+    if (!dayBtn) return;
+    const d = Number(dayBtn.textContent);
+    const now = Date.now();
+    if (lastTapDay === d && now - lastTapTs < 380) {
+      void toggleSession(state.person, d);
+    }
+    lastTapDay = d;
+    lastTapTs = now;
+  }, true);
+
+  $('prevMonth').addEventListener('click', () => {
+    const dt = new Date(state.year, state.month - 1, 1);
+    state.year = dt.getFullYear();
+    state.month = dt.getMonth();
+    renderAll();
+  });
+  $('nextMonth').addEventListener('click', () => {
+    const dt = new Date(state.year, state.month + 1, 1);
+    state.year = dt.getFullYear();
+    state.month = dt.getMonth();
+    renderAll();
+  });
+  $('btnToday').addEventListener('click', () => {
+    const n = new Date();
+    state.year = n.getFullYear();
+    state.month = n.getMonth();
+    state.selectedDay = n.getDate();
+    renderAll();
+    document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.getAttribute('data-tab') === 'agenda'));
+    document.querySelectorAll('.content').forEach((c) => c.classList.remove('active'));
+    $('tab-agenda').classList.add('active');
+  });
+
+  $('btnWhatsApp').addEventListener('click', () => {
+    const text = buildWhatsAppText();
+    window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+  });
+
+  ['nameA', 'nameB', 'priceInput'].forEach((id) => {
+    $(id).addEventListener('input', scheduleSettingsSave);
+  });
+
+  $('btnLeave').addEventListener('click', () => {
+    if (!confirm('Mudar de casa? Os dados no servidor mantêm-se.')) return;
+    clearCode();
+    state.code = null;
+    state.settings = null;
+    state.sessions = [];
+    if (state.channel) { db.removeChannel(state.channel); state.channel = null; }
+    $('gate').classList.add('show');
+    $('gateCode').value = '';
+  });
+
+  $('gateEnter').addEventListener('click', async () => {
+    const raw = ($('gateCode').value || '').trim().toLowerCase().replace(/\s+/g, '-');
+    if (!raw) { toast('Indica um código'); return; }
+    try {
+      saveCode(raw);
+      await bootHousehold(raw);
+      toast('Entrou na casa');
+    } catch (e) {
+      toast('Não foi possível entrar');
+    }
+  });
+  $('gateCode').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('gateEnter').click();
+  });
+
+  /* Install PWA */
+  let deferredPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    $('installBanner').style.display = 'flex';
+  });
+  $('installBtn').addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    $('installBanner').style.display = 'none';
+  });
+  $('installDismiss').addEventListener('click', () => {
+    $('installBanner').style.display = 'none';
+  });
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+
+  /* Boot */
+  const existing = loadCode();
+  if (existing) {
+    bootHousehold(existing).catch(() => {
+      $('gate').classList.add('show');
+      $('gateCode').value = existing;
+    });
+  } else {
+    $('gate').classList.add('show');
+  }
+})();
+</script>
+</body>
+</html>
