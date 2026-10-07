@@ -1,5 +1,5 @@
-// fretes.js v1.8.92 — scrub ghosts fully (zero lineSum); no lineSum resurrect; pago once
-const FRETES_JS_VERSION = '1.8.92';
+// fretes.js v1.8.93 — QZ month = quinzena file period; pago = Resumo com impostos
+const FRETES_JS_VERSION = '1.8.93';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
 /**
@@ -4129,35 +4129,35 @@ function pickEarliestDateValue(...vals) {
 
 /**
  * Month bucket for Por mês:
- * 1) SAP emissão (dtSAP / ZFACT) when present and valid
- * 2) else Data NF from quinzenais (invoice emission)
- * 3) else min Dt CTE
- * 4) else mesKey from the quinzenal file name / pack
+ * 1) Quinzenal file/quinzena month (mesKey/qzMesKey) when present — matches Unilog Resumo period
+ *    (Data NF spills Fev→Jan and leaves Dec-dated NFs out of the Jan quinzena).
+ * 2) else SAP emissão (dtSAP / ZFACT)
+ * 3) else Data NF / Dt CTE
  * Never stick on stale 'sem-data'.
  */
 function enrichNF(nf) {
   if (nf.mesRef && nf.mesRef !== 'sem-data' && nf.dtRef) return nf;
-  // 1. SAP emissão
+
   let d = parseCteDateValue(nf.dtSAP);
-  // 2. Data NF (quinzenal emissão da fatura) — preferred QZ date for bucketing
   if (!d) d = parseCteDateValue(nf.dtNFQz);
-  // 3. dtNF may still hold QZ Data NF (no SAP overwrite) or legacy SAP date
   if (!d) d = parseCteDateValue(nf.dtNF);
-  // 4. min Dt CTE across CT-e lines
   if (!d && nf.ctes?.length) {
     const dates = nf.ctes.map(c => parseCteDateValue(c.dtCte)).filter(Boolean);
     if (dates.length) d = new Date(Math.min(...dates.map(x => x.getTime())));
   }
-  if (d && !isNaN(d) && isPlausibleSapDate(d)) {
-    nf.dtRef = d;
-    nf.mesRef = monthKey(d);
-    return nf;
-  }
-  // Fallback: quinzenal file month (e.g. "1ªQ Julho 2026") when dates blank
+  const dateOk = d && !isNaN(d) && isPlausibleSapDate(d);
+
+  // Quinzenal period wins — Excel "Janeiro 1ªQ/2ªQ" totals are by report period, not invoice date.
   const qzMes = nf.mesKey || nf.qzMesKey || null;
   if (qzMes && qzMes !== 'sem-mes' && qzMes !== 'sem-data' && /^\d{4}-\d{2}$/.test(String(qzMes))) {
-    nf.dtRef = null;
+    nf.dtRef = dateOk ? d : null;
     nf.mesRef = qzMes;
+    return nf;
+  }
+
+  if (dateOk) {
+    nf.dtRef = d;
+    nf.mesRef = monthKey(d);
     return nf;
   }
   nf.dtRef = null;
@@ -5513,17 +5513,18 @@ function mesKeyFromQuinzenaKey(qk) {
 }
 
 function resolveB2cRowMesKey(r, fileMeta) {
+  const meta = fileMeta || r;
+  // Prefer quinzena file month — same rule as B2B / enrichNF (match Unilog Resumo period).
+  if (meta?.mesKey && meta.mesKey !== 'sem-mes') return meta.mesKey;
+  if (r?.mesKey && r.mesKey !== 'sem-mes') return r.mesKey;
+  const fromQz = mesKeyFromQuinzenaKey(r?.quinzenaKey || meta?.quinzenaKey);
+  if (fromQz && fromQz !== 'sem-mes') return fromQz;
+  if (meta?.mes && meta?.ano) return `${meta.ano}-${String(meta.mes).padStart(2, '0')}`;
   const d = parseSapBrDate(r?.dtColeta) || parseSapBrDate(r?.dtNF);
   if (d) {
     const k = monthKey(d);
     if (k && k !== 'sem-data') return k;
   }
-  if (r?.mesKey && r.mesKey !== 'sem-mes') return r.mesKey;
-  const meta = fileMeta || r;
-  if (meta?.mesKey && meta.mesKey !== 'sem-mes') return meta.mesKey;
-  const fromQz = mesKeyFromQuinzenaKey(r?.quinzenaKey || meta?.quinzenaKey);
-  if (fromQz && fromQz !== 'sem-mes') return fromQz;
-  if (meta?.mes && meta?.ano) return `${meta.ano}-${String(meta.mes).padStart(2, '0')}`;
   return 'sem-mes';
 }
 
@@ -5659,10 +5660,115 @@ function parseQzSheetRows(sheet, canal) {
   return { rows, headers };
 }
 
+/**
+ * Folha Resumo: Total Frete + Impostos → "Total NF" final (pago com impostos).
+ * Jan/2026 B2B: 101 405,72 frete + 12 854,24 imp = 114 259,96.
+ */
+function parseQzResumoTotals(wb) {
+  if (!wb?.SheetNames?.length) return null;
+  for (const name of wb.SheetNames) {
+    if (!/resumo/i.test(String(name))) continue;
+    const raw = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: null });
+    if (!raw.length) continue;
+    let headerIdx = -1;
+    let colFrete = -1;
+    let colImp = -1;
+    let colComImp = -1;
+    let colValorNF = -1;
+    for (let i = 0; i < Math.min(raw.length, 40); i++) {
+      const row = raw[i];
+      if (!Array.isArray(row)) continue;
+      const norms = row.map(c => normCol(c));
+      const iFrete = norms.findIndex(c => c === 'total frete');
+      const iImp = norms.findIndex(c => c === 'impostos' || c === 'imposto');
+      const totalNfIdxs = norms
+        .map((c, j) => (c === 'total nf' ? j : -1))
+        .filter(j => j >= 0);
+      if (iFrete < 0 || iImp < 0) continue;
+      headerIdx = i;
+      colFrete = iFrete;
+      colImp = iImp;
+      colValorNF = totalNfIdxs.length ? totalNfIdxs[0] : -1;
+      // Second "Total NF" (after Impostos) = frete + impostos (pago Unilog).
+      colComImp = totalNfIdxs.length >= 2 ? totalNfIdxs[totalNfIdxs.length - 1] : -1;
+      if (colComImp < 0) {
+        for (let j = norms.length - 1; j > iImp; j--) {
+          const h = norms[j];
+          if (h === 'total nf' || (h.includes('total') && !h.includes('frete'))) {
+            colComImp = j;
+            break;
+          }
+        }
+      }
+      break;
+    }
+    if (headerIdx < 0) continue;
+
+    const pickRow = (row) => {
+      const totalFrete = num(row[colFrete]);
+      const impostos = num(row[colImp]);
+      let totalComImpostos = colComImp >= 0 ? num(row[colComImp]) : 0;
+      if (!(totalComImpostos > 0) && totalFrete > 0) totalComImpostos = totalFrete + impostos;
+      return {
+        totalFrete,
+        impostos,
+        totalComImpostos,
+        totalValorNF: colValorNF >= 0 ? num(row[colValorNF]) : 0
+      };
+    };
+
+    for (let i = headerIdx + 1; i < raw.length; i++) {
+      const row = raw[i];
+      if (!Array.isArray(row)) continue;
+      const label = normCol(row.find(c => c != null && String(c).trim() !== '') || '');
+      if (!label.includes('total geral')) continue;
+      const out = pickRow(row);
+      if (out.totalFrete > 0 || out.totalComImpostos > 0) return out;
+    }
+    // No "Total Geral" — sum operation rows (skip blanks).
+    let totalFrete = 0, impostos = 0, totalComImpostos = 0, totalValorNF = 0;
+    for (let i = headerIdx + 1; i < raw.length; i++) {
+      const row = raw[i];
+      if (!Array.isArray(row)) continue;
+      const label = normCol(row.find(c => c != null && String(c).trim() !== '') || '');
+      if (!label || label.includes('total')) continue;
+      const p = pickRow(row);
+      totalFrete += p.totalFrete;
+      impostos += p.impostos;
+      totalComImpostos += p.totalComImpostos;
+      totalValorNF += p.totalValorNF;
+    }
+    if (totalFrete > 0 || totalComImpostos > 0) {
+      return { totalFrete, impostos, totalComImpostos, totalValorNF };
+    }
+  }
+  return null;
+}
+
+/** Scale Dados "Total Fatura" (sem impostos) → Resumo pago com impostos. */
+function qzTaxFactor(fileMeta) {
+  const frete = num(fileMeta?.resumoTotalFrete);
+  const comImp = num(fileMeta?.resumoTotalComImpostos);
+  if (frete > 0.01 && comImp > 0.01) return comImp / frete;
+  return 1;
+}
+
+function attachQzResumoToMeta(wb, fileMeta) {
+  const resumo = parseQzResumoTotals(wb);
+  if (!resumo) return fileMeta;
+  fileMeta.resumoTotalFrete = resumo.totalFrete;
+  fileMeta.resumoImpostos = resumo.impostos;
+  fileMeta.resumoTotalComImpostos = resumo.totalComImpostos;
+  fileMeta.resumoTotalValorNF = resumo.totalValorNF;
+  return fileMeta;
+}
+
 function loadQuinzenalFromWorkbook(wb, fileMeta) {
   const canal = fileMeta.canal || (/B2B/i.test(fileMeta.fileName) ? 'B2B' : 'B2C');
+  attachQzResumoToMeta(wb, fileMeta);
   let best = { rows: [], headers: [], valid: 0, sheetName: wb.SheetNames[0] };
   for (const name of wb.SheetNames) {
+    if (/resumo/i.test(String(name))) continue; // never treat Resumo as detail rows
     const parsed = parseQzSheetRows(wb.Sheets[name], canal);
     if (parsed.rows.length > best.valid) best = { ...parsed, sheetName: name, valid: parsed.rows.length };
   }
@@ -5671,6 +5777,7 @@ function loadQuinzenalFromWorkbook(wb, fileMeta) {
 
 function aggregateQzB2BRows(rows, fileMeta) {
   const byNf = {};
+  const taxFactor = qzTaxFactor(fileMeta);
   rows.forEach(r => {
     const key = normNFKey(r.nf);
     if (!key) return;
@@ -5691,7 +5798,9 @@ function aggregateQzB2BRows(rows, fileMeta) {
     // Duplicate QZ rows for the same CT-e — do not double-count pago / CT-e list.
     if (cteKey && g.nCteSet.has(cteKey)) return;
     if (cteKey) g.nCteSet.add(cteKey);
-    g.pago += num(r.pago);
+    // Dados "Total Fatura" is frete sem impostos; scale to Resumo com impostos.
+    const pagoLine = num(r.pago) * taxFactor;
+    g.pago += pagoLine;
     if (r.transportador && g.transportador === '') g.transportador = r.transportador;
     if (r.modalidade && !g.modalidade) g.modalidade = r.modalidade;
     if (r.dtNF) {
@@ -5703,7 +5812,7 @@ function aggregateQzB2BRows(rows, fileMeta) {
     g.ctes.push({
       numCte: cteKey,
       dtCte: persistDateValue(r.dtCte) || r.dtCte || null,
-      pago: num(r.pago),
+      pago: pagoLine,
       devolucao: isDev,
       tipoOp: r.tipoOp || '',
       peso: num(r.peso)
@@ -5712,7 +5821,7 @@ function aggregateQzB2BRows(rows, fileMeta) {
   });
   return Object.values(byNf).map(g => {
     const nCte = g.nCteSet.size || g.ctes.length || 1;
-    return { ...g, nCte, nCteSet: undefined };
+    return { ...g, nCte, nCteSet: undefined, taxFactor };
   });
 }
 
@@ -6364,28 +6473,46 @@ function buildQuinzenalPack(fileResults, fileBinaries) {
     if (canal === 'B2B') {
       const agg = aggregateQzB2BRows(rows, meta);
       b2bRows.push(...agg);
+      const sumPago = agg.reduce((s, x) => s + x.pago, 0);
+      // Prefer Resumo "com impostos" when present (authoritative Unilog total).
+      const totalPago = num(meta.resumoTotalComImpostos) > 0 ? num(meta.resumoTotalComImpostos) : sumPago;
       files.push({
         fileName: meta.fileName, canal, mesKey: meta.mesKey, mesLabel: meta.mesLabel,
         quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel,
         sheetName, rowCount: rows.length, nfCount: agg.length,
-        totalValorNF: agg.reduce((s, x) => s + x.valorNF, 0),
-        totalPago: agg.reduce((s, x) => s + x.pago, 0),
+        totalValorNF: num(meta.resumoTotalValorNF) > 0
+          ? num(meta.resumoTotalValorNF)
+          : agg.reduce((s, x) => s + x.valorNF, 0),
+        totalPago,
+        totalPagoDados: sumPago,
+        resumoTotalFrete: meta.resumoTotalFrete || null,
+        resumoImpostos: meta.resumoImpostos || null,
+        resumoTotalComImpostos: meta.resumoTotalComImpostos || null,
         totalCte: agg.reduce((s, x) => s + x.nCte, 0)
       });
     } else {
+      const taxFactor = qzTaxFactor(meta);
       rows.forEach(r => {
         const row = enrichB2cRowMesFields({
-          ...r, valorNF: num(r.valorNF) || num(r.valorProdutos), pago: num(r.pago),
-          quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel, fileName: meta.fileName
+          ...r, valorNF: num(r.valorNF) || num(r.valorProdutos), pago: num(r.pago) * taxFactor,
+          quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel, fileName: meta.fileName,
+          mesKey: meta.mesKey, mesLabel: meta.mesLabel
         }, meta);
         b2cRows.push(row);
       });
+      const sumPago = b2cRows.filter(r => r.fileName === meta.fileName).reduce((s, x) => s + num(x.pago), 0);
+      const totalPago = num(meta.resumoTotalComImpostos) > 0 ? num(meta.resumoTotalComImpostos) : sumPago;
       files.push({
         fileName: meta.fileName, canal, mesKey: meta.mesKey, mesLabel: meta.mesLabel,
         quinzenaKey: meta.quinzenaKey, quinzenaLabel: meta.quinzenaLabel,
         sheetName, rowCount: rows.length, nfCount: rows.length,
-        totalValorNF: rows.reduce((s, x) => s + (num(x.valorNF) || num(x.valorProdutos)), 0),
-        totalPago: rows.reduce((s, x) => s + num(x.pago), 0),
+        totalValorNF: num(meta.resumoTotalValorNF) > 0
+          ? num(meta.resumoTotalValorNF)
+          : rows.reduce((s, x) => s + (num(x.valorNF) || num(x.valorProdutos)), 0),
+        totalPago,
+        resumoTotalFrete: meta.resumoTotalFrete || null,
+        resumoImpostos: meta.resumoImpostos || null,
+        resumoTotalComImpostos: meta.resumoTotalComImpostos || null,
         totalCte: rows.filter(x => x.numCte).length
       });
     }
