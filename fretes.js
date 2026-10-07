@@ -1,5 +1,5 @@
-// fretes.js v1.8.93 — QZ month = quinzena file period; pago = Resumo com impostos
-const FRETES_JS_VERSION = '1.8.93';
+// fretes.js v1.8.94 — QZ partial upload merges into cloud pack (never wipe other months/files)
+const FRETES_JS_VERSION = '1.8.94';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
 /**
@@ -373,50 +373,47 @@ function fmtByteSize(n) {
   return (n / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
-/** Merge key for quinzenal rows: canal + NF (pedido fallback for B2C without NF). */
-function qzRowMergeKey(r, canal) {
-  const ch = canal || (/B2B/i.test(r?.fileName || '') ? 'B2B' : 'B2C');
-  const nf = r?.nfKey || normNFKey(r?.nf);
-  if (nf) return `${ch}|nf:${nf}`;
-  const ped = r?.pedido != null && String(r.pedido).trim() !== '' ? String(r.pedido).trim() : '';
-  if (ped) return `${ch}|ped:${ped}`;
-  return '';
-}
-
 /**
- * Merge quinzenal packs without treating the new Excel as full truth.
- * - Same fileName → replace that file's rows (re-upload of same report).
- * - Else NF-level (canal|nf): update overlapping NFs; keep NFs absent from the new file.
+ * Merge quinzenal packs — partial upload must NEVER wipe other months/files.
+ * Unit of replace = fileName (one Excel = one quinzena report):
+ * - Same fileName → replace that file's rows/meta (re-upload).
+ * - Different fileName → keep both (1ªQ+2ªQ of same month accumulate; Fev–Ago stay).
+ * Do NOT drop rows by NF across files — an NF in Jan must not erase Fev/other quinzenas.
  */
 function mergeQuinzenalPacks(prev, next) {
   if (!prev?.files?.length) return next;
   if (!next?.files?.length) return prev;
-  const replaceNames = new Set((next.files || []).map(f => f.fileName));
-  const nextB2bKeys = new Set(
-    (next.b2bRows || []).map(r => qzRowMergeKey(r, 'B2B')).filter(Boolean)
+  const replaceNames = new Set((next.files || []).map(f => f.fileName).filter(Boolean));
+  // Also replace by quinzenaKey when re-upload uses a slightly different file name
+  // for the same canal+period (e.g. renamed Excel for 1ªQ Janeiro 2026).
+  const replaceQzKeys = new Set(
+    (next.files || []).map(f => {
+      const qk = f.quinzenaKey || '';
+      const canal = f.canal || '';
+      return qk && canal ? `${canal}|${qk}` : '';
+    }).filter(Boolean)
   );
-  const nextB2cKeys = new Set(
-    (next.b2cRows || []).map(r => qzRowMergeKey(r, 'B2C')).filter(Boolean)
-  );
-  const keepPrevRow = (r, canal, nextKeys) => {
-    if (replaceNames.has(r.fileName)) return false;
-    const k = qzRowMergeKey(r, canal);
-    if (k && nextKeys.has(k)) return false;
-    return true;
+  const fileReplaced = (fileName, quinzenaKey, canal) => {
+    if (fileName && replaceNames.has(fileName)) return true;
+    const qk = quinzenaKey || '';
+    const ch = canal || (/B2B/i.test(fileName || '') ? 'B2B' : (/B2C/i.test(fileName || '') ? 'B2C' : ''));
+    return !!(qk && ch && replaceQzKeys.has(`${ch}|${qk}`));
+  };
+  const keepPrevFile = f => !fileReplaced(f.fileName, f.quinzenaKey, f.canal);
+  const keepPrevRow = r => {
+    const canal = /B2B/i.test(r?.fileName || '') ? 'B2B' : (/B2C/i.test(r?.fileName || '') ? 'B2C' : '');
+    return !fileReplaced(r.fileName, r.quinzenaKey, canal);
   };
   const b2bRows = [
-    ...(prev.b2bRows || []).filter(r => keepPrevRow(r, 'B2B', nextB2bKeys)),
+    ...(prev.b2bRows || []).filter(keepPrevRow),
     ...(next.b2bRows || [])
   ];
   const b2cRows = [
-    ...(prev.b2cRows || []).filter(r => keepPrevRow(r, 'B2C', nextB2cKeys)),
+    ...(prev.b2cRows || []).filter(keepPrevRow),
     ...(next.b2cRows || [])
   ];
-  const usedNames = new Set(
-    [...b2bRows, ...b2cRows].map(r => r.fileName).filter(Boolean)
-  );
   const files = [
-    ...(prev.files || []).filter(f => !replaceNames.has(f.fileName) && usedNames.has(f.fileName)),
+    ...(prev.files || []).filter(keepPrevFile),
     ...(next.files || [])
   ];
   const failKeys = new Set((next.failedFiles || []).map(f => f.fileName));
@@ -436,6 +433,16 @@ function mergeQuinzenalPacks(prev, next) {
   pack.b2cQuinzenaTotals = buildB2CQuinzenaTotals(b2cRows);
   pack.b2cRegionTotals = buildB2CRegionTotals(b2cRows);
   return pack;
+}
+
+/** Append quinzenal picks (multi-select / second picker) instead of replacing the buffer. */
+function addQzPendingFiles(fileList) {
+  const incoming = Array.from(fileList || []).filter(f => f && f.name);
+  if (!incoming.length) return;
+  const byName = new Map((fteQzPendingFiles || []).map(f => [f.name, f]));
+  incoming.forEach(f => byName.set(f.name, f));
+  fteQzPendingFiles = [...byName.values()];
+  syncQzUploadZone();
 }
 
 function updateFretesFileStatus(meta) {
@@ -3335,6 +3342,16 @@ function selectSapFile(file) {
 
 async function processQuinzenalPending() {
   if (!fteQzPendingFiles.length) return true;
+  // ALWAYS merge into existing pack — load cloud first if RAM empty so partial
+  // upload cannot wipe Fev–Ago (or the other Jan quinzena) already saved.
+  if (!quinzenalPack?.files?.length) {
+    try {
+      await fteYield('A carregar quinzenais guardados…');
+      await loadSavedQuinzenalPack(true, null, { deferCompare: true, skipRender: true });
+    } catch (e) {
+      console.warn('[fretes] pre-merge load quinzenal', e);
+    }
+  }
   const results = await Promise.all(fteQzPendingFiles.map(f => processQuinzenalFile(f)));
   const ok = results.filter(r => r.ok);
   const fail = results.filter(r => !r.ok);
@@ -3351,6 +3368,11 @@ async function processQuinzenalPending() {
   const prevPack = quinzenalPack?.files?.length ? quinzenalPack : null;
   const built = buildQuinzenalPack(results, fileBinaries);
   quinzenalPack = (prevPack && built?.files?.length) ? mergeQuinzenalPacks(prevPack, built) : built;
+  console.log('[fretes] qz merge',
+    'prev', prevPack?.files?.length || 0,
+    'new', built?.files?.length || 0,
+    'merged', quinzenalPack?.files?.length || 0,
+    'b2bRows', quinzenalPack?.b2bRows?.length || 0);
   refreshQuinzenalCompare();
   fteQzPendingFiles = [];
   const qzInput = $('qzFileInput');
@@ -7454,15 +7476,13 @@ function initFretes() {
     qzZone.addEventListener('dragleave', () => qzZone.classList.remove('drag'));
     qzZone.addEventListener('drop', e => {
       e.preventDefault(); qzZone.classList.remove('drag');
-      if (e.dataTransfer.files.length) {
-        fteQzPendingFiles = Array.from(e.dataTransfer.files);
-        syncQzUploadZone();
-      }
+      if (e.dataTransfer.files.length) addQzPendingFiles(e.dataTransfer.files);
     });
     qzInput.addEventListener('change', e => {
       if (e.target.files.length) {
-        fteQzPendingFiles = Array.from(e.target.files);
-        syncQzUploadZone();
+        addQzPendingFiles(e.target.files);
+        // Allow re-picking the same path after append (input value kept would block change).
+        qzInput.value = '';
       }
     });
   }
