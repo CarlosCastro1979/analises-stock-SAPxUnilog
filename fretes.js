@@ -1,5 +1,5 @@
-// fretes.js v1.8.94 — QZ partial upload merges into cloud pack (never wipe other months/files)
-const FRETES_JS_VERSION = '1.8.94';
+// fretes.js v1.8.95 — QZ: reject MIP/encrypted Excels loudly; keep 1ªQ+2ªQ merge by fileName/quinzenaKey
+const FRETES_JS_VERSION = '1.8.95';
 /** Unilog ops started ~10 Nov 2025 — coverage table ignores months before this (YYYY-MM). */
 const FRETES_OPS_START_MES = '2025-11';
 /**
@@ -931,19 +931,45 @@ function fteToastError(msg) {
   if (typeof toast === 'function') toast(msg, 'error');
 }
 
-/** SheetJS CE (0.18.x) cannot decrypt ECMA-376 password-protected xlsx. */
+/** SheetJS CE (0.18.x) cannot decrypt ECMA-376 / MIP-encrypted Office files. */
 function isEncryptedXlsxError(err) {
   const m = String(err?.message || err || '');
-  return /encryptioninfo|encrypted file|password|agile encryption|office crypto|file is password-protected/i.test(m);
+  return /encryptioninfo|encrypted file|password|agile encryption|office crypto|file is password-protected|encryptedpackage|dataspace/i.test(m);
+}
+
+/** OLE CFB magic + EncryptedPackage/DataSpaces = MIP / password-encrypted OOXML (not readable by SheetJS CE). */
+function isEncryptedOfficeArrayBuffer(data) {
+  try {
+    if (!data) return false;
+    const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
+    if (u8.length < 8) return false;
+    // D0 CF 11 E0 A1 B1 1A E1 — OLE Compound File
+    if (!(u8[0] === 0xD0 && u8[1] === 0xCF && u8[2] === 0x11 && u8[3] === 0xE0)) return false;
+    const ascii = new TextDecoder('latin1').decode(u8);
+    if (/EncryptedPackage/i.test(ascii)) return true;
+    // CFB directory names are UTF-16LE
+    let utf16 = '';
+    const n = Math.min(u8.length - 1, 2 * 1024 * 1024);
+    for (let i = 0; i < n; i += 2) utf16 += String.fromCharCode(u8[i] | (u8[i + 1] << 8));
+    return /EncryptedPackage|DataSpaces/i.test(utf16);
+  } catch (_) {
+    return false;
+  }
+}
+
+function encryptedOfficeUserMessage(context) {
+  const kind = context === 'qz' ? 'quinzenal' : (context === 'sap' ? 'SAP/ZFACT' : 'Excel');
+  return `Ficheiro ${kind} ENCRIPTADO (rótulo de sensibilidade / MIP / password) — o browser não consegue ler. `
+    + 'Abre no Excel → Ficheiro → Informações → remove o rótulo/proteção → Guardar Como .xlsx sem proteção '
+    + '(ou copia as folhas Resumo+Dados para um livro novo sem rótulo) e volta a Processar.';
 }
 
 function formatXlsxReadError(err, context) {
-  if (isEncryptedXlsxError(err)) {
-    return 'Ficheiro SAP protegido por password — não é possível ler ficheiros Excel encriptados. '
-      + 'Exporta do SAP sem proteção, ou abre no Excel e guarda como .xlsx sem password '
-      + '(Ficheiro → Guardar como). Alternativa: exportar como CSV.';
+  if (isEncryptedXlsxError(err) || /encrypted/i.test(String(err?.message || err || ''))) {
+    return encryptedOfficeUserMessage(context);
   }
-  const prefix = context === 'sap' ? 'Erro a ler SAP' : 'Erro a ler o ficheiro';
+  const prefix = context === 'sap' ? 'Erro a ler SAP'
+    : (context === 'qz' ? 'Erro a ler quinzenal' : 'Erro a ler o ficheiro');
   return prefix + ': ' + String(err?.message || err || 'ficheiro inválido');
 }
 
@@ -3352,11 +3378,34 @@ async function processQuinzenalPending() {
       console.warn('[fretes] pre-merge load quinzenal', e);
     }
   }
+  const pendingNames = fteQzPendingFiles.map(f => f.name);
+  console.log('[fretes] qz process pending', pendingNames.length, pendingNames);
   const results = await Promise.all(fteQzPendingFiles.map(f => processQuinzenalFile(f)));
   const ok = results.filter(r => r.ok);
   const fail = results.filter(r => !r.ok);
+  if (fail.length) {
+    const details = fail.map(f => {
+      const short = String(f.fileName || '').replace(/^Gest[aã]o de [Ff]rete DELTA[_ ]?/i, '');
+      return `${short || f.fileName}: ${f.error || 'erro'}`;
+    }).join('\n');
+    console.error('[fretes] qz process FAIL', fail.length, fail.map(f => f.fileName + ' → ' + f.error));
+    fteToastError(`${fail.length} quinzenal(is) NÃO entraram no pack — ${details.replace(/\n/g, ' · ')}`);
+  }
   if (!ok.length) {
-    fteToastError('Nenhum ficheiro quinzenal processado.');
+    fteToastError('Nenhum ficheiro quinzenal processado — nenhum foi adicionado ao pack.');
+    // Keep failedFiles visible on pack for UI note
+    if (fail.length) {
+      const prev = quinzenalPack || { files: [], b2bRows: [], b2cRows: [], failedFiles: [] };
+      quinzenalPack = {
+        ...prev,
+        failedFiles: [
+          ...(prev.failedFiles || []).filter(f => !fail.some(x => x.fileName === f.fileName)),
+          ...fail.map(f => ({ fileName: f.fileName, error: f.error || 'Erro' }))
+        ]
+      };
+      syncQzUploadZone();
+      updateQzFileNote();
+    }
     return false;
   }
   const fileBinaries = { ...(quinzenalPack?.fileBinaries || {}) };
@@ -3368,17 +3417,27 @@ async function processQuinzenalPending() {
   const prevPack = quinzenalPack?.files?.length ? quinzenalPack : null;
   const built = buildQuinzenalPack(results, fileBinaries);
   quinzenalPack = (prevPack && built?.files?.length) ? mergeQuinzenalPacks(prevPack, built) : built;
+  const janB2b = (quinzenalPack.files || []).filter(f => f.canal === 'B2B' && f.mesKey === '2026-01');
+  const janPago = janB2b.reduce((s, f) => s + num(f.totalPago), 0);
   console.log('[fretes] qz merge',
     'prev', prevPack?.files?.length || 0,
     'new', built?.files?.length || 0,
     'merged', quinzenalPack?.files?.length || 0,
-    'b2bRows', quinzenalPack?.b2bRows?.length || 0);
+    'b2bRows', quinzenalPack?.b2bRows?.length || 0,
+    'jan2026 B2B files', janB2b.length,
+    'jan2026 B2B pago', janPago,
+    'keys', (quinzenalPack.files || []).map(f => f.quinzenaKey || f.fileName).join(' | '));
   refreshQuinzenalCompare();
   fteQzPendingFiles = [];
   const qzInput = $('qzFileInput');
   if (qzInput) qzInput.value = '';
   syncQzUploadZone();
-  if (fail.length) fteToast(`${ok.length} quinzenais OK, ${fail.length} com erro`);
+  updateQzFileNote();
+  if (ok.length && !fail.length) {
+    fteToast(`${ok.length} quinzenal(is) OK · pack ${quinzenalPack.files.length} ficheiro(s)`);
+  } else if (ok.length && fail.length) {
+    fteToast(`${ok.length} OK no pack (${quinzenalPack.files.length} ficheiros) — corrige os ${fail.length} com erro e Processa de novo`);
+  }
   return true;
 }
 
@@ -3512,7 +3571,28 @@ function reEnrichAfterSapLoad() {
   renderAll();
 }
 
-function num(v) { return (v === null || v === undefined || v === '') ? 0 : Number(v); }
+/** Coerce Excel/SheetJS values incl. "R$ 54.018,62" / "R$ 54,018.62" / "47 941,53". */
+function num(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  let s = String(v).trim();
+  if (!s || s === '-' || /^[−–—]$/.test(s)) return 0;
+  s = s.replace(/R\$\s*/gi, '').replace(/\u00a0/g, ' ').trim();
+  if (!s || s === '-' || /^-\s*$/.test(s)) return 0;
+  s = s.replace(/\s+/g, '');
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  if (lastComma >= 0 && lastComma > lastDot) {
+    // BR: 54.018,62 or 54018,62
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else {
+    // US / plain: 54,018.62 or 54018.62
+    s = s.replace(/,/g, '');
+  }
+  s = s.replace(/[^0-9.\-]/g, '');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
 
 /** Sim/Não (and common variants) → boolean — used by Conciliacao + quinzenal B2B. */
 function isDevolucaoFlag(v) {
@@ -6564,10 +6644,19 @@ function qzFileCountNoteHtml() {
   const c = qzFileCounts();
   if (!c.total && !c.failed) return '';
   let s = `${c.b2c} ficheiro${c.b2c !== 1 ? 's' : ''} B2C · ${c.b2b} ficheiro${c.b2b !== 1 ? 's' : ''} B2B carregados`;
+  const janB2b = (quinzenalPack?.files || []).filter(f => f.canal === 'B2B' && f.mesKey === '2026-01');
+  if (janB2b.length) {
+    const pago = janB2b.reduce((sum, f) => sum + num(f.totalPago), 0);
+    s += ` · Jan/26 B2B: ${janB2b.length}Q · ${fmtMoney(pago)}`;
+  }
   if (c.failed) {
     const details = (quinzenalPack.failedFiles || []).map(f => {
       const shortName = String(f.fileName || '').replace(/\.xlsx?$/i, '').replace(/^Gest[aã]o de frete DELTA[_ ]?B2[BC]\s*-\s*/i, '');
-      return `${shortName || f.fileName}: ${f.error || 'Erro desconhecido'}`;
+      const err = String(f.error || 'Erro desconhecido');
+      const shortErr = /encript|MIP|rótulo|password/i.test(err)
+        ? 'ENCRIPTADO — remove rótulo no Excel e Guardar Como sem proteção'
+        : err;
+      return `${shortName || f.fileName}: ${shortErr}`;
     }).join(' · ');
     s += ` · ${c.failed} com erro (${details})`;
   }
@@ -6783,7 +6872,13 @@ function processQuinzenalFile(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const wb = readWorkbookFromArrayBuffer(e.target.result);
+        const buf = e.target.result;
+        if (isEncryptedOfficeArrayBuffer(buf)) {
+          console.error('[fretes] qz encrypted OLE/MIP', file.name);
+          resolve({ ok: false, fileName: file.name, error: encryptedOfficeUserMessage('qz') });
+          return;
+        }
+        const wb = readWorkbookFromArrayBuffer(buf);
         if (!meta.canal) {
           const detected = detectCanalFromWorkbook(wb);
           if (detected) meta.canal = detected;
@@ -6795,8 +6890,14 @@ function processQuinzenalFile(file) {
           resolve({ ok: false, fileName: file.name, error: err });
           return;
         }
-        resolve({ ok: true, ...loaded, meta, canal: meta.canal, arrayBuffer: e.target.result });
-      } catch (err) { resolve({ ok: false, fileName: file.name, error: String(err.message || err) }); }
+        console.log('[fretes] qz file ok', file.name,
+          'canal', meta.canal, 'quinzenaKey', meta.quinzenaKey,
+          'rows', loaded.rows.length,
+          'resumoComImp', meta.resumoTotalComImpostos || 0);
+        resolve({ ok: true, ...loaded, meta, canal: meta.canal, arrayBuffer: buf });
+      } catch (err) {
+        resolve({ ok: false, fileName: file.name, error: formatXlsxReadError(err, 'qz') });
+      }
     };
     reader.onerror = () => resolve({ ok: false, fileName: file.name, error: 'Erro de leitura do ficheiro' });
     reader.readAsArrayBuffer(file);

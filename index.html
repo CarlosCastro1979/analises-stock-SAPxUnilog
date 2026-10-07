@@ -524,7 +524,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.94 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.95 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1746,7 +1746,7 @@ select.cad-inp{cursor:pointer;}
     <div id="fte-tab-carregamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
       <div class="data-warn" style="display:block;margin:0 0 14px;">
-        <strong>Atualização v1.8.94 — Fretes QZ merge sem wipe:</strong> carregar só Jan (ou 1ªQ) já não apaga Fev–Ago nem a outra quinzena — faz merge com o pack na cloud; 1ªQ+2ªQ do mesmo mês somam (~114k Jan). Se a cloud já ficou só com Jan, volta a carregar os outros meses uma vez.
+        <strong>Atualização v1.8.95 — 2ªQ encriptada:</strong> se o Excel tiver rótulo MIP/encriptação (comum na 2ªQ Jan), o browser não lê e o pack ficava só com a 1ªQ (~60k). Agora falha em erro claro. Abre no Excel → remove rótulo/proteção → Guardar Como .xlsx sem proteção → Processar (1ªQ+2ªQ = ~114k Jan).
       </div>
       <div class="upload-grid">
         <div>
@@ -9849,7 +9849,7 @@ function applyResizable(){scheduleColResize();}
       load('inventario-acerto.js', 'v=1.0.10');
     });
   }
-  load('fretes.js', 'v=1.8.94', function () {
+  load('fretes.js', 'v=1.8.95', function () {
     loadInventarioAcerto();
     load('armazem.js', 'v=1.0.42', bootApp, function () {
       var e = document.getElementById('arm-initErr');
