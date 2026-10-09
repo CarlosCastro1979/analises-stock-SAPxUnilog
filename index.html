@@ -524,7 +524,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.95 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.96 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -654,6 +654,10 @@ select.cad-inp{cursor:pointer;}
       </tr></thead>
       <tbody id="reconBody"></tbody>
     </table></div>
+    <div id="reconMoreWrap" style="display:none;padding:10px 0;text-align:center">
+      <button type="button" class="btn bg bs" onclick="showMoreRecon()">Mostrar mais</button>
+      <span id="reconMoreHint" style="font-size:11px;color:var(--muted);margin-left:8px"></span>
+    </div>
     <div id="reconEmpty" class="empty" style="display:none"><div class="empty-i">⚖️</div><div>Carrega os ficheiros para ver a conciliação</div></div>
   </div>
   </div><!-- /recon-lote -->
@@ -1622,6 +1626,10 @@ select.cad-inp{cursor:pointer;}
         </tr></thead>
         <tbody id="transEcBody"></tbody>
       </table></div>
+      <div id="transEcMoreWrap" style="display:none;padding:10px 0;text-align:center">
+        <button type="button" class="btn bg bs" onclick="showMoreTrans('ecommerce')">Mostrar mais</button>
+        <span id="transEcMoreHint" style="font-size:11px;color:var(--muted);margin-left:8px"></span>
+      </div>
       <div id="transEcEmpty" class="empty" style="display:none"><div class="empty-i">🔄</div><div>Clica "Calcular" para processar as transferências.<br><span style="font-size:12px;color:var(--muted)">Inclui vendas B2C, stock no dep. 0008 e artigos com B2C=Sim no cadastro (stock 0011).</span></div></div>
     </div>
   </div>
@@ -1667,6 +1675,10 @@ select.cad-inp{cursor:pointer;}
         </tr></thead>
         <tbody id="transQbBody"></tbody>
       </table></div>
+      <div id="transQbMoreWrap" style="display:none;padding:10px 0;text-align:center">
+        <button type="button" class="btn bg bs" onclick="showMoreTrans('qbrasil')">Mostrar mais</button>
+        <span id="transQbMoreHint" style="font-size:11px;color:var(--muted);margin-left:8px"></span>
+      </div>
       <div id="transQbEmpty" class="empty" style="display:none"><div class="empty-i">🔄</div><div>Clica "Calcular" para processar as transferências</div></div>
     </div>
   </div>
@@ -1746,7 +1758,8 @@ select.cad-inp{cursor:pointer;}
     <div id="fte-tab-carregamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
       <div class="data-warn" style="display:block;margin:0 0 14px;">
-        <strong>Atualização v1.8.95 — 2ªQ encriptada:</strong> se o Excel tiver rótulo MIP/encriptação (comum na 2ªQ Jan), o browser não lê e o pack ficava só com a 1ªQ (~60k). Agora falha em erro claro. Abre no Excel → remove rótulo/proteção → Guardar Como .xlsx sem proteção → Processar (1ªQ+2ªQ = ~114k Jan).
+        <strong>Atualização v1.8.96 — Conciliação Por Lote:</strong> a tabela voltava vazia (pills com contagens OK) porque faltava a constante <code>TABLE_ROW_PAGE</code> e o render abortava em silêncio. Corrigido + «Mostrar mais».
+        <br><strong>v1.8.95 — 2ªQ encriptada:</strong> se o Excel tiver rótulo MIP/encriptação (comum na 2ªQ Jan), o browser não lê e o pack ficava só com a 1ªQ (~60k). Agora falha em erro claro. Abre no Excel → remove rótulo/proteção → Guardar Como .xlsx sem proteção → Processar (1ªQ+2ªQ = ~114k Jan).
       </div>
       <div class="upload-grid">
         <div>
@@ -2601,6 +2614,11 @@ const EXCL=['93','Total',''];
 
 let sapData=null,uniData=null,reconData={},suspData=[],soUnilogData=[],posClasseData=[],vencidoForaDepData=[],vencidoForaDepSapData=[],semValidadeData=[],semValidadeStats=null,valConflData=[],valConflStats=null,validCurtaData=[],validCurtaStats=null,validCurtaEstadoFlt='',prodBomVencData=[],prodBomVencStats=null,vencForaDepStats=null,vencForaDepSapStats=null,occParams=[],reconNotas={},cadEdits={},suspValidados=new Set(),suspValidadosOcultos=0;
 let showAll=false,showAllOcc=true,activeDepot='11',activeReconClass='',activePosDepot='',activeVencDepot='',activeVencSubTab='wms',editOccId=null,company='DFB',sorts={},pecasData=[],pecasMesesBase=3;
+/** Page size for large tables (recon / transferências). Missing const aborted renderRecon with ReferenceError. */
+const TABLE_ROW_PAGE=400;
+let reconRowLimit=TABLE_ROW_PAGE,_reconKeepLimit=false;
+let transRowLimit={ecommerce:TABLE_ROW_PAGE,qbrasil:TABLE_ROW_PAGE};
+let _transKeepLimit={ecommerce:false,qbrasil:false};
 // Declared early — init()/switchCompany reference these (TDZ crash if left below).
 let reclamacoes=[], recTipos=[], recUsers=[], recSorts={};
 let recLoggedUser=null, recDetailId=null, commentRecId=null, editTipoId=null;
@@ -6118,12 +6136,13 @@ function renderReconClassPills(){
 }
 
 function toggleShowAll(){showAll=!showAll;document.getElementById('showAllTg').classList.toggle('on',showAll);document.getElementById('tgLbl').textContent=showAll?'Mostrar tudo':'Só diferenças';renderRecon();}
+function showMoreRecon(){_reconKeepLimit=true;reconRowLimit+=TABLE_ROW_PAGE;renderRecon();}
 
 let _renderReconBusy=false;
 function renderRecon(){
   if(_renderReconBusy)return;
   _renderReconBusy=true;
-  try{ _renderRecon(); }finally{ _renderReconBusy=false; }
+  try{ _renderRecon(); }catch(e){console.error('renderRecon',e);}finally{ _renderReconBusy=false; }
 }
 function _renderRecon(){
   if(!reconData[activeDepot])return;
@@ -9375,10 +9394,11 @@ async function buildTransData(){
 
 function renderTrans_ec(){renderTrans('ecommerce');}
 function renderTrans_qb(){renderTrans('qbrasil');}
+function showMoreTrans(tipo){_transKeepLimit[tipo]=true;transRowLimit[tipo]=(transRowLimit[tipo]||TABLE_ROW_PAGE)+TABLE_ROW_PAGE;renderTrans(tipo);}
 
 // ── RENDER ──
 let _renderTransBusy={};
-function renderTrans(tipo){if(_renderTransBusy[tipo])return;_renderTransBusy[tipo]=true;try{_renderTrans(tipo);}finally{_renderTransBusy[tipo]=false;}}
+function renderTrans(tipo){if(_renderTransBusy[tipo])return;_renderTransBusy[tipo]=true;try{_renderTrans(tipo);}catch(e){console.error('renderTrans',e);}finally{_renderTransBusy[tipo]=false;}}
 function _renderTrans(tipo){
   const isEc=tipo==='ecommerce';
   if(!_transKeepLimit[tipo])transRowLimit[tipo]=TABLE_ROW_PAGE;
