@@ -524,7 +524,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.96 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.97 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -597,6 +597,7 @@ select.cad-inp{cursor:pointer;}
     <div class="it" onclick="reconTab('ean',this)">Por EAN <span id="reconEanBadge" style="display:none;background:var(--red);color:#fff;border-radius:10px;padding:0 6px;font-size:10px;margin-left:4px"></span></div>
     <div class="it" onclick="reconTab('acerto',this)">Emitir doc acerto sem valor</div>
     <div class="it" id="it-inventario-acerto" onclick="reconTab('inventario',this)">Acerto Inventário</div>
+    <div class="it" id="it-inventario-acerto-sem-fi" onclick="reconTab('inventarioSemFi',this)">Acerto Inv sem FI</div>
   </div>
 
   <!-- SUB: POR LOTE -->
@@ -802,6 +803,56 @@ select.cad-inp{cursor:pointer;}
     </div>
   </div>
   </div><!-- /recon-inventario -->
+
+  <!-- SUB: ACERTO INVENTÁRIO SEM FI -->
+  <div id="recon-inventario-sem-fi" style="display:none">
+  <div id="iasQbNote" class="banner" style="display:none">Doc. de acerto de inventário disponível apenas para <strong>DFB</strong> (depósitos 0008, 0009, 0011, 0022, 0044).</div>
+  <div id="iasMain">
+    <div class="card">
+      <div class="ch">
+        <div class="ct">Acerto Inventário sem FI — SAP = Unilog (excl. falta de inventário)</div>
+        <button class="btn bp bs" onclick="typeof exportInventarioAcertoSemFiXlsx==='function'?exportInventarioAcertoSemFiXlsx():toast('Módulo Acerto Inventário a carregar — aguarde ou recarregue','error')">⬇ Exportar Excel PT</button>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55">
+        Mesma lógica do <strong>Acerto Inventário</strong>, mas o físico Unilog <strong>não inclui a classe FI</strong> (falta de inventário).
+        Útil para comparar as duas vistas e escolher o Excel a exportar. Template igual (<code>mapa_acertos_template.xlsx</code>).
+        Com filtros activos, o Excel exporta <strong>só os produtos filtrados</strong>.
+      </p>
+      <div class="tb">
+        <input class="inp is" id="iasSrch" placeholder="Material, EAN, lote ou descrição…" oninput="typeof renderInventarioAcertoSemFiPage==='function'&&renderInventarioAcertoSemFiPage()">
+        <div class="ms-wrap" id="ms-iasCat" data-placeholder="Categorias" data-onchange="renderInventarioAcertoSemFiPage"><div class="ms-btn" onclick="msTogOpen('iasCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('iasCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('iasCat')">Todas</button><button onclick="msClrAll('iasCat')">Limpar</button></div><div class="ms-list"></div></div></div>
+        <div class="ms-wrap" id="ms-iasSub" data-placeholder="Subcategorias" data-onchange="renderInventarioAcertoSemFiPage"><div class="ms-btn" onclick="msTogOpen('iasSub')"><span class="ms-btn-lbl">Todas as subcategorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('iasSub',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('iasSub')">Todas</button><button onclick="msClrAll('iasSub')">Limpar</button></div><div class="ms-list"></div></div></div>
+      </div>
+      <div id="iasFilterBanner" class="flt-banner" style="display:none">
+        Filtro activo: <strong id="iasFilterLbl"></strong>
+        <button type="button" class="btn bg bs" onclick="typeof iasClearDrill==='function'&&iasClearDrill()">Limpar filtro</button>
+      </div>
+      <p id="iasDepotCounts" style="font-size:11px;color:var(--muted);margin-bottom:14px;font-family:var(--mono)"></p>
+      <div class="kr" id="iasKpis"></div>
+      <div class="tw2" id="iasTableWrap" style="display:none">
+        <table id="iasTable">
+          <thead><tr>
+            <th onclick="doSort('ias','depotSheet')">Depósito</th>
+            <th onclick="doSort('ias','cat')">Categoria</th>
+            <th onclick="doSort('ias','subcat')">Subcategoria</th>
+            <th onclick="doSort('ias','material')">Material</th>
+            <th onclick="doSort('ias','EAN_norm')">EAN</th>
+            <th onclick="doSort('ias','desc')">Descrição</th>
+            <th onclick="doSort('ias','lote')">Lote</th>
+            <th class="num" onclick="doSort('ias','qt_sap')">SAP</th>
+            <th class="num" onclick="doSort('ias','qt_wms')">Unilog</th>
+            <th class="num" onclick="doSort('ias','diff')">Δ qty</th>
+            <th class="num" onclick="doSort('ias','valor')">Valor acerto</th>
+            <th onclick="doSort('ias','_dir')">Direcção</th>
+            <th onclick="doSort('ias','_estado')">Estado</th>
+          </tr></thead>
+          <tbody id="iasBody"></tbody>
+        </table>
+      </div>
+      <div id="iasEmpty" class="empty"><div class="empty-i">📑</div><div id="iasEmptyMsg">Carrega SAP e Unilog e processa — ou sem diferenças (já sem FI)</div></div>
+    </div>
+  </div>
+  </div><!-- /recon-inventario-sem-fi -->
 </div>
 
 <!-- ══ ALERTAS AÇÃO URGENTE ══ -->
@@ -1758,7 +1809,8 @@ select.cad-inp{cursor:pointer;}
     <div id="fte-tab-carregamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
       <div class="data-warn" style="display:block;margin:0 0 14px;">
-        <strong>Atualização v1.8.96 — Conciliação Por Lote:</strong> a tabela voltava vazia (pills com contagens OK) porque faltava a constante <code>TABLE_ROW_PAGE</code> e o render abortava em silêncio. Corrigido + «Mostrar mais».
+        <strong>Atualização v1.8.97 — Acerto Inv sem FI:</strong> novo separador ao lado de Acerto Inventário com a mesma análise/export, excluindo a classe Unilog <strong>FI</strong> (falta de inventário) do físico.
+        <br><strong>v1.8.96 — Conciliação Por Lote:</strong> a tabela voltava vazia (pills com contagens OK) porque faltava a constante <code>TABLE_ROW_PAGE</code> e o render abortava em silêncio. Corrigido + «Mostrar mais».
         <br><strong>v1.8.95 — 2ªQ encriptada:</strong> se o Excel tiver rótulo MIP/encriptação (comum na 2ªQ Jan), o browser não lê e o pack ficava só com a 1ªQ (~60k). Agora falha em erro claro. Abre no Excel → remove rótulo/proteção → Guardar Como .xlsx sem proteção → Processar (1ªQ+2ªQ = ~114k Jan).
       </div>
       <div class="upload-grid">
@@ -2940,6 +2992,7 @@ async function init(){
           if(pageNeedsRender('recon')){renderReconPage();markPageRendered('recon');}
           if(typeof renderMapaAcertosPage==='function'&&document.getElementById('recon-acerto')?.style.display!=='none')renderMapaAcertosPage();
           if(typeof renderInventarioAcertoPage==='function'&&document.getElementById('recon-inventario')?.style.display!=='none')renderInventarioAcertoPage();
+          if(typeof renderInventarioAcertoSemFiPage==='function'&&document.getElementById('recon-inventario-sem-fi')?.style.display!=='none')renderInventarioAcertoSemFiPage();
           loadReconNotas().catch(()=>{});
         }).catch(e=>console.warn('[nav] recon stock',e));
       }
@@ -5585,6 +5638,7 @@ async function processAll(opts={}){
   refreshOccIfVisible();
   if(typeof renderMapaAcertosPage==='function')renderMapaAcertosPage();
   if(typeof renderInventarioAcertoPage==='function'&&document.getElementById('recon-inventario')&&document.getElementById('recon-inventario').style.display!=='none')renderInventarioAcertoPage();
+  if(typeof renderInventarioAcertoSemFiPage==='function'&&document.getElementById('recon-inventario-sem-fi')&&document.getElementById('recon-inventario-sem-fi').style.display!=='none')renderInventarioAcertoSemFiPage();
   }finally{
     if(manageUi)setStockProcessing(false);
   }
@@ -5783,6 +5837,7 @@ function switchCompany(){
   }
   if(typeof syncInventarioAcertoNav==='function')syncInventarioAcertoNav();
   if(typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
+  if(typeof renderInventarioAcertoSemFiPage==='function')renderInventarioAcertoSemFiPage();
   if(typeof renderMapaAcertosPage==='function')renderMapaAcertosPage();
   if(document.getElementById('page-custoUnilog')?.classList.contains('active'))renderCustoUnilog();
   toast('Empresa: '+company,'info');
@@ -5946,9 +6001,12 @@ function reconTab(name,el){
   if(acertoEl)acertoEl.style.display=name==='acerto'?'':'none';
   const invEl=document.getElementById('recon-inventario');
   if(invEl)invEl.style.display=name==='inventario'?'':'none';
+  const invSemFiEl=document.getElementById('recon-inventario-sem-fi');
+  if(invSemFiEl)invSemFiEl.style.display=name==='inventarioSemFi'?'':'none';
   if(name==='ean')renderEanView();
   if(name==='acerto'&&typeof renderMapaAcertosPage==='function')renderMapaAcertosPage();
   if(name==='inventario'&&typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
+  if(name==='inventarioSemFi'&&typeof renderInventarioAcertoSemFiPage==='function')renderInventarioAcertoSemFiPage();
   scheduleColResize();
 }
 
@@ -8294,6 +8352,7 @@ function doSort(table,col){
   else if(table==='pecas')renderPecas();
   else if(table==='custoUnilog')renderCustoUnilog();
   else if(table==='ia'&&typeof renderInventarioAcertoPage==='function')renderInventarioAcertoPage();
+  else if(table==='ias'&&typeof renderInventarioAcertoSemFiPage==='function')renderInventarioAcertoSemFiPage();
   else if(table==='ma'&&typeof renderMapaAcertosPage==='function')renderMapaAcertosPage();
 }
 function applySort(table,rows){
@@ -9864,9 +9923,9 @@ function applyResizable(){scheduleColResize();}
   function loadInventarioAcerto() {
     // mapa-acertos first — Acerto Inventário reuses maExportPatchedXlsx / same template
     load('mapa-acertos.js', 'v=1.0.16', function () {
-      load('inventario-acerto.js', 'v=1.0.10');
+      load('inventario-acerto.js', 'v=1.1.0');
     }, function () {
-      load('inventario-acerto.js', 'v=1.0.10');
+      load('inventario-acerto.js', 'v=1.1.0');
     });
   }
   load('fretes.js', 'v=1.8.95', function () {
