@@ -5870,6 +5870,7 @@ async function loadFromDB(silent=false){
         renderReconPage();
         if(typeof renderMapaAcertosPage==='function'&&document.getElementById('recon-acerto')?.style.display!=='none')renderMapaAcertosPage();
         if(typeof renderInventarioAcertoPage==='function'&&document.getElementById('recon-inventario')?.style.display!=='none')renderInventarioAcertoPage();
+        if(typeof renderInventarioAcertoSemFiPage==='function'&&document.getElementById('recon-inventario-sem-fi')?.style.display!=='none')renderInventarioAcertoSemFiPage();
       }
       if(activePage.id==='page-alertas')renderAlertPage();
       if(activePage.id==='page-cadastro')renderCadastro();
