@@ -524,7 +524,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.97 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.98 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -760,12 +760,13 @@ select.cad-inp{cursor:pointer;}
   <div id="iaMain">
     <div class="card">
       <div class="ch">
-        <div class="ct">Acerto Inventário — SAP = Unilog 100%</div>
+        <div class="ct">Acerto Inventário — SAP = WMS 100%</div>
         <button class="btn bp bs" onclick="typeof exportInventarioAcertoXlsx==='function'?exportInventarioAcertoXlsx():toast('Módulo Acerto Inventário a carregar — aguarde ou recarregue','error')">⬇ Exportar Excel PT</button>
       </div>
       <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55">
-        Lista <strong>todas</strong> as diferenças (positivas e negativas) para o inventário contabilístico (SAP) ficar igual ao físico (Unilog).
-        Excel no <strong>mesmo template</strong> (<code>mapa_acertos_template.xlsx</code>): folhas 0008 / 0009 / 0011 / 0022 / 0044 — aqui I Física = Unilog, J Contabilístico = SAP, L/M Dif ±, N valorizadas @ preço SAP (doc. de inventário clássico).
+        Objectivo: pôr o <strong>SAP 100% igual ao Unilog (WMS)</strong> — inclui <strong>todas as classes</strong>, inclusive <strong>FI</strong> (falta de inventário) no dep. 0044.
+        Δ qty = Unilog − SAP (+ sobe SAP, − desce SAP). Excluídos do acerto: <strong>máquinas / equip. profissionais</strong> (e caixas de papelão).
+        Excel no <strong>mesmo template</strong> (<code>mapa_acertos_template.xlsx</code>): folhas 0008 / 0009 / 0011 / 0022 / 0044 — I Física = Unilog, J Contabilístico = SAP.
         Com filtros activos, o Excel exporta <strong>só os produtos filtrados</strong>.
       </p>
       <div class="tb">
@@ -810,12 +811,12 @@ select.cad-inp{cursor:pointer;}
   <div id="iasMain">
     <div class="card">
       <div class="ch">
-        <div class="ct">Acerto Inventário sem FI — SAP = Unilog (excl. falta de inventário)</div>
+        <div class="ct">Acerto Inv sem FI — SAP = WMS sem FI</div>
         <button class="btn bp bs" onclick="typeof exportInventarioAcertoSemFiXlsx==='function'?exportInventarioAcertoSemFiXlsx():toast('Módulo Acerto Inventário a carregar — aguarde ou recarregue','error')">⬇ Exportar Excel PT</button>
       </div>
       <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55">
-        Mesma lógica do <strong>Acerto Inventário</strong>, mas o físico Unilog <strong>não inclui a classe FI</strong> (falta de inventário).
-        Útil para comparar as duas vistas e escolher o Excel a exportar. Template igual (<code>mapa_acertos_template.xlsx</code>).
+        Mesmo objectivo do <strong>Acerto Inventário</strong> (SAP = WMS), mas o físico Unilog <strong>exclui a classe FI</strong> (falta de inventário) — o resto das classes (A1/A2/SI, etc.) entra no alvo.
+        Excluídos do acerto: <strong>máquinas / equip. profissionais</strong> (e caixas de papelão). Template igual (<code>mapa_acertos_template.xlsx</code>).
         Com filtros activos, o Excel exporta <strong>só os produtos filtrados</strong>.
       </p>
       <div class="tb">
@@ -1809,9 +1810,9 @@ select.cad-inp{cursor:pointer;}
     <div id="fte-tab-carregamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
       <div class="data-warn" style="display:block;margin:0 0 14px;">
-        <strong>Atualização v1.8.97 — Acerto Inv sem FI:</strong> novo separador ao lado de Acerto Inventário com a mesma análise/export, excluindo a classe Unilog <strong>FI</strong> (falta de inventário) do físico.
+        <strong>Atualização v1.8.98 — Acerto Inventário:</strong> SAP = WMS 100% (inclui FI); <strong>Acerto Inv sem FI</strong> = SAP = WMS sem classe FI. Máquinas/equip. profissionais fora do acerto (não só valor zero).
+        <br><strong>v1.8.97 — Acerto Inv sem FI:</strong> novo separador ao lado de Acerto Inventário com a mesma análise/export, excluindo a classe Unilog <strong>FI</strong> do físico.
         <br><strong>v1.8.96 — Conciliação Por Lote:</strong> a tabela voltava vazia (pills com contagens OK) porque faltava a constante <code>TABLE_ROW_PAGE</code> e o render abortava em silêncio. Corrigido + «Mostrar mais».
-        <br><strong>v1.8.95 — 2ªQ encriptada:</strong> se o Excel tiver rótulo MIP/encriptação (comum na 2ªQ Jan), o browser não lê e o pack ficava só com a 1ªQ (~60k). Agora falha em erro claro. Abre no Excel → remove rótulo/proteção → Guardar Como .xlsx sem proteção → Processar (1ªQ+2ªQ = ~114k Jan).
       </div>
       <div class="upload-grid">
         <div>
@@ -8367,7 +8368,7 @@ function applySort(table,rows){
 }
 function updateSortHeaders(table){
   const s=sorts[table];
-  const tableEl=document.getElementById({recon:'reconTable',ean:'eanTable',susp:'suspTable',su:'suTable',poscl:'posTable',semval:'semValTable',valconfl:'valConflTable',validcurta:'validCurtaTable',prodbomvenc:'prodBomVencTable',occ:'ovTable',occpkpk:'opkTable',transEc:'transEcTable',transQb:'transQbTable',audit:'auditTable',rec:'recTable',hist:'histTable',pecas:'pecasTable',vencforadep:'vencTable',vencforadepSap:'vencTable',ia:'iaTable',ma:'maTable'}[table]);
+  const tableEl=document.getElementById({recon:'reconTable',ean:'eanTable',susp:'suspTable',su:'suTable',poscl:'posTable',semval:'semValTable',valconfl:'valConflTable',validcurta:'validCurtaTable',prodbomvenc:'prodBomVencTable',occ:'ovTable',occpkpk:'opkTable',transEc:'transEcTable',transQb:'transQbTable',audit:'auditTable',rec:'recTable',hist:'histTable',pecas:'pecasTable',vencforadep:'vencTable',vencforadepSap:'vencTable',ia:'iaTable',ias:'iasTable',ma:'maTable'}[table]);
   document.querySelectorAll('th[onclick]').forEach(th=>{
     const oc=th.getAttribute('onclick')||'';
     let t=table,col;
@@ -9924,9 +9925,9 @@ function applyResizable(){scheduleColResize();}
   function loadInventarioAcerto() {
     // mapa-acertos first — Acerto Inventário reuses maExportPatchedXlsx / same template
     load('mapa-acertos.js', 'v=1.0.16', function () {
-      load('inventario-acerto.js', 'v=1.1.0');
+      load('inventario-acerto.js', 'v=1.1.1');
     }, function () {
-      load('inventario-acerto.js', 'v=1.1.0');
+      load('inventario-acerto.js', 'v=1.1.1');
     });
   }
   load('fretes.js', 'v=1.8.95', function () {

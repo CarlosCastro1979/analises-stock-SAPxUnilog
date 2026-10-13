@@ -1,9 +1,12 @@
 /* Inventário — doc. de acerto (mesmo Excel template/pipeline do Mapa Acertos / acerto sem valor)
- * Duas vistas: com FI (padrão) e sem FI (exclui classe Unilog FI do físico). */
+ * Duas vistas:
+ *  - Full (ia): SAP = Unilog 100% (todas as classes, incluindo FI)
+ *  - Sem FI (ias): SAP = Unilog sem classe FI
+ * Excluídos do acerto: máquinas/equip. profissionais (+ caixas de papelão via isExcluidoDifStock). */
 (function (global) {
   'use strict';
 
-  const INVENTARIO_ACERTO_JS_VERSION = '1.1.0';
+  const INVENTARIO_ACERTO_JS_VERSION = '1.1.1';
   const INVENTARIO_ACERTO_DEPOTS = ['8', '9', '11', '22', '44'];
   const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
 
@@ -49,7 +52,7 @@
     return { cat: p?.cat || '', subcat: p?.subcat || '' };
   }
 
-  /** Físico Unilog; se excludeFI, remove qty da classe FI (falta de inventário). */
+  /** Físico Unilog alvo do acerto; se excludeFI, remove qty da classe FI (falta de inventário). */
   function iaPhysicalQty(r, excludeFI) {
     let h = Number(r.qt_uni) || 0;
     if (excludeFI) {
@@ -60,12 +63,18 @@
     return h;
   }
 
+  /** Δ = Unilog(alvo) − SAP — subir SAP quando WMS > SAP. */
   function iaAcertoHI(r, excludeFI) {
     const h = iaPhysicalQty(r, excludeFI);
     const i = Number(r.qt_sap) || 0;
-    if (h > 0 && i === 0) return { h, i: 0 };
-    if (i > 0 && h === 0) return { h: 0, i };
     return { h, i };
+  }
+
+  /** Máquinas profissionais (+ caixas papelão) — fora do acerto; não exigir no SAP. */
+  function iaIsExcludedFromAcerto(r, dk) {
+    if (typeof isExcluidoDifStock === 'function') return !!isExcluidoDifStock(r.EAN_norm, dk, r.desc);
+    if (typeof isEquipProfissional === 'function') return !!isEquipProfissional(r.EAN_norm, dk);
+    return false;
   }
 
   function iaRowEstado(hi) {
@@ -92,16 +101,19 @@
     const rows = (typeof reconData !== 'undefined' ? reconData[dk] : null) || [];
     const precoMap = typeof buildSapPrecoMap === 'function' ? buildSapPrecoMap() : {};
     let skippedNoMaterial = 0;
+    let skippedExcluded = 0;
     const out = rows
       .map((r) => {
+        if (iaIsExcludedFromAcerto(r, dk)) {
+          skippedExcluded++;
+          return null;
+        }
         const hi = iaAcertoHI(r, excludeFI);
         const diff = hi.h - hi.i;
         if (diff === 0) return null;
         const material = resolveSapMaterial(r, dk);
         const preco = precoMap[r.EAN_norm] || 0;
         const cs = iaResolveCat(r.EAN_norm, r.cat, r.subcat);
-        const excl =
-          typeof isExcluidoDifStock === 'function' && isExcluidoDifStock(r.EAN_norm, dk, r.desc);
         const fiQty = Number(r.qt_uni_by_class?.FI) || Number(r.qt_uni_by_class?.fi) || 0;
         return {
           depot: dk,
@@ -119,8 +131,8 @@
           qt_sap: hi.i,
           qt_fi_excluded: excludeFI ? fiQty : 0,
           diff,
-          valor: excl || preco <= 0 ? 0 : diff * preco,
-          _semValor: !!excl || preco <= 0,
+          valor: preco <= 0 ? 0 : diff * preco,
+          _semValor: preco <= 0,
           _estado: iaRowEstado(hi),
           _dir: iaRowDir(diff),
         };
@@ -137,6 +149,7 @@
         return (a.lote || '').localeCompare(b.lote || '');
       });
     out._skippedNoMaterial = skippedNoMaterial;
+    out._skippedExcluded = skippedExcluded;
     return out;
   }
 
@@ -304,7 +317,9 @@
       const fmtQ = typeof fmtKv === 'function' ? (n) => fmtKv(iaFmtSignedQty(n)) : iaFmtSignedQty;
       const liqCls = typeof kvLiqCls === 'function' ? kvLiqCls(valorTot) : '';
       const qtyCls = typeof kvLiqCls === 'function' ? kvLiqCls(units) : '';
-      const fiNote = excludeFI ? ' · Unilog sem classe FI' : '';
+      const alvoNote = excludeFI
+        ? ' · alvo = Unilog sem FI (SAP = WMS excl. falta de inventário)'
+        : ' · alvo = Unilog 100% incl. FI (SAP = WMS)';
       kpiEl.innerHTML =
         '<div class="kpi" style="border-color:' +
         (valorTot > 0 ? 'var(--yellow)' : valorTot < 0 ? 'var(--red)' : 'var(--border)') +
@@ -312,7 +327,7 @@
         '<div class="kl">Valor final do acerto</div>' +
         '<div class="kv ' + liqCls + '">' + fmtV(valorTot) + '</div>' +
         '<div class="ks">Σ (Unilog−SAP)×preço SAP · vista filtrada · + = subir stock SAP' +
-        fiNote +
+        alvoNote +
         '</div></div>' +
         '<div class="kpi" style="border-color:' +
         (units > 0 ? 'var(--yellow)' : units < 0 ? 'var(--red)' : 'var(--border)') +
@@ -320,7 +335,7 @@
         '<div class="kl">Saldo final (qtd)</div>' +
         '<div class="kv ' + qtyCls + '">' + fmtQ(units) + '</div>' +
         '<div class="ks">Σ (Unilog−SAP) · vista filtrada · + = subir stock SAP' +
-        fiNote +
+        alvoNote +
         '</div></div>';
     }
 
