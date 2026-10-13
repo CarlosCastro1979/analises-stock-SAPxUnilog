@@ -524,7 +524,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.98 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.99 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -766,6 +766,7 @@ select.cad-inp{cursor:pointer;}
       <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55">
         Objectivo: pôr o <strong>SAP 100% igual ao Unilog (WMS)</strong> — inclui <strong>todas as classes</strong>, inclusive <strong>FI</strong> (falta de inventário) no dep. 0044.
         Δ qty = Unilog − SAP (+ sobe SAP, − desce SAP). Excluídos do acerto: <strong>máquinas / equip. profissionais</strong> (e caixas de papelão).
+        Linhas <strong>só no WMS sem código SAP</strong> aparecem na tabela (diagnóstico) mas <strong>não vão para o Excel</strong> — é preciso material no SAP.
         Excel no <strong>mesmo template</strong> (<code>mapa_acertos_template.xlsx</code>): folhas 0008 / 0009 / 0011 / 0022 / 0044 — I Física = Unilog, J Contabilístico = SAP.
         Com filtros activos, o Excel exporta <strong>só os produtos filtrados</strong>.
       </p>
@@ -816,7 +817,7 @@ select.cad-inp{cursor:pointer;}
       </div>
       <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55">
         Mesmo objectivo do <strong>Acerto Inventário</strong> (SAP = WMS), mas o físico Unilog <strong>exclui a classe FI</strong> (falta de inventário) — o resto das classes (A1/A2/SI, etc.) entra no alvo.
-        Excluídos do acerto: <strong>máquinas / equip. profissionais</strong> (e caixas de papelão). Template igual (<code>mapa_acertos_template.xlsx</code>).
+        Excluídos do acerto: <strong>máquinas / equip. profissionais</strong> (e caixas de papelão). Linhas sem código SAP ficam visíveis mas fora do Excel. Template igual (<code>mapa_acertos_template.xlsx</code>).
         Com filtros activos, o Excel exporta <strong>só os produtos filtrados</strong>.
       </p>
       <div class="tb">
@@ -1810,9 +1811,9 @@ select.cad-inp{cursor:pointer;}
     <div id="fte-tab-carregamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
       <div class="data-warn" style="display:block;margin:0 0 14px;">
-        <strong>Atualização v1.8.98 — Acerto Inventário:</strong> SAP = WMS 100% (inclui FI); <strong>Acerto Inv sem FI</strong> = SAP = WMS sem classe FI. Máquinas/equip. profissionais fora do acerto (não só valor zero).
+        <strong>Atualização v1.8.99 — Acerto vs Conciliação:</strong> caixas de papelão (cat. «CX Papelao» / «CAIXA VAZIA…») passam a ser reconhecidas na exclusão; Acerto Inventário <strong>mostra</strong> diffs Só-Unilog sem código SAP (não exportáveis) em vez de os esconder.
+        <br><strong>v1.8.98 — Acerto Inventário:</strong> SAP = WMS 100% (inclui FI); <strong>Acerto Inv sem FI</strong> = SAP = WMS sem classe FI. Máquinas/equip. profissionais fora do acerto (não só valor zero).
         <br><strong>v1.8.97 — Acerto Inv sem FI:</strong> novo separador ao lado de Acerto Inventário com a mesma análise/export, excluindo a classe Unilog <strong>FI</strong> do físico.
-        <br><strong>v1.8.96 — Conciliação Por Lote:</strong> a tabela voltava vazia (pills com contagens OK) porque faltava a constante <code>TABLE_ROW_PAGE</code> e o render abortava em silêncio. Corrigido + «Mostrar mais».
       </div>
       <div class="upload-grid">
         <div>
@@ -3340,10 +3341,28 @@ function getValidCurtaLimitDate(fromDate){
 function getMuimCat(){const muimConf=Object.values(DEPOT_MAP).find(d=>d.catOnly);return muimConf?.catOnly||null;}
 const CAIXAS_PAPELAO_CAT='Caixas de Papelão';
 const RECON_EXCL_KS='excl. equip. prof. / cx. papelão';
+function normCatLabel(s){return String(s||'').trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu,'');}
+/** Alias de categoria (occParams): "CX Papelao", "Caixas de Papelao", etc. */
+function isCaixasPapelaoCat(cat){
+  const n=normCatLabel(cat);
+  if(!n)return false;
+  if(n===normCatLabel(CAIXAS_PAPELAO_CAT)||n==='caixas de papelao'||n==='caixa de papelao')return true;
+  if(n==='cx papelao'||n==='cx. papelao'||n.startsWith('cx papel'))return true;
+  if(/\bpapel/.test(n)&&/\b(caixa|caixas|cx)\b/.test(n))return true;
+  return false;
+}
+function isCaixasPapelaoDesc(desc){
+  if(!desc)return false;
+  const d=String(desc).toUpperCase();
+  if(/\bCAIXA\s+VAZIA\b/.test(d))return true;
+  if(/\bPAPEL[ÃA]O\b|\bCAIXA[S]?\s+DE\s+PAPEL|\bCX\.?\s*PAPEL/i.test(d))return true;
+  const{cat}=autoCat(desc);return cat===CAIXAS_PAPELAO_CAT;
+}
 function isCaixasPapelao(ean,desc){
   const param=occParams.find(p=>p.ean===ean);
-  if(param?.cat===CAIXAS_PAPELAO_CAT)return true;
-  if(desc){const{cat}=autoCat(desc);if(cat===CAIXAS_PAPELAO_CAT)return true;}
+  if(isCaixasPapelaoCat(param?.cat))return true;
+  if(isCaixasPapelaoDesc(desc))return true;
+  if(param?.descricao&&isCaixasPapelaoDesc(param.descricao))return true;
   return false;
 }
 function getReconExclCats(){const cats=[];const muim=getMuimCat();if(muim)cats.push(muim);cats.push(CAIXAS_PAPELAO_CAT);return cats;}
@@ -3352,7 +3371,11 @@ function invalidateReconExclEANs(){_reconExclEANs=null;}
 function getReconExclEANs(){
   if(_reconExclEANs)return _reconExclEANs;
   const cats=new Set(getReconExclCats());
-  const eans=new Set(occParams.filter(p=>cats.has(p.cat)).map(p=>p.ean));
+  const eans=new Set();
+  occParams.forEach(p=>{
+    if(!p?.ean)return;
+    if(cats.has(p.cat)||isCaixasPapelaoCat(p.cat)||isCaixasPapelao(p.ean,p.descricao||p.desc||''))eans.add(p.ean);
+  });
   if(sapData)sapData.forEach(r=>{if(r.EAN_norm&&isCaixasPapelao(r.EAN_norm,r.desc))eans.add(r.EAN_norm);});
   if(uniData)uniData.forEach(r=>{if(r.EAN_norm&&isCaixasPapelao(r.EAN_norm,r.produto))eans.add(r.EAN_norm);});
   _reconExclEANs=eans;
@@ -3505,7 +3528,6 @@ function hasRealValidade(validadeStr,ean,desc,cat){
   if(isValidadeIgnorada(validadeStr,ean,desc,cat))return false;
   return !!parseValidadeDate(validadeStr);
 }
-function normCatLabel(s){return String(s||'').trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu,'');}
 function isSemValidadeExcluido(ean,desc,cat,subcat){
   if(isMaquinaDomestica(ean,desc))return true;
   if(isVinhoProduct(ean,desc,cat))return true;
@@ -3958,6 +3980,8 @@ function calcValorGapByEan({catFilter=null}={}){
 // ── AUTO CATEGORY ──
 function autoCat(desc){
   if(!desc)return{cat:'',subcat:''};const d=desc.toUpperCase();
+  // Caixas / CX papelão ANTES de DELTA Q — "CAIXA VAZIA DELTA Q" não é café
+  if(/\bPAPEL[ÃA]O\b|\bCAIXA[S]?\s+DE\s+PAPEL|\bCX\.?\s*PAPEL|\bCAIXA\s+VAZIA\b/i.test(d))return{cat:CAIXAS_PAPELAO_CAT,subcat:''};
   if(/\bDELTA\s*Q\b/.test(d)||/\bDELTAQ\b/.test(d)){const s=d.includes('100CAP')||d.includes('100 CAP')?'Caps 100':d.includes('40CAP')||d.includes('40 CAP')||d.includes('XL40')?'Caps 40':'Caps 10';return{cat:'Café em Cápsulas',subcat:s};}
   if(/\d+\s*CAP\b|\bCAP\s*\d+|COFFEE\s+\d+\s*CAP|\bCAPSULAS\b|\bCÁPSULAS\b|\bCAPS\b/.test(d)){const s=d.includes('100CAP')||d.includes('100 CAP')?'Caps 100':d.includes('40CAP')||d.includes('40 CAP')||d.includes('XL40')?'Caps 40':'Caps 10';return{cat:'Café em Cápsulas',subcat:s};}
   if(/\bBELLISSIMO\b/.test(d))return{cat:'Café em Grão',subcat:(d.includes('KG')||d.includes(' KG'))?'1 Kg':'500g'};
@@ -3973,7 +3997,6 @@ function autoCat(desc){
   if(d.includes('EVOLUTION'))return{cat:'Máquinas Domésticas',subcat:'Evolution'};
   if(d.includes('ICONIQ'))return{cat:'Máquinas Domésticas',subcat:'Iconiq'};
   if(d.includes('QUORUM'))return{cat:'Máquinas Profissionais',subcat:'Quorum'};
-  if(/\bPAPEL[ÃA]O\b|\bCAIXA[S]?\s+DE\s+PAPEL|\bCX\.?\s+PAPEL/i.test(d))return{cat:CAIXAS_PAPELAO_CAT,subcat:''};
   return{cat:'',subcat:''};
 }
 function guessQPP(cat,subcat){
@@ -6293,9 +6316,9 @@ function _renderRecon(){
   document.getElementById('reconKpis').innerHTML=`
     <div class="kpi"><div class="kl">${comboLbl}</div><div class="kv">${fmtKvNum(rows.length)}</div><div class="ks">dep. ${depLbl}${classLbl}${invResumo?` · Unilog resumo: ${invResumo.sku.toLocaleString('pt-BR')} SKU`:''}</div></div>
     <div class="kpi"><div class="kl">OK</div><div class="kv g">${fmtKvNum(okCount)}</div><div class="ks">${pct}%</div></div>
-    <div class="kpi"><div class="kl">Com diferença</div><div class="kv r">${fmtKvNum(comDiff)}</div></div>
-    <div class="kpi"><div class="kl">Qt SAP</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_sap,0))}</div></div>
-    <div class="kpi"><div class="kl">Qt Unilog</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_uni,0))}</div>${invResumo?`<div class="ks">resumo Unilog: ${invResumo.qtd.toLocaleString('pt-BR')} un</div>`:''}</div>
+    <div class="kpi"><div class="kl">Com diferença</div><div class="kv r">${fmtKvNum(comDiff)}</div><div class="ks">contagem de linhas · inclui itens sem valor</div></div>
+    <div class="kpi"><div class="kl">Qt SAP</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_sap,0))}</div><div class="ks">todas as linhas da vista</div></div>
+    <div class="kpi"><div class="kl">Qt Unilog</div><div class="kv">${fmtKvNum(rows.reduce((s,r)=>s+r.qt_uni,0))}</div>${invResumo?`<div class="ks">resumo Unilog: ${invResumo.qtd.toLocaleString('pt-BR')} un</div>`:'<div class="ks">todas as linhas da vista</div>'}</div>
     ${kpiValorTotCards(valorSap,valorWms,temPrecoSap||temPrecoWms)}
     ${temPreco?`<div class="kpi"><div class="kl">Valor total dif. (líquido)</div><div class="kv ${kvLiqCls(totalValorLiq)}">${fmtKvBrlLiq(totalValorLiq)}</div><div class="ks">preço SAP × dif · ${RECON_EXCL_KS}</div></div>`:''}
   `;
@@ -9925,9 +9948,9 @@ function applyResizable(){scheduleColResize();}
   function loadInventarioAcerto() {
     // mapa-acertos first — Acerto Inventário reuses maExportPatchedXlsx / same template
     load('mapa-acertos.js', 'v=1.0.16', function () {
-      load('inventario-acerto.js', 'v=1.1.1');
+      load('inventario-acerto.js', 'v=1.1.2');
     }, function () {
-      load('inventario-acerto.js', 'v=1.1.1');
+      load('inventario-acerto.js', 'v=1.1.2');
     });
   }
   load('fretes.js', 'v=1.8.95', function () {

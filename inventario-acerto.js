@@ -6,7 +6,7 @@
 (function (global) {
   'use strict';
 
-  const INVENTARIO_ACERTO_JS_VERSION = '1.1.1';
+  const INVENTARIO_ACERTO_JS_VERSION = '1.1.2';
   const INVENTARIO_ACERTO_DEPOTS = ['8', '9', '11', '22', '44'];
   const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
 
@@ -16,6 +16,7 @@
     diverg: 'Divergência (ambos com stock)',
     subir: 'Subir SAP (Δ qty > 0)',
     descer: 'Descer SAP (Δ qty < 0)',
+    semMat: 'Sem código SAP (não exportável)',
   };
 
   function iaDepotLabel(dk) {
@@ -100,7 +101,7 @@
   function buildAcertoRowsForDepot(dk, excludeFI) {
     const rows = (typeof reconData !== 'undefined' ? reconData[dk] : null) || [];
     const precoMap = typeof buildSapPrecoMap === 'function' ? buildSapPrecoMap() : {};
-    let skippedNoMaterial = 0;
+    let countSemMaterial = 0;
     let skippedExcluded = 0;
     const out = rows
       .map((r) => {
@@ -112,6 +113,8 @@
         const diff = hi.h - hi.i;
         if (diff === 0) return null;
         const material = resolveSapMaterial(r, dk);
+        const semMat = !material;
+        if (semMat) countSemMaterial++;
         const preco = precoMap[r.EAN_norm] || 0;
         const cs = iaResolveCat(r.EAN_norm, r.cat, r.subcat);
         const fiQty = Number(r.qt_uni_by_class?.FI) || Number(r.qt_uni_by_class?.fi) || 0;
@@ -119,7 +122,7 @@
           depot: dk,
           depotSheet: INVENTARIO_ACERTO_SHEETS[dk] || dk.padStart(4, '0'),
           depotLabel: iaDepotLabel(dk),
-          material,
+          material: material || '',
           EAN_norm: r.EAN_norm,
           desc: r.desc || '',
           lote: r.Lote_norm || '',
@@ -133,22 +136,21 @@
           diff,
           valor: preco <= 0 ? 0 : diff * preco,
           _semValor: preco <= 0,
+          _semMaterial: semMat,
           _estado: iaRowEstado(hi),
           _dir: iaRowDir(diff),
         };
       })
-      .filter((r) => {
-        if (!r) return false;
-        if (r.material) return true;
-        skippedNoMaterial++;
-        return false;
-      })
+      .filter((r) => !!r)
       .sort((a, b) => {
-        const ma = a.material.localeCompare(b.material);
+        // Com material primeiro; sem cód. SAP no fim (ainda visíveis)
+        if (!!a._semMaterial !== !!b._semMaterial) return a._semMaterial ? 1 : -1;
+        const ma = String(a.material || '').localeCompare(String(b.material || ''));
         if (ma) return ma;
         return (a.lote || '').localeCompare(b.lote || '');
       });
-    out._skippedNoMaterial = skippedNoMaterial;
+    out._skippedNoMaterial = countSemMaterial; // legado: contagem sem material (agora visíveis)
+    out._countSemMaterial = countSemMaterial;
     out._skippedExcluded = skippedExcluded;
     return out;
   }
@@ -171,6 +173,7 @@
     if (drill === 'diverg') return rows.filter((r) => r._estado === 'Diverg.');
     if (drill === 'subir') return rows.filter((r) => r.diff > 0);
     if (drill === 'descer') return rows.filter((r) => r.diff < 0);
+    if (drill === 'semMat') return rows.filter((r) => r._semMaterial);
     return rows;
   }
 
@@ -223,7 +226,16 @@
     function buildRows() {
       if (typeof company !== 'undefined' && company !== 'DFB') return [];
       const out = [];
-      for (const dk of INVENTARIO_ACERTO_DEPOTS) out.push(...buildAcertoRowsForDepot(dk, excludeFI));
+      let countSemMaterial = 0;
+      let skippedExcluded = 0;
+      for (const dk of INVENTARIO_ACERTO_DEPOTS) {
+        const part = buildAcertoRowsForDepot(dk, excludeFI);
+        countSemMaterial += part._countSemMaterial || 0;
+        skippedExcluded += part._skippedExcluded || 0;
+        out.push(...part);
+      }
+      out._countSemMaterial = countSemMaterial;
+      out._skippedExcluded = skippedExcluded;
       cachedRows = out;
       return out;
     }
@@ -276,15 +288,22 @@
         toast('Módulo Mapa Acertos a carregar — aguarde ou recarregue', 'error');
         return;
       }
-      const filtered = getFilteredRows().slice().sort(function (a, b) {
+      const filteredAll = getFilteredRows().slice().sort(function (a, b) {
         const d = String(a.depotSheet).localeCompare(String(b.depotSheet));
         if (d) return d;
-        const ma = String(a.material).localeCompare(String(b.material));
+        const ma = String(a.material || '').localeCompare(String(b.material || ''));
         if (ma) return ma;
         return String(a.lote || '').localeCompare(String(b.lote || ''));
       });
+      const skippedSemMat = filteredAll.filter(function (r) { return r._semMaterial; }).length;
+      const filtered = filteredAll.filter(function (r) { return !r._semMaterial && r.material; });
       if (!filtered.length) {
-        toast('Sem linhas com diferença nos filtros actuais (ou sem código SAP)', 'info');
+        toast(
+          skippedSemMat
+            ? 'Nada exportável: ' + skippedSemMat + ' linha(s) sem código SAP (cria material no SAP ou mapeia EAN)'
+            : 'Sem linhas com diferença nos filtros actuais',
+          'info'
+        );
         return;
       }
       try {
@@ -293,12 +312,13 @@
         const valorTot = filtered.reduce(function (s, r) { return s + (r.valor || 0); }, 0);
         const fmtV = typeof fmtBrlLiq === 'function' ? fmtBrlLiq(valorTot) : String(valorTot);
         let msg = 'Exportado: ' + result.written + ' linhas · valor acerto ' + fmtV;
+        if (skippedSemMat) msg += ' · ' + skippedSemMat + ' sem cód. SAP omitidas';
         const selCats = typeof msGet === 'function' ? msGet(catMs) : new Set();
         const selSubs = typeof msGet === 'function' ? msGet(subMs) : new Set();
         if (selCats.size || selSubs.size || drill) msg += ' (filtrado)';
         if (excludeFI) msg += ' · sem FI';
         if (result.truncated) msg += ' · aviso: limite ' + result.maxPerSheet + ' linhas/folha (template)';
-        toast(msg, result.truncated ? 'info' : 'success');
+        toast(msg, result.truncated || skippedSemMat ? 'info' : 'success');
       } catch (e) {
         toast('Erro ao exportar: ' + (e.message || e), 'error');
       }
@@ -311,22 +331,34 @@
         kpiEl.innerHTML = '';
         return;
       }
-      const units = rows.reduce((s, r) => s + (Number(r.diff) || 0), 0);
-      const valorTot = rows.reduce((s, r) => s + (r.valor || 0), 0);
+      const exportable = rows.filter((r) => !r._semMaterial);
+      const semMatN = rows.length - exportable.length;
+      const units = exportable.reduce((s, r) => s + (Number(r.diff) || 0), 0);
+      const valorTot = exportable.reduce((s, r) => s + (r.valor || 0), 0);
       const fmtV = typeof fmtKvBrlLiq === 'function' ? fmtKvBrlLiq : (v) => String(v);
       const fmtQ = typeof fmtKv === 'function' ? (n) => fmtKv(iaFmtSignedQty(n)) : iaFmtSignedQty;
+      const fmtN = typeof fmtKvNum === 'function' ? fmtKvNum : (n) => String(n);
       const liqCls = typeof kvLiqCls === 'function' ? kvLiqCls(valorTot) : '';
       const qtyCls = typeof kvLiqCls === 'function' ? kvLiqCls(units) : '';
       const alvoNote = excludeFI
         ? ' · alvo = Unilog sem FI (SAP = WMS excl. falta de inventário)'
         : ' · alvo = Unilog 100% incl. FI (SAP = WMS)';
+      const semMatKpi = semMatN
+        ? '<div class="kpi" style="border-color:var(--yellow);cursor:pointer" onclick="typeof ' +
+          (prefix === 'ias' ? 'iasSetDrill' : 'iaSetDrill') +
+          '===\'function\'&&' +
+          (prefix === 'ias' ? 'iasSetDrill' : 'iaSetDrill') +
+          '(\'semMat\')"><div class="kl">Sem código SAP</div><div class="kv y">' +
+          fmtN(semMatN) +
+          '</div><div class="ks">visíveis na tabela · não entram no Excel · clica para filtrar</div></div>'
+        : '';
       kpiEl.innerHTML =
         '<div class="kpi" style="border-color:' +
         (valorTot > 0 ? 'var(--yellow)' : valorTot < 0 ? 'var(--red)' : 'var(--border)') +
         ';grid-column:span 2">' +
         '<div class="kl">Valor final do acerto</div>' +
         '<div class="kv ' + liqCls + '">' + fmtV(valorTot) + '</div>' +
-        '<div class="ks">Σ (Unilog−SAP)×preço SAP · vista filtrada · + = subir stock SAP' +
+        '<div class="ks">Σ (Unilog−SAP)×preço SAP · só com cód. SAP · + = subir stock SAP' +
         alvoNote +
         '</div></div>' +
         '<div class="kpi" style="border-color:' +
@@ -334,9 +366,10 @@
         ';grid-column:span 2">' +
         '<div class="kl">Saldo final (qtd)</div>' +
         '<div class="kv ' + qtyCls + '">' + fmtQ(units) + '</div>' +
-        '<div class="ks">Σ (Unilog−SAP) · vista filtrada · + = subir stock SAP' +
+        '<div class="ks">Σ (Unilog−SAP) · só com cód. SAP · + = subir stock SAP' +
         alvoNote +
-        '</div></div>';
+        '</div></div>' +
+        semMatKpi;
     }
 
     function renderTable(rows) {
@@ -377,8 +410,9 @@
               : r._estado === 'Só SAP'
                 ? '<span class="badge bwarn">Só SAP</span>'
                 : '<span class="badge bwarn">Diverg.</span>';
-          const dirBadge =
-            r.diff > 0
+          const dirBadge = r._semMaterial
+            ? '<span class="badge bgray">Sem cód. SAP</span>'
+            : r.diff > 0
               ? '<span class="badge bok">Subir</span>'
               : r.diff < 0
                 ? '<span class="badge berr">Descer</span>'
@@ -386,17 +420,20 @@
           const diffCls = r.diff > 0 ? 'pos' : r.diff < 0 ? 'neg' : '';
           const valorCls = r.valor > 0 ? 'pos' : r.valor < 0 ? 'neg' : '';
           const valorTxt =
-            r._semValor || !(r.preco > 0)
+            r._semMaterial || r._semValor || !(r.preco > 0)
               ? '—'
               : typeof fmtBrlLiq === 'function'
                 ? fmtBrlLiq(r.valor)
                 : r.valor;
+          const matCell = r._semMaterial
+            ? '<span style="color:var(--muted)">—</span> <span class="badge bwarn" title="Existe no WMS mas sem material SAP mapeado">Sem cód. SAP</span>'
+            : r.material;
           return (
-            '<tr>' +
+            '<tr' + (r._semMaterial ? ' style="background:rgba(234,179,8,.08)"' : '') + '>' +
             '<td><span class="badge bgray">' + r.depotSheet + '</span></td>' +
             '<td>' + (r.cat || '—') + '</td>' +
             '<td>' + (r.subcat || '—') + '</td>' +
-            '<td style="font-family:var(--mono);font-size:11px">' + r.material + '</td>' +
+            '<td style="font-family:var(--mono);font-size:11px">' + matCell + '</td>' +
             '<td style="font-family:var(--mono);font-size:11px">' + (r.EAN_norm || '—') + '</td>' +
             '<td class="col-desc">' + (r.desc || '—') + '</td>' +
             '<td style="font-family:var(--mono);font-size:11px">' + (r.lote || '—') + '</td>' +
@@ -448,8 +485,14 @@
         const n = rows.filter((r) => r.depot === dk).length;
         return INVENTARIO_ACERTO_SHEETS[dk] + ': ' + n;
       }).join(' · ');
+      const allBuilt = cachedRows || [];
+      const semMatTot = allBuilt._countSemMaterial || allBuilt.filter((r) => r._semMaterial).length;
+      const exclTot = allBuilt._skippedExcluded || 0;
+      const extras = [];
+      if (semMatTot) extras.push(semMatTot + ' sem cód. SAP (visíveis, não exportáveis)');
+      if (exclTot) extras.push(exclTot + ' excl. equip.prof./cx.papelão');
       const sub = el('DepotCounts');
-      if (sub) sub.textContent = depCounts;
+      if (sub) sub.textContent = depCounts + (extras.length ? ' · ' + extras.join(' · ') : '');
     }
 
     function syncNav() {
