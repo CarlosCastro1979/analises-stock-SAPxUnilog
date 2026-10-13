@@ -6,7 +6,7 @@
 (function (global) {
   'use strict';
 
-  const INVENTARIO_ACERTO_JS_VERSION = '1.1.2';
+  const INVENTARIO_ACERTO_JS_VERSION = '1.1.3';
   const INVENTARIO_ACERTO_DEPOTS = ['8', '9', '11', '22', '44'];
   const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
 
@@ -28,15 +28,19 @@
     const ean = reconRow?.EAN_norm;
     if (!ean) return '';
     if (reconRow.material) return String(reconRow.material).trim();
-    if (typeof buildEanSapCodeMap === 'function' && typeof sapData !== 'undefined' && sapData) buildEanSapCodeMap();
+    if (typeof buildEanSapCodeMap === 'function') buildEanSapCodeMap();
     const sap = typeof sapData !== 'undefined' ? sapData : [];
     const depotHit = sap.find((x) => x.deposito === depotKey && x.EAN_norm === ean && x.material);
     if (depotHit) return String(depotHit.material).trim();
-    if (typeof _eanSapCodeMap !== 'undefined' && _eanSapCodeMap?.[ean]) return [..._eanSapCodeMap[ean]][0];
+    if (typeof _eanSapCodeMap !== 'undefined' && _eanSapCodeMap?.[ean]?.size) return [..._eanSapCodeMap[ean]][0];
     const anyEan = sap.find((x) => x.EAN_norm === ean && x.material);
     if (anyEan) return String(anyEan.material).trim();
     const asMaterial = sap.find((x) => x.material === ean);
     if (asMaterial) return String(asMaterial.material).trim();
+    if (typeof getManualSapMaterial === 'function') {
+      const ov = getManualSapMaterial(ean);
+      if (ov) return ov;
+    }
     return '';
   }
 

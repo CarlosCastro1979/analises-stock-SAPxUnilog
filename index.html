@@ -524,7 +524,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.99 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.100 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1811,7 +1811,8 @@ select.cad-inp{cursor:pointer;}
     <div id="fte-tab-carregamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
       <div class="data-warn" style="display:block;margin:0 0 14px;">
-        <strong>Atualização v1.8.99 — Acerto vs Conciliação:</strong> caixas de papelão (cat. «CX Papelao» / «CAIXA VAZIA…») passam a ser reconhecidas na exclusão; Acerto Inventário <strong>mostra</strong> diffs Só-Unilog sem código SAP (não exportáveis) em vez de os esconder.
+        <strong>Atualização v1.8.100 — Mapa EAN→SAP:</strong> 6 artigos WMS sem material no extract SAP passam a ter código SAP permanente (incl. zeros à esquerda: 012960, 023418, 018341) — export de diferenças / Acerto Inventário deixa de os omitir por «sem cód. SAP».
+        <br><strong>v1.8.99 — Acerto vs Conciliação:</strong> caixas de papelão (cat. «CX Papelao» / «CAIXA VAZIA…») passam a ser reconhecidas na exclusão; Acerto Inventário <strong>mostra</strong> diffs Só-Unilog sem código SAP (não exportáveis) em vez de os esconder.
         <br><strong>v1.8.98 — Acerto Inventário:</strong> SAP = WMS 100% (inclui FI); <strong>Acerto Inv sem FI</strong> = SAP = WMS sem classe FI. Máquinas/equip. profissionais fora do acerto (não só valor zero).
         <br><strong>v1.8.97 — Acerto Inv sem FI:</strong> novo separador ao lado de Acerto Inventário com a mesma análise/export, excluindo a classe Unilog <strong>FI</strong> do físico.
       </div>
@@ -3646,6 +3647,20 @@ function uniClasseLabel(cl){
 }
 
 // ── SAP CODE / PRICE HELPERS ──
+/** Permanent EAN11 → Material SAP (strings; preserve leading zeros). Used when WMS has stock but SAP extract has no EAN. */
+const EAN_SAP_MATERIAL_OVERRIDES={
+  '5601082008578':'310301',        // GUARDA SOL DELTA
+  '5601082036137':'7801553',       // DELTA GOLD COFFEE GR 500g
+  '5609060007995':'012960',        // MAQ.QOOL EVOLUTION BLACK 127V BR
+  '5609060015723':'230340',        // PALETINA MADEIRA DELTA Q
+  '5609060034977':'023418',        // DELTA Q PRO-QUPS COFFEE R
+  '5609060098351':'018341',        // DELTA Q QIDS QUP 2 UN
+};
+function getManualSapMaterial(ean){
+  if(!ean)return'';
+  const m=EAN_SAP_MATERIAL_OVERRIDES[String(ean).trim()];
+  return m?String(m):'';
+}
 let _eanSapCodeMap=null;
 function invalidateSapMaps(){_eanSapCodeMap=null;}
 function buildEanSapCodeMap(){
@@ -3655,13 +3670,19 @@ function buildEanSapCodeMap(){
     if(!_eanSapCodeMap[r.EAN_norm])_eanSapCodeMap[r.EAN_norm]=new Set();
     _eanSapCodeMap[r.EAN_norm].add(r.material);
   });
+  Object.keys(EAN_SAP_MATERIAL_OVERRIDES).forEach(ean=>{
+    const mat=EAN_SAP_MATERIAL_OVERRIDES[ean];
+    if(!mat)return;
+    if(!_eanSapCodeMap[ean])_eanSapCodeMap[ean]=new Set();
+    if(!_eanSapCodeMap[ean].size)_eanSapCodeMap[ean].add(String(mat));
+  });
   return _eanSapCodeMap;
 }
 function getSapCode(ean){
   if(!ean)return'';
-  if(!_eanSapCodeMap&&sapData)buildEanSapCodeMap();
-  if(!_eanSapCodeMap||!_eanSapCodeMap[ean])return'';
-  return[..._eanSapCodeMap[ean]].join(' / ');
+  if(!_eanSapCodeMap)buildEanSapCodeMap();
+  if(_eanSapCodeMap&&_eanSapCodeMap[ean]&&_eanSapCodeMap[ean].size)return[..._eanSapCodeMap[ean]].join(' / ');
+  return getManualSapMaterial(ean);
 }
 function buildSapPrecoMap(){
   const m={};
@@ -4072,7 +4093,7 @@ function buildRecon(){
     }
     const keys=new Set([...Object.keys(sA),...Object.keys(uA)]);
     reconData[dk]=[];
-    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,qt_uni_by_class:u?{...u.qtByClass}:{},diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',material:s?.material||'',uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[],cat:param?.cat||'',subcat:param?.subcat||''});}
+    for(const k of keys){const s=sA[k],u=uA[k];const qt_sap=s?s.qt:0,qt_uni=u?u.qt:0;const ean=(s||u).EAN_norm,lote=(s||u).Lote_norm;const param=occParams.find(p=>p.ean===ean);const mat=s?.material||getManualSapMaterial(ean)||'';reconData[dk].push({EAN_norm:ean,Lote_norm:lote,qt_sap,qt_uni,qt_uni_by_class:u?{...u.qtByClass}:{},diff:qt_sap-qt_uni,desc:(s?.desc)||dm[ean]||'',validade:s?.validade||'',material:mat,uni_classes:u?[...u.classes]:[],uni_enderecos:u?u.enderecos.slice(0,5):[],cat:param?.cat||'',subcat:param?.subcat||''});}
   }
 }
 

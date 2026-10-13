@@ -85,15 +85,19 @@
   }
   function maResolveMaterial(reconRow, depotKey) {
     if (reconRow && reconRow.material) return String(reconRow.material).trim();
-    if (typeof buildEanSapCodeMap === 'function' && typeof sapData !== 'undefined' && sapData) buildEanSapCodeMap();
+    if (typeof buildEanSapCodeMap === 'function') buildEanSapCodeMap();
     const ean = reconRow && reconRow.EAN_norm;
     if (!ean) return '';
     const sap = typeof sapData !== 'undefined' ? sapData : [];
     const depotHit = sap.find(function (x) { return x.deposito === depotKey && x.EAN_norm === ean && x.material; });
     if (depotHit) return String(depotHit.material).trim();
-    if (typeof _eanSapCodeMap !== 'undefined' && _eanSapCodeMap && _eanSapCodeMap[ean]) return [..._eanSapCodeMap[ean]][0];
+    if (typeof _eanSapCodeMap !== 'undefined' && _eanSapCodeMap && _eanSapCodeMap[ean] && _eanSapCodeMap[ean].size) return [..._eanSapCodeMap[ean]][0];
     const anyEan = sap.find(function (x) { return x.EAN_norm === ean && x.material; });
     if (anyEan) return String(anyEan.material).trim();
+    if (typeof getManualSapMaterial === 'function') {
+      const ov = getManualSapMaterial(ean);
+      if (ov) return ov;
+    }
     return '';
   }
   function maResolveCat(ean, existingCat, existingSub) {
