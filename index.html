@@ -524,7 +524,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.102 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.103 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -714,7 +714,7 @@ select.cad-inp{cursor:pointer;}
 
   <!-- SUB: ACERTO SEM VALOR -->
   <div id="recon-acerto" style="display:none">
-  <div id="maQbNote" class="banner" style="display:none">Acerto sem valor disponível apenas para <strong>DFB</strong> (depósitos 0008, 0009, 0011, 0022, 0044).</div>
+  <div id="maQbNote" class="banner" style="display:none">Acerto sem valor disponível apenas para <strong>DFB</strong> (depósitos 0008, 0099, 0011, 0022, 0044).</div>
   <div id="maMain" class="card">
     <div class="ch">
       <div class="ct">Emitir doc acerto sem valor <span class="badge binfo" title="Todos os artigos com stock SAP">todos os artigos</span></div>
@@ -723,11 +723,11 @@ select.cad-inp{cursor:pointer;}
     <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55">
       Transferências <strong>SAP</strong> entre depósitos (e lotes) do mesmo <strong>EAN</strong> para aproximar o stock SAP do <strong>físico desejado</strong> — <strong>sem alterar a quantidade total SAP</strong> desse EAN (Σ subir = Σ descer; Σ SAP depois = Σ SAP antes).
       <strong>Físico</strong> = Unilog/WMS quando existe; <strong>Contabilístico</strong> = SAP.
-      Só propõe linhas em que SAP ≠ físico por depósito. Se já estiver alinhado (ex. tremoços no 0009 = WMS, ou caixas já no <strong>0044</strong>), <strong>não aparece</strong>.
+      Só propõe linhas em que SAP ≠ físico por depósito. Se já estiver alinhado (ex. tremoços no 0099 = WMS, ou caixas já no <strong>0044</strong>), <strong>não aparece</strong>.
       Caixas de papelão (sem WMS): físico desejado = dep. <strong>0044</strong> — só move se ainda houver SAP noutro depósito.
       Sobra SAP sem falta WMS noutro dep. <strong>não</strong> é despejada para 0044 (fica para Acerto Inventário).
       Excel: <strong>Contabilístico</strong> = SAP actual · <strong>Física</strong> = alvo pós-acerto · <strong>Subir / Descer</strong> · Contabilístico + Subir − Descer = Física · K = Física × preço SAP.
-      Ficheiro <code>acerto_sem_valor_AAAA-MM-DD.xlsx</code> · depósitos 0008/0009/0011/0022/0044.
+      Ficheiro <code>acerto_sem_valor_AAAA-MM-DD.xlsx</code> · depósitos 0008/0099/0011/0022/0044.
     </p>
     <div class="tb">
       <div class="ms-wrap" id="ms-maCat" data-placeholder="Categorias" data-onchange="renderMapaAcertosPage"><div class="ms-btn" onclick="msTogOpen('maCat')"><span class="ms-btn-lbl">Todas as categorias</span><span class="ms-btn-arr">▼</span></div><div class="ms-drop" style="display:none"><div class="ms-search"><input placeholder="Pesquisar…" oninput="msRenderSearch('maCat',this.value)"></div><div class="ms-actions"><button onclick="msSelAll('maCat')">Todas</button><button onclick="msClrAll('maCat')">Limpar</button></div><div class="ms-list"></div></div></div>
@@ -757,7 +757,7 @@ select.cad-inp{cursor:pointer;}
 
   <!-- SUB: ACERTO INVENTÁRIO -->
   <div id="recon-inventario" style="display:none">
-  <div id="iaQbNote" class="banner" style="display:none">Doc. de acerto de inventário disponível apenas para <strong>DFB</strong> (depósitos 0008, 0009, 0011, 0022, 0044).</div>
+  <div id="iaQbNote" class="banner" style="display:none">Doc. de acerto de inventário disponível apenas para <strong>DFB</strong> (depósitos 0008, 0099, 0011, 0022, 0044).</div>
   <div id="iaMain">
     <div class="card">
       <div class="ch">
@@ -768,7 +768,7 @@ select.cad-inp{cursor:pointer;}
         Objectivo: pôr o <strong>SAP 100% igual ao Unilog (WMS)</strong> — inclui <strong>todas as classes</strong>, inclusive <strong>FI</strong> (falta de inventário) no dep. 0044.
         Δ qty = Unilog − SAP (+ sobe SAP, − desce SAP). Excluídos do acerto: <strong>máquinas / equip. profissionais</strong> (e caixas de papelão).
         Linhas <strong>só no WMS sem código SAP</strong> aparecem na tabela (diagnóstico) mas <strong>não vão para o Excel</strong> — é preciso material no SAP.
-        Excel no <strong>mesmo template</strong> (<code>mapa_acertos_template.xlsx</code>): folhas 0008 / 0009 / 0011 / 0022 / 0044 — I Física = Unilog, J Contabilístico = SAP.
+        Excel no <strong>mesmo template</strong> (<code>mapa_acertos_template.xlsx</code>): folhas 0008 / 0099 / 0011 / 0022 / 0044 — I Física = Unilog, J Contabilístico = SAP.
         Com filtros activos, o Excel exporta <strong>só os produtos filtrados</strong>.
       </p>
       <div class="tb">
@@ -809,7 +809,7 @@ select.cad-inp{cursor:pointer;}
 
   <!-- SUB: ACERTO INVENTÁRIO SEM FI -->
   <div id="recon-inventario-sem-fi" style="display:none">
-  <div id="iasQbNote" class="banner" style="display:none">Doc. de acerto de inventário disponível apenas para <strong>DFB</strong> (depósitos 0008, 0009, 0011, 0022, 0044).</div>
+  <div id="iasQbNote" class="banner" style="display:none">Doc. de acerto de inventário disponível apenas para <strong>DFB</strong> (depósitos 0008, 0099, 0011, 0022, 0044).</div>
   <div id="iasMain">
     <div class="card">
       <div class="ch">
@@ -1080,7 +1080,7 @@ select.cad-inp{cursor:pointer;}
       <strong>Unilog (WMS):</strong> produtos com EAN, lote, quantidade e posição, <strong>validade expirada</strong>, fora da classe 104 (dep. vencidos). Excluídos: equip. profissional, caixas de papelão, máquinas domésticas, vinhos, validade 00.0000 e posições classe <strong>FI</strong> (falta de inventário).
     </p>
     <p id="vencDescSap" style="font-size:12px;color:var(--text2);margin-bottom:6px;display:none">
-      <strong>SAP:</strong> produtos com validade expirada fora do dep. vencidos (<span id="vencSapDepLbl">0009</span>). Excluídos: equip. profissional, caixas de papelão, máquinas domésticas, vinhos e validade 00.0000.
+      <strong>SAP:</strong> produtos com validade expirada fora do dep. vencidos (<span id="vencSapDepLbl">0099</span>). Excluídos: equip. profissional, caixas de papelão, máquinas domésticas, vinhos e validade 00.0000.
     </p>
     <p id="vencForaDepStats" style="font-size:11px;color:var(--muted);margin-bottom:14px;display:none"></p>
     <div class="dp" id="vencDepPills"></div>
@@ -1114,7 +1114,7 @@ select.cad-inp{cursor:pointer;}
       <button class="btn bg bs" onclick="exportProdBomVencXlsx()">⬇ Excel</button>
     </div>
     <p style="font-size:12px;color:var(--text2);margin-bottom:6px;">
-      <strong>Unilog (WMS):</strong> stock na classe <strong>104</strong> / dep. vencidos (<span id="prodBomVencDepLbl">0009</span>) que <strong>não deveria estar lá</strong>: (1) validade ainda boa em mês <strong>posterior</strong> ao corrente, ou (2) <strong>vinhos</strong> (sem controlo de validade — devem sair dos vencidos). Inclui posição para transferência. Excluídos: validade no <strong>mês corrente</strong> (OK nos vencidos), já vencidos, equip. profissional, caixas de papelão, máquinas domésticas, validade 00.0000 (não-vinho) e classe <strong>FI</strong>.
+      <strong>Unilog (WMS):</strong> stock na classe <strong>104</strong> / dep. vencidos (<span id="prodBomVencDepLbl">0099</span>) que <strong>não deveria estar lá</strong>: (1) validade ainda boa em mês <strong>posterior</strong> ao corrente, ou (2) <strong>vinhos</strong> (sem controlo de validade — devem sair dos vencidos). Inclui posição para transferência. Excluídos: validade no <strong>mês corrente</strong> (OK nos vencidos), já vencidos, equip. profissional, caixas de papelão, máquinas domésticas, validade 00.0000 (não-vinho) e classe <strong>FI</strong>.
     </p>
     <p id="prodBomVencStats" style="font-size:11px;color:var(--muted);margin-bottom:14px;display:none"></p>
     <div class="tb">
@@ -1354,7 +1354,7 @@ select.cad-inp{cursor:pointer;}
           <option value="">Todos os depósitos</option>
           <option value="11">0011 — Disponível</option>
           <option value="8">0008 — B2C</option>
-          <option value="9">0009 — Vencidos</option>
+          <option value="99">0099 — Vencidos</option>
           <option value="22">0022 — Quarentena</option>
           <option value="44">0044 — Avarias</option>
         </select>
@@ -1406,7 +1406,7 @@ select.cad-inp{cursor:pointer;}
           <option value="">Todos os depósitos</option>
           <option value="11">0011 — Disponível</option>
           <option value="8">0008 — B2C</option>
-          <option value="9">0009 — Vencidos</option>
+          <option value="99">0099 — Vencidos</option>
           <option value="22">0022 — Quarentena</option>
           <option value="44">0044 — Avarias</option>
         </select>
@@ -1909,7 +1909,8 @@ select.cad-inp{cursor:pointer;}
     <div id="fte-tab-carregamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
       <div class="data-warn" style="display:block;margin:0 0 14px;">
-        <strong>Atualização v1.8.102 — Insumos na Conciliação:</strong> <strong>Insumos</strong> deixa o menu topo e passa a sub-aba de Conciliação (ao lado de Acerto Inventário / Acerto Inv sem FI); upload, cloud e autosave mantêm-se.
+        <strong>Atualização v1.8.103 — Dep. Vencidos 0099:</strong> classe Unilog <strong>104</strong> / Vencidos passa de depósito SAP <strong>0009</strong> para <strong>0099</strong> (DFB e QB). Conciliação, alertas, ocupação e exports de Acerto Inventário / Acerto Inv sem FI / Emitir doc usam <strong>0099</strong>.
+        <br><strong>v1.8.102 — Insumos na Conciliação:</strong> <strong>Insumos</strong> deixa o menu topo e passa a sub-aba de Conciliação (ao lado de Acerto Inventário / Acerto Inv sem FI); upload, cloud e autosave mantêm-se.
         <br><strong>v1.8.101 — Insumos:</strong> CX Papelão sai da conciliação em <strong>todos</strong> os deps (incl. <strong>0044 Avarias</strong>); aba Insumos com upload CSV Unilog, lista SAP vs extract, posições ocupadas e qtd/posição (base p/ optimização).
         <br><strong>v1.8.100 — Mapa EAN→SAP:</strong> 6 artigos WMS sem material no extract SAP passam a ter código SAP permanente (incl. zeros à esquerda: 012960, 023418, 018341) — export de diferenças / Acerto Inventário deixa de os omitir por «sem cód. SAP».
         <br><strong>v1.8.99 — Acerto vs Conciliação:</strong> caixas de papelão (cat. «CX Papelao» / «CAIXA VAZIA…») passam a ser reconhecidas na exclusão; Acerto Inventário <strong>mostra</strong> diffs Só-Unilog sem código SAP (não exportáveis) em vez de os esconder.
@@ -2761,7 +2762,7 @@ function setStockProcessing(active,label){
 }
 
 // Depot maps per company
-const DEPOT_MAP_DFB={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'9':{classes:['104'],label:'0009 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2','FI','SI'],label:'0044 — Avarias'},'MUIM':{classes:['00'],label:'MUIM — Equipamento Profissional',catOnly:'Equipamento Profissional'}};
+const DEPOT_MAP_DFB={'8':{classes:['07'],label:'0008 — B2C'},'11':{classes:['00'],label:'0011 — Disponível'},'99':{classes:['104'],label:'0099 — Vencidos'},'22':{classes:['96'],label:'0022 — Quarentena'},'44':{classes:['A1','A2','FI','SI'],label:'0044 — Avarias'},'MUIM':{classes:['00'],label:'MUIM — Equipamento Profissional',catOnly:'Equipamento Profissional'}};
 const DEPOT_MAP_QB={'11':{classes:['00'],label:'0011 — Disponível'},'44':{classes:['A1','A2','FI','SI'],label:'0044 — Avarias'},'99':{classes:['104'],label:'0099 — Vencidos'}};
 let DEPOT_MAP=DEPOT_MAP_DFB;
 let DKS=Object.keys(DEPOT_MAP);
@@ -3419,8 +3420,8 @@ function normUni(rows){
   console.log('[normUni] linhas por classe:',counts,'total:',out.length,'FI:',counts.FI||0,'SI:',counts.SI||0);
   return out;
 }
-function getVencidosDepotKey(){return company==='QB'?'99':'9';}
-/** Unilog classe 104 = depósito de vencidos (DFB 0009 / QB 0099). Stock misturado por posição — sem optimização de ocupação. */
+function getVencidosDepotKey(){return'99';}
+/** Unilog classe 104 = depósito de vencidos (SAP 0099). Stock misturado por posição — sem optimização de ocupação. */
 const UNI_CLASSE_VENCIDOS='104';
 function isVencidosClasse(classe){return String(classe??'').trim()===UNI_CLASSE_VENCIDOS;}
 function isVencidosUniRow(r){return!!r&&isVencidosClasse(r.classe);}
@@ -4692,7 +4693,7 @@ function vencSubTab(tab,el){
   if(descWms)descWms.style.display=tab==='wms'?'':'none';
   if(descSap)descSap.style.display=tab==='sap'?'':'none';
   const depLbl=document.getElementById('vencSapDepLbl');
-  if(depLbl)depLbl.textContent=company==='QB'?'0099':'0009';
+  if(depLbl)depLbl.textContent='0099';
   renderVencidoForaDep();
   scheduleColResize();
 }
@@ -4925,7 +4926,7 @@ function _renderVencidoForaDepSap(){
   if(empty)empty.style.display='none';
   renderVencDepPills();
   const statsEl=document.getElementById('vencForaDepStats');
-  const vencDepLbl=company==='QB'?'0099':'0009';
+  const vencDepLbl='0099';
   if(statsEl&&vencForaDepSapStats){
     const s=vencForaDepSapStats;
     let extra='';
@@ -5017,7 +5018,7 @@ function buildProdBomVenc(){
   const vencidosDk=getVencidosDepotKey();
   const today=new Date();today.setHours(0,0,0,0);
   const depLblEl=document.getElementById('prodBomVencDepLbl');
-  if(depLblEl)depLblEl.textContent=company==='QB'?'0099':'0009';
+  if(depLblEl)depLblEl.textContent='0099';
   const stats={analizadas:uniData.length,noDepVencidos:0,comValidadeBoa:0,vinhos:0,vencidasNoDep:0,validadeMesAtual:0,validadeNaoParseada:0,validadeIgnorada:0,equipProf:0,maquinaDom:0,semLote:0,semEndereco:0,dc:0,classeDesconhecida:0,faltaInventario:0,foraDepVencidos:0};
   const isValidadeMesAtual=d=>d&&d.getFullYear()===today.getFullYear()&&d.getMonth()===today.getMonth();
   const dm={};
@@ -5112,7 +5113,7 @@ function _renderProdBomVenc(){
   const empty=document.getElementById('prodBomVencEmpty');
   const ok=document.getElementById('prodBomVencOk');
   const depLblEl=document.getElementById('prodBomVencDepLbl');
-  if(depLblEl)depLblEl.textContent=company==='QB'?'0099':'0009';
+  if(depLblEl)depLblEl.textContent='0099';
   if(!uniData){
     if(body)body.innerHTML='';
     if(empty)empty.style.display='block';
@@ -7198,7 +7199,7 @@ function occRecoStep(n,body,meta){
 function occRecoMoveBody(fromEnd,toEnd,qty){
   return`<strong>${fmt(qty)} un</strong><div class="occ-reco-route">${occEndChip(fromEnd,'de')}<span style="color:var(--muted)">→</span>${occEndChip(toEnd,'para')}</div>`;
 }
-const OCC_DEP_CLASS_MAP={'8':['07'],'11':['00'],'9':['104'],'22':['96'],'44':['A1','A2','FI','SI']};
+const OCC_DEP_CLASS_MAP={'8':['07'],'11':['00'],'99':['104'],'22':['96'],'44':['A1','A2','FI','SI']};
 /** Classe Unilog → chave de depósito de ocupação (nunca misturar stock entre deps na optimização). */
 function occDepKeyFromClasse(classe){
   const cl=String(classe??'').trim();
@@ -7209,7 +7210,7 @@ function occDepKeyFromClasse(classe){
   const dk=DKS.find(k=>(DEPOT_MAP[k]?.classes||[]).includes(cl));
   return dk||'_';
 }
-function isOccVencidosDepFilter(depF){return depF==='9'||depF===getVencidosDepotKey();}
+function isOccVencidosDepFilter(depF){return depF==='99'||depF===getVencidosDepotKey();}
 function isOccAvariasDepFilter(depF){return depF===OCC_AVARIAS_DEP_KEY;}
 function isOccNoOptimDepFilter(depF){return isOccVencidosDepFilter(depF)||isOccAvariasDepFilter(depF);}
 /** Lista de depósitos seleccionados no multi-select ovDep (vazio = todos, excl. vencidos/avarias por defeito). */
@@ -7262,7 +7263,7 @@ function filterUniForOcc(depF,{includeVencidosStock=false,includeAvariasStock=fa
     return true;
   });
 }
-/** Neutraliza optimização por depósito (multi-dep: cada row já é EAN×dep; 0009/0044 → 0 poupança). */
+/** Neutraliza optimização por depósito (multi-dep: cada row já é EAN×dep; 0099/0044 → 0 poupança). */
 function applyOccVistaOptimFlags(rows,uniFiltered,deps){
   const onlyNoOptim=deps.length>0&&deps.every(isOccNoOptimDepFilter);
   if(onlyNoOptim){
@@ -10103,10 +10104,10 @@ function applyResizable(){scheduleColResize();}
   // inventario-acerto.js / mapa-acertos.js are optional — never block app boot on them
   function loadInventarioAcerto() {
     // mapa-acertos first — Acerto Inventário reuses maExportPatchedXlsx / same template
-    load('mapa-acertos.js', 'v=1.0.16', function () {
-      load('inventario-acerto.js', 'v=1.1.2');
+    load('mapa-acertos.js', 'v=1.0.17', function () {
+      load('inventario-acerto.js', 'v=1.1.4');
     }, function () {
-      load('inventario-acerto.js', 'v=1.1.2');
+      load('inventario-acerto.js', 'v=1.1.4');
     });
   }
   load('fretes.js', 'v=1.8.95', function () {

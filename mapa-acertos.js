@@ -1,13 +1,13 @@
 /* Mapa Acertos — doc. acerto sem valor (redistribuição EAN neto zero; cx→0044 só se ainda fora) */
 (function (global) {
   'use strict';
-  const MAPA_ACERTOS_JS_VERSION = '1.0.16';
+  const MAPA_ACERTOS_JS_VERSION = '1.0.17';
   /** @deprecated test filter removed — full SAP-stock scope. Kept empty for old callers. */
   const MA_TEST_MATERIALS = [];
   /** @deprecated */
   const MAPA_ACERTOS_TEST_MATERIAL = '';
-  const MAPA_ACERTOS_DEPOTS = ['8', '9', '11', '22', '44'];
-  const MAPA_ACERTOS_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
+  const MAPA_ACERTOS_DEPOTS = ['8', '99', '11', '22', '44'];
+  const MAPA_ACERTOS_SHEETS = { 8: '0008', 99: '0099', 11: '0011', 22: '0022', 44: '0044' };
   /** Destino desejado para caixas de papelão (sem WMS): consolidar SAP fora deste dep. */
   const MAPA_ACERTOS_DEPOT_SOBRA = '44';
   const MA_CAIXAS_CAT = (typeof CAIXAS_PAPELAO_CAT !== 'undefined') ? CAIXAS_PAPELAO_CAT : 'Caixas de Papelão';
@@ -266,7 +266,7 @@
   /**
    * Só para caixas (físico desejado = 0044): SAP ainda fora do 0044 → DESCER source + SUBIR 0044.
    * Excess já no 0044 fica. NÃO usar para artigos com WMS — sobra residual fica para inventário.
-   * adjDepot keyed by depot id ('8','9',...). Mutates adjDepot.
+   * adjDepot keyed by depot id ('8','99',...). Mutates adjDepot.
    */
   function maMoveExcessTo0044Depot(depotAgg, adjDepot) {
     const deps = Object.keys(depotAgg);

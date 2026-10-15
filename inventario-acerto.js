@@ -6,9 +6,9 @@
 (function (global) {
   'use strict';
 
-  const INVENTARIO_ACERTO_JS_VERSION = '1.1.3';
-  const INVENTARIO_ACERTO_DEPOTS = ['8', '9', '11', '22', '44'];
-  const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 9: '0009', 11: '0011', 22: '0022', 44: '0044' };
+  const INVENTARIO_ACERTO_JS_VERSION = '1.1.4';
+  const INVENTARIO_ACERTO_DEPOTS = ['8', '99', '11', '22', '44'];
+  const INVENTARIO_ACERTO_SHEETS = { 8: '0008', 99: '0099', 11: '0011', 22: '0022', 44: '0044' };
 
   const IA_DRILL_LABELS = {
     wms: 'Só Unilog (físico>0, SAP=0)',
