@@ -524,7 +524,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.103 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.104 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -561,7 +561,7 @@ select.cad-inp{cursor:pointer;}
         <div class="uz" id="sapZone" onclick="document.getElementById('sapFile').click()">
           <div style="font-size:26px;margin-bottom:8px">🗄️</div>
           <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o ficheiro SAP</div>
-          <div style="font-size:11px;color:var(--muted)">xlsx — Centro, Depósito, EAN11, Lote, Quantidade…</div>
+          <div style="font-size:11px;color:var(--muted)">xlsx — merge por depósito (ex. só 0099 actualiza 0099; restantes mantêm-se)</div>
           <div id="sapFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
           <input type="file" id="sapFile" accept=".xlsx,.xls" onchange="loadSap(this)">
         </div>
@@ -577,7 +577,7 @@ select.cad-inp{cursor:pointer;}
         </div>
       </div>
     </div>
-    <p style="font-size:12px;color:var(--muted);margin:14px 0 0;">Ao abrir a app só carrega a shell — stock / Fretes / Armazém entram sob pedido (aba ou «Carregar último»). Evita Out of Memory no Chrome.</p>
+    <p style="font-size:12px;color:var(--muted);margin:14px 0 0;">Ao abrir a app só carrega a shell — stock / Fretes / Armazém entram sob pedido (aba ou «Carregar último»). Evita Out of Memory no Chrome. <strong>SAP:</strong> upload parcial faz merge por depósito (só os deps do ficheiro são substituídos).</p>
     <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;">
       <button class="btn bp" id="procBtn" onclick="processAll()" disabled>⚡ Processar e Guardar</button>
       <button class="btn bg" id="stockLoadLastBtn" onclick="loadLastSaved()">☁️ Carregar último guardado</button>
@@ -1909,7 +1909,8 @@ select.cad-inp{cursor:pointer;}
     <div id="fte-tab-carregamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
       <div class="data-warn" style="display:block;margin:0 0 14px;">
-        <strong>Atualização v1.8.103 — Dep. Vencidos 0099:</strong> classe Unilog <strong>104</strong> / Vencidos passa de depósito SAP <strong>0009</strong> para <strong>0099</strong> (DFB e QB). Conciliação, alertas, ocupação e exports de Acerto Inventário / Acerto Inv sem FI / Emitir doc usam <strong>0099</strong>.
+        <strong>Atualização v1.8.104 — SAP merge por depósito:</strong> upload SAP parcial (ex. <code>dep 0099_v2.xlsx</code>) substitui só os depósitos presentes no ficheiro; 0008/0011/0022/0044/… mantêm-se. <strong>Processar e Guardar</strong> persiste o stock completo (JSON + Excel merged).
+        <br><strong>v1.8.103 — Dep. Vencidos 0099:</strong> classe Unilog <strong>104</strong> / Vencidos passa de depósito SAP <strong>0009</strong> para <strong>0099</strong> (DFB e QB). Conciliação, alertas, ocupação e exports de Acerto Inventário / Acerto Inv sem FI / Emitir doc usam <strong>0099</strong>.
         <br><strong>v1.8.102 — Insumos na Conciliação:</strong> <strong>Insumos</strong> deixa o menu topo e passa a sub-aba de Conciliação (ao lado de Acerto Inventário / Acerto Inv sem FI); upload, cloud e autosave mantêm-se.
         <br><strong>v1.8.101 — Insumos:</strong> CX Papelão sai da conciliação em <strong>todos</strong> os deps (incl. <strong>0044 Avarias</strong>); aba Insumos com upload CSV Unilog, lista SAP vs extract, posições ocupadas e qtd/posição (base p/ optimização).
         <br><strong>v1.8.100 — Mapa EAN→SAP:</strong> 6 artigos WMS sem material no extract SAP passam a ter código SAP permanente (incl. zeros à esquerda: 012960, 023418, 018341) — export de diferenças / Acerto Inventário deixa de os omitir por «sem cód. SAP».
@@ -3184,7 +3185,122 @@ async function init(){
 function setDB(ok){document.getElementById('dbDot').className='db-dot'+(ok?' ok':'');document.getElementById('dbLbl').textContent=ok?'Supabase OK':'offline';}
 
 // ── FILES ──
-function loadSap(inp){const f=inp.files[0];if(!f)return;stockSapFileName=f.name;const fnEl=document.getElementById('sapFn');if(fnEl)fnEl.textContent='⏳ A ler '+f.name+'…';const r=new FileReader();r.onload=async e=>{try{stockSapBuffer=e.target.result;await yieldToUI('A parsear Excel SAP…');const rows=xlsxRowsFromArrayBuffer(stockSapBuffer);await yieldToUI('A normalizar SAP…');syncCompanyDepotMap();window._rawSapRows=rows;sapData=normSap(rows);invalidateSapMaps();invalidateReconExclEANs();document.getElementById('sapFn').textContent='✓ '+f.name;document.getElementById('sapZone').classList.add('loaded');checkBtn();toast('SAP: '+sapData.length+' linhas','success');}catch(err){if(fnEl)fnEl.textContent='';toast(xlsxReadErrorMsg(err),'error');}finally{setStockProcessing(false);}};r.onerror=()=>{if(fnEl)fnEl.textContent='';toast('Erro ao ler ficheiro SAP.','error');};r.readAsArrayBuffer(f);}
+function padSapDepLabel(dk){const n=Number(dk);return Number.isFinite(n)&&n>0?String(n).padStart(4,'0'):String(dk||'');}
+function rawSapDepotKey(r){return sapDepotKey(pickSapField(r,SAP_DEPOSITO_COLS)||r['Depósito']||r['Deposito']);}
+/** Merge SAP by depósito — next overwrites those depots; prev depots absent from next are kept (same rule as Fretes ZFACT). */
+function mergeSapNormByDepot(prev,next){
+  if(!next?.length)return prev?.length?prev.slice():[];
+  if(!prev?.length)return next.slice();
+  const nextDeps=new Set(next.map(r=>sapDepotKey(r.deposito)).filter(d=>d!==''));
+  return prev.filter(r=>!nextDeps.has(sapDepotKey(r.deposito))).concat(next);
+}
+function mergeSapRawByDepot(prev,next,depotKeys){
+  if(!next?.length)return prev?.length?prev.slice():[];
+  if(!prev?.length)return next.slice();
+  const nextDeps=new Set((depotKeys&&depotKeys.length)?depotKeys:next.map(rawSapDepotKey).filter(d=>d!==''));
+  if(!nextDeps.size)return prev.concat(next);
+  return prev.filter(r=>!nextDeps.has(rawSapDepotKey(r))).concat(next);
+}
+function sapNormToRawRows(rows){
+  return(rows||[]).map(r=>({
+    'Centro':r.centro||'','Depósito':r.deposito||'','EAN11':r.EAN_norm||'',
+    'Material':r.material||'','Descrição':r.desc||'','Lote.':r.Lote_norm||'',
+    'Quantidade':r.qt||0,'Validade Lote':r.validade||'','Preço':r.preco||0
+  }));
+}
+function sapRawRowsToArrayBuffer(rows){
+  const ws=XLSX.utils.json_to_sheet(rows||[]);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Stock SAP');
+  const out=XLSX.write(wb,{type:'array',bookType:'xlsx'});
+  if(out instanceof ArrayBuffer)return out;
+  return out.buffer.slice(out.byteOffset,out.byteOffset+out.byteLength);
+}
+/** Lightweight cloud baseline for partial SAP uploads (avoids wiping other depots). */
+async function fetchCloudSapBaseline(){
+  try{
+    syncCompanyDepotMap();
+    const{data,error}=await db.from('logistica_stock').select('sap_data,unilog_data').eq('id',company).single();
+    if(error||!data)return null;
+    const sap=data.sap_data?filterSapRowsForCompany(JSON.parse(data.sap_data),company):[];
+    let uni=null;
+    if(data.unilog_data&&!(uniData&&uniData.length)){
+      try{uni=filterUniForCompany(JSON.parse(data.unilog_data));}catch(_){uni=null;}
+    }
+    return{sap,uni};
+  }catch(e){console.warn('[sap] fetchCloudSapBaseline',e);return null;}
+}
+function loadSap(inp){
+  const f=inp.files[0];if(!f)return;
+  stockSapFileName=f.name;
+  const fnEl=document.getElementById('sapFn');
+  if(fnEl)fnEl.textContent='⏳ A ler '+f.name+'…';
+  const r=new FileReader();
+  r.onload=async e=>{
+    try{
+      const incomingBuf=e.target.result;
+      await yieldToUI('A parsear Excel SAP…');
+      const incomingRaw=xlsxRowsFromArrayBuffer(incomingBuf);
+      await yieldToUI('A normalizar SAP…');
+      syncCompanyDepotMap();
+      // Baseline from memory or cloud JSON so a single-depot file does not wipe the rest
+      if(!(sapData&&sapData.length)||!(uniData&&uniData.length)){
+        await yieldToUI('A carregar stock cloud para merge…');
+        const base=await fetchCloudSapBaseline();
+        if(base?.sap?.length&&!(sapData&&sapData.length))sapData=base.sap;
+        if(base?.uni?.length&&!(uniData&&uniData.length)){
+          uniData=base.uni;
+          refreshUniClasseNorm();
+        }
+      }
+      const nextNorm=normSap(incomingRaw);
+      const nextDeps=[...new Set(nextNorm.map(x=>sapDepotKey(x.deposito)).filter(Boolean))]
+        .sort((a,b)=>Number(a)-Number(b));
+      const prevNorm=sapData?.length?sapData.slice():[];
+      const prevRaw=window._rawSapRows?.length
+        ?window._rawSapRows.slice()
+        :(prevNorm.length?sapNormToRawRows(prevNorm):[]);
+      let mergedRaw,mergedNorm,didMerge=false;
+      if(prevNorm.length&&nextNorm.length){
+        mergedNorm=mergeSapNormByDepot(prevNorm,nextNorm);
+        mergedRaw=mergeSapRawByDepot(prevRaw,incomingRaw,nextDeps);
+        didMerge=true;
+      }else{
+        mergedNorm=nextNorm;
+        mergedRaw=incomingRaw;
+      }
+      window._rawSapRows=mergedRaw;
+      sapData=mergedNorm;
+      // Persist full merged workbook (not the partial upload alone)
+      try{
+        stockSapBuffer=sapRawRowsToArrayBuffer(mergedRaw);
+        stockSapFileName=didMerge&&nextDeps.length
+          ?('stock_sap_merged_'+nextDeps.map(padSapDepLabel).join('-')+'_'+f.name)
+          :f.name;
+      }catch(bufErr){
+        console.warn('[sap] rebuild buffer',bufErr);
+        stockSapBuffer=incomingBuf;
+        stockSapFileName=f.name;
+      }
+      invalidateSapMaps();
+      invalidateReconExclEANs();
+      const mergeLbl=didMerge?' (merge dep. '+nextDeps.map(padSapDepLabel).join(', ')+')':'';
+      document.getElementById('sapFn').textContent='✓ '+f.name+mergeLbl;
+      document.getElementById('sapZone').classList.add('loaded');
+      checkBtn();
+      if(didMerge){
+        toast('SAP merge dep. '+nextDeps.map(padSapDepLabel).join(', ')+': '+nextNorm.length+' linhas → '+sapData.length+' total (outros deps mantidos)','success');
+      }else{
+        toast('SAP: '+sapData.length+' linhas','success');
+      }
+    }catch(err){
+      if(fnEl)fnEl.textContent='';
+      toast(xlsxReadErrorMsg(err),'error');
+    }finally{setStockProcessing(false);}
+  };
+  r.onerror=()=>{if(fnEl)fnEl.textContent='';toast('Erro ao ler ficheiro SAP.','error');};
+  r.readAsArrayBuffer(f);
+}
 function loadUni(inp){const f=inp.files[0];if(!f)return;stockUniFileName=f.name;const fnEl=document.getElementById('uniFn');if(fnEl)fnEl.textContent='⏳ A ler '+f.name+'…';const r=new FileReader();r.onload=async e=>{try{stockUniBuffer=e.target.result;await yieldToUI('A parsear Excel Unilog…');const rows=xlsxRowsFromArrayBuffer(stockUniBuffer);await yieldToUI('A normalizar Unilog…');window._rawUniRows=rows;syncCompanyDepotMap();uniData=filterUniForCompany(normUni(rows));logUniClasseCounts('loadUni');invalidateReconExclEANs();document.getElementById('uniFn').textContent='✓ '+f.name;document.getElementById('uniZone').classList.add('loaded');checkBtn();toast('Unilog: '+uniData.length+' linhas','success');}catch(err){if(fnEl)fnEl.textContent='';toast(xlsxReadErrorMsg(err),'error');}finally{setStockProcessing(false);}};r.onerror=()=>{if(fnEl)fnEl.textContent='';toast('Erro ao ler ficheiro Unilog.','error');};r.readAsArrayBuffer(f);}
 function xlsxReadErrorMsg(err){const m=String(err?.message||err||'');if(/encryptioninfo|encrypted file|password|agile encryption|office crypto|file is password-protected/i.test(m))return 'Ficheiro Excel protegido por password — exporta sem proteção ou guarda como .xlsx não encriptado (Excel → Guardar como). SheetJS CE não suporta ficheiros encriptados.';return 'Erro: '+m;}
 function readXlsx(file,cb){const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});cb(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));}catch(err){toast(xlsxReadErrorMsg(err),'error');}};r.readAsArrayBuffer(file);}
