@@ -1,5 +1,5 @@
-// fretes.js v1.8.107 — QZ: CT-e distintos por NF (sem cópias), CT-e em 2 quinzenas sinalizado, DELTA ≠ Q-BRASIL
-const FRETES_JS_VERSION = '1.8.107';
+// fretes.js v1.8.108 — pago NF = soma dos CT-e distintos; valor igual em vários CT-e → «Possível cobrança a mais»
+const FRETES_JS_VERSION = '1.8.108';
 /** Bump when a stored quinzenal pack needs a one-time repair on load (persisted as pack.cleanup.version). */
 const QZ_PACK_CLEANUP_VERSION = 1;
 /** Pre-repair copy of the quinzenal pack (written once per company, never overwritten). */
@@ -260,13 +260,15 @@ function renderCteSubPanels() {
   }
   if (content) content.style.display = hasData ? 'block' : 'none';
   if (!hasData) return;
-  ['resumo', 'detalhe', 'anomalias', 'mensal', 'qzdup'].forEach(sub => {
+  ['resumo', 'detalhe', 'anomalias', 'mensal', 'qzdup', 'overcharge'].forEach(sub => {
     const el = $('cte-sub-' + sub);
     if (el) el.style.display = activeCteSub === sub ? 'block' : 'none';
   });
   updateQzDupTabCount();
+  updateOverchargeTabCount();
   if (activeCteSub === 'mensal') renderMonthlyTable();
   if (activeCteSub === 'qzdup') renderQzDupPanel();
+  if (activeCteSub === 'overcharge') renderOverchargePanel();
 }
 
 async function applyFretesFileLabelsFromMeta() {
@@ -3984,20 +3986,25 @@ function analyzeCteEntry(cte, idx, valorNF, nCteTotal) {
 }
 
 /**
- * Quinzenal B2B often repeats the NF-level "Total fatura" on every CT-e row.
- * Summing identical pagos × N (e.g. 91×R$26.703) explodes % pago to 500%+.
- * Take once when all positive pagos match; or when every row is ~6% of the full NF (≥3 CT-e).
+ * Pago per NF. Distinct Num. CTE are separate charges and are always summed — identical pagos on
+ * distinct CT-e are reported as identicalDistinct (possível cobrança a mais), never taken once.
+ * Legacy lines without distinct Num. CTE may repeat the NF-level "Total fatura" on every row
+ * (e.g. 91×R$26.703): take once when all pagos match, or when every row is ~6% of the full NF (≥3).
  */
 function aggregateNfPago(ctes, valorNF) {
-  const pagos = (ctes || []).map(c => num(c.pago));
-  const positive = pagos.filter(p => p > 0);
-  if (!positive.length) return { pago: 0, coalescedOnce: false };
-  if (positive.length === 1) return { pago: positive[0], coalescedOnce: false };
+  const withPago = (ctes || []).filter(c => num(c.pago) > 0);
+  const positive = withPago.map(c => num(c.pago));
+  if (!positive.length) return { pago: 0, coalescedOnce: false, identicalDistinct: false };
+  if (positive.length === 1) return { pago: positive[0], coalescedOnce: false, identicalDistinct: false };
 
   const first = positive[0];
   const eps = Math.max(0.05, Math.abs(first) * 0.002);
   const allClose = positive.every(p => Math.abs(p - first) <= eps);
-  if (allClose) return { pago: first, coalescedOnce: true };
+  const sum = positive.reduce((s, p) => s + p, 0);
+  const nums = withPago.map(qzCteNumKey);
+  const distinctDocs = nums.every(Boolean) && new Set(nums).size === nums.length;
+  if (distinctDocs) return { pago: sum, coalescedOnce: false, identicalDistinct: allClose };
+  if (allClose) return { pago: first, coalescedOnce: true, identicalDistinct: false };
 
   const v = num(valorNF);
   if (v > 0 && positive.length >= 3) {
@@ -4005,10 +4012,10 @@ function aggregateNfPago(ctes, valorNF) {
       const pct = p / v;
       return pct >= (CTE_PCT_LOW - 0.005) && pct <= (CTE_PCT_HIGH + 0.02);
     });
-    if (allNearFullPct) return { pago: Math.max(...positive), coalescedOnce: true };
+    if (allNearFullPct) return { pago: Math.max(...positive), coalescedOnce: true, identicalDistinct: false };
   }
 
-  return { pago: positive.reduce((s, p) => s + p, 0), coalescedOnce: false };
+  return { pago: sum, coalescedOnce: false, identicalDistinct: false };
 }
 
 (function _debugAggregateNfPago() {
@@ -4022,7 +4029,9 @@ function aggregateNfPago(ctes, valorNF) {
     10000
   );
   const okSum = !pagoSum.coalescedOnce && Math.abs(pagoSum.pago - 350) < 0.01;
-  if (!okPagoOnce || !okSum) console.warn('[SAP NF] aggregateNfPago failed', { pagoOnce, pagoSum });
+  const pagoDistinct = aggregateNfPago([{ numCte: '88225', pago: 100 }, { numCte: '88567', pago: 100 }], 1000);
+  const okDistinct = pagoDistinct.identicalDistinct && Math.abs(pagoDistinct.pago - 200) < 0.01;
+  if (!okPagoOnce || !okSum || !okDistinct) console.warn('[SAP NF] aggregateNfPago failed', { pagoOnce, pagoSum, pagoDistinct });
   else console.debug('[SAP NF] aggregateNfPago OK');
 })();
 
@@ -4030,13 +4039,16 @@ function buildNfRecord(g) {
   const ctesRaw = g.ctes || [];
   const nCte = resolveNfCteCount(ctesRaw, g.qtdCteFromSource);
   const ctes = ctesRaw.map((c, i) => analyzeCteEntry(c, i, g.valorNF, nCte));
-  const { pago, coalescedOnce } = aggregateNfPago(ctes, g.valorNF);
+  const { pago, coalescedOnce, identicalDistinct } = aggregateNfPago(ctes, g.valorNF);
   const esperado = g.valorNF * CTE_PCT_TARGET;
   const diff = pago - esperado;
   const pct = g.valorNF > 0 ? pago / g.valorNF : 0;
+  // Several distinct CT-e with the same pago (each ~6% + imp. of the whole NF) — no devolução to explain it.
+  const overchargeFlag = !!(identicalDistinct && nCte >= 2 && !g.temDevolucao);
+  const overchargeEach = overchargeFlag ? num(ctes.find(c => num(c.pago) > 0)?.pago) : 0;
 
   let status, motivo;
-  // Identical NF-level frete repeated on every CT-e row → classify like a single logical charge.
+  // Legacy lines (no distinct Num. CTE) repeating the NF-level frete → classify like a single charge.
   if (nCte === 1 || (coalescedOnce && !g.temDevolucao)) {
     ({ status, motivo } = analyzeSingleCteMotivo(pago, esperado, pct));
     if (coalescedOnce && nCte > 1) {
@@ -4060,6 +4072,10 @@ function buildNfRecord(g) {
   if (qzDupCtes.length) {
     motivo += ` ⚠️ ${qzDupCtes.length} CT-e faturado(s) em 2 quinzenas (${fmtMoney(qzDupPago)} repetido) — contado 1× aqui; reclamar à Unilog.`;
   }
+  if (overchargeFlag) {
+    const eachPct = g.valorNF > 0 ? overchargeEach / g.valorNF : 0;
+    motivo += ` 💰 Possível cobrança a mais: ${nCte} CT-e distintos com o mesmo valor (${fmtMoney(overchargeEach)} cada ≈ ${fmtPct(eachPct)} da NF inteira) — total ${fmtMoney(pago)} vs esperado ${fmtMoney(esperado)}.`;
+  }
 
   return {
     nf: g.nf, cliente: g.cliente || '', transportador: g.transportador, modalidade: g.modalidade,
@@ -4071,6 +4087,8 @@ function buildNfRecord(g) {
     dtNFQz: g.dtNFQz || g.dtNF || null,
     qtdCteFromSource: g.qtdCteFromSource || 0,
     pagoCoalescedOnce: !!coalescedOnce,
+    overchargeFlag,
+    overchargeEach,
     qzDupCount: qzDupCtes.length,
     qzDupPago,
     mesKey: g.mesKey || g.qzMesKey || null,
@@ -4675,6 +4693,7 @@ function nfExportRow(x) {
     'Pago': x.pago,
     'CT-e em 2 quinzenas': x.qzDupCount || 0,
     'Valor repetido (2ª quinzena)': x.qzDupPago || 0,
+    'Possível cobrança a mais': x.overchargeFlag ? 'Sim' : 'Não',
     'Esperado (6%)': x.esperado,
     'Diferença': x.diff,
     '% Pago': x.pct,
@@ -4778,6 +4797,9 @@ function exportFullWorkbook() {
   const dupRows = qzDupRows();
   if (dupRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(qzDupExportRows(dupRows)), 'CT-e 2 quinzenas');
 
+  const overList = overchargeNFs();
+  if (overList.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overchargeExportRows(overList)), 'Possível cobrança a mais');
+
   const mensal = buildMonthlyExportRows(monthlyRows);
   if (mensal.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mensal), 'Por mês');
 
@@ -4825,6 +4847,7 @@ function getFilteredNFs() {
   const valorDiffF = $('filterValorDiff')?.checked;
   const sapMissingF = $('filterSapMissing')?.checked;
   const qzDupF = $('filterQzDup')?.checked;
+  const overchargeF = $('filterOvercharge')?.checked;
   let list = currentNFs;
   if (statusF) list = list.filter(x => x.status === statusF);
   if (transpF) list = list.filter(x => x.transportador === transpF);
@@ -4832,6 +4855,7 @@ function getFilteredNFs() {
   if (valorDiffF) list = list.filter(x => x.sapValorMismatch);
   if (sapMissingF) list = list.filter(x => x.sapMissing);
   if (qzDupF) list = list.filter(x => x.qzDupCount > 0);
+  if (overchargeF) list = list.filter(x => x.overchargeFlag);
   if (searchF) list = list.filter(x =>
     String(x.nf).includes(searchF) ||
     String(x.cliente || '').toLowerCase().includes(searchF)
@@ -4943,10 +4967,13 @@ function renderAll() {
     <div class="kpi"><div class="label">NFs conformes</div><div class="value">${s.byStatus.ok}</div><div class="sub">${s.totalNF ? fmtPct(s.byStatus.ok / s.totalNF) : '0%'} do total · sem sobretaxa R$165</div></div>
     <div class="kpi${s.byStatus.fix165 ? ' flag' : ''}"><div class="label">Sobretaxa ~R$165</div><div class="value">${s.byStatus.fix165}</div><div class="sub">excedente R$160–170 · padrão recorrente</div></div>
     <div class="kpi flag"><div class="label">NFs a investigar ⚠️</div><div class="value">${s.byStatus.flag}</div><div class="sub">múltiplos CT-e sem devolução</div></div>
+    ${overchargeKpiHtml()}
     ${qzDupKpiHtml()}
     ${sapKpi}
   `;
-  kpisEl?.querySelector('[data-cte-goto]')?.addEventListener('click', () => switchCteSub('qzdup'));
+  kpisEl?.querySelectorAll('[data-cte-goto]').forEach(k => {
+    k.addEventListener('click', () => switchCteSub(k.dataset.cteGoto));
+  });
 
   const reconcileBox = $('reconcileBox');
   if (reconcileBox) reconcileBox.innerHTML = `
@@ -5117,6 +5144,114 @@ function exportQzDupWorkbook() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(qzDupExportRows(rows)), 'CT-e 2 quinzenas');
   downloadWorkbook(wb, `CTe_faturado_2_quinzenas_${new Date().toISOString().slice(0, 10)}.xlsx`);
   fteToast(`${rows.length} CT-e exportados (faturados em 2 quinzenas).`);
+}
+
+function overchargeNFs(list = currentNFs) {
+  return (list || []).filter(x => x.overchargeFlag);
+}
+
+function overchargeBadge(x) {
+  if (!x?.overchargeFlag) return '';
+  return ` <span class="badge b-overcharge" title="${x.nCte} CT-e distintos com o mesmo valor (${fmtMoney(x.overchargeEach)} cada) — possível cobrança a mais; excesso ${fmtMoney(x.diff)}">💰 a mais?</span>`;
+}
+
+function overchargeKpiHtml() {
+  const list = overchargeNFs();
+  if (!list.length) return '';
+  const pago = list.reduce((s, x) => s + x.pago, 0);
+  const excesso = list.reduce((s, x) => s + x.diff, 0);
+  return `<div class="kpi flag qz-kpi-filter" data-cte-goto="overcharge" role="button" tabindex="0" title="Ver NFs com vários CT-e distintos de valor igual">
+    <div class="label">Possível cobrança a mais 💰</div><div class="value">${list.length}</div>
+    <div class="sub">pago ${fmtMoney(pago)} · excesso ${fmtMoney(excesso)} vs 6%</div></div>`;
+}
+
+function updateOverchargeTabCount() {
+  const el = $('overchargeTabCount');
+  if (!el) return;
+  const n = overchargeNFs().length;
+  el.textContent = n ? `(${n})` : '';
+}
+
+function overchargeRowData(x) {
+  const ctes = (x.ctes || []).filter(c => num(c.pago) > 0);
+  return {
+    nf: x.nf, cliente: x.cliente || '', transportador: x.transportador || '',
+    numCtes: ctes.map(c => c.numCte).join(', '),
+    pagoEach: ctes.map(c => fmtMoney(num(c.pago))).join(' · '),
+    nCte: x.nCte, valorNF: x.valorUnilog ?? x.valorNF,
+    pago: x.pago, esperado: x.esperado, excesso: x.diff, pct: x.pct,
+    qzDup: x.qzDupCount || 0, status: x.status
+  };
+}
+
+function renderOverchargePanel() {
+  const body = $('overchargeTableBody');
+  if (!body) return;
+  const list = overchargeNFs().slice().sort((a, b) => b.diff - a.diff);
+  const countEl = $('overchargeCount');
+  if (countEl) {
+    countEl.textContent = list.length
+      ? `${list.length} NF · pago ${fmtMoney(list.reduce((s, x) => s + x.pago, 0))} · excesso ${fmtMoney(list.reduce((s, x) => s + x.diff, 0))}`
+      : 'Nenhuma';
+  }
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="12" class="empty">Nenhuma NF com vários CT-e distintos de valor igual.</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map(x => {
+    const r = overchargeRowData(x);
+    const meta = statusMeta[r.status] || {};
+    return `<tr class="row-clickable" data-nf="${r.nf}">
+      <td>${r.nf}${qzDupBadge(x)}</td><td>${r.cliente || '-'}</td><td>${r.transportador || '-'}</td>
+      <td>${r.numCtes || '-'}</td><td>${r.pagoEach || '-'}</td>
+      <td class="right">${r.nCte}</td>
+      <td class="right">${fmtMoney(r.valorNF)}</td>
+      <td class="right">${fmtMoney(r.pago)}</td>
+      <td class="right">${fmtMoney(r.esperado)}</td>
+      <td class="right" style="color:${r.excesso > 0.5 ? '#b3261e' : 'inherit'}">${fmtMoney(r.excesso)}</td>
+      <td class="right">${fmtPct(r.pct)}</td>
+      <td><span class="badge ${meta.cls || ''}">${meta.label || r.status || ''}</span></td>
+    </tr>`;
+  }).join('');
+  body.querySelectorAll('tr.row-clickable').forEach(tr => {
+    tr.addEventListener('click', () => {
+      $('searchNF').value = tr.dataset.nf;
+      switchCteSub('detalhe');
+      renderTable();
+      $('nfTable')?.scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+  fteEnableDomSort(body);
+}
+
+function overchargeExportRows(list) {
+  return list.map(x => {
+    const r = overchargeRowData(x);
+    return {
+      'Nota Fiscal': r.nf,
+      'Cliente': r.cliente,
+      'Transportador': r.transportador,
+      'Nº CT-e': r.numCtes,
+      'Pago por CT-e': (x.ctes || []).filter(c => num(c.pago) > 0).map(c => num(c.pago).toFixed(2)).join('; '),
+      'Qtd CT-e': r.nCte,
+      'Valor NF': r.valorNF,
+      'Total pago': r.pago,
+      'Esperado (6%)': r.esperado,
+      'Excesso': r.excesso,
+      '% pago': r.pct,
+      'CT-e em 2 quinzenas': r.qzDup,
+      'Estado NF': (statusMeta[r.status] || {}).label || r.status
+    };
+  });
+}
+
+function exportOverchargeWorkbook() {
+  const list = overchargeNFs().slice().sort((a, b) => b.diff - a.diff);
+  if (!list.length) { fteToast('Sem NFs com possível cobrança a mais.'); return; }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overchargeExportRows(list)), 'Possível cobrança a mais');
+  downloadWorkbook(wb, `Possivel_cobranca_a_mais_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  fteToast(`${list.length} NF exportadas (possível cobrança a mais).`);
 }
 
 function renderAnomaliesPanel() {
@@ -5317,7 +5452,7 @@ function renderTable() {
       + (x.sapValorMismatch ? ' nf-val-mismatch' : '')
       + (x.sapMissing ? ' nf-sap-missing' : '');
     parts.push(`<tr class="${cls}" data-nf-i="${i}">
-      <td>${x.nf}${qzDupBadge(x)}</td>
+      <td>${x.nf}${qzDupBadge(x)}${overchargeBadge(x)}</td>
       <td>${fmtDate(x.dtNF)}</td>
       <td>${x.cliente || '-'}</td>
       <td>${x.transportador}</td>
@@ -8091,8 +8226,9 @@ function initFretes() {
   $('exportB2bMissingCteBtn')?.addEventListener('click', () => exportB2bMissingCte());
   $('exportB2bMismatchBtn')?.addEventListener('click', () => exportB2bMismatchWorkbook());
   $('exportQzDupBtn')?.addEventListener('click', () => exportQzDupWorkbook());
+  $('exportOverchargeBtn')?.addEventListener('click', () => exportOverchargeWorkbook());
 
-  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff', 'filterSapMissing', 'filterQzDup'].forEach(id => {
+  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff', 'filterSapMissing', 'filterQzDup', 'filterOvercharge'].forEach(id => {
     const el = $(id);
     if (!el) return;
     el.addEventListener('input', () => {
