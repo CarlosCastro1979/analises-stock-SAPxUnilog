@@ -1,5 +1,5 @@
-// fretes.js v1.8.108 — pago NF = soma dos CT-e distintos; valor igual em vários CT-e → «Possível cobrança a mais»
-const FRETES_JS_VERSION = '1.8.108';
+// fretes.js v1.8.109 — «Devolução — por explicar»: responsabilidade Delta/Unilog por NF com autosave na cloud
+const FRETES_JS_VERSION = '1.8.109';
 /** Bump when a stored quinzenal pack needs a one-time repair on load (persisted as pack.cleanup.version). */
 const QZ_PACK_CLEANUP_VERSION = 1;
 /** Pre-repair copy of the quinzenal pack (written once per company, never overwritten). */
@@ -260,12 +260,14 @@ function renderCteSubPanels() {
   }
   if (content) content.style.display = hasData ? 'block' : 'none';
   if (!hasData) return;
-  ['resumo', 'detalhe', 'anomalias', 'mensal', 'qzdup', 'overcharge'].forEach(sub => {
+  ['resumo', 'detalhe', 'anomalias', 'mensal', 'qzdup', 'overcharge', 'devexp'].forEach(sub => {
     const el = $('cte-sub-' + sub);
     if (el) el.style.display = activeCteSub === sub ? 'block' : 'none';
   });
   updateQzDupTabCount();
   updateOverchargeTabCount();
+  updateDevExpTabCount();
+  if (activeCteSub === 'devexp') renderDevExplainPanel();
   if (activeCteSub === 'mensal') renderMonthlyTable();
   if (activeCteSub === 'qzdup') renderQzDupPanel();
   if (activeCteSub === 'overcharge') renderOverchargePanel();
@@ -4046,6 +4048,8 @@ function buildNfRecord(g) {
   // Several distinct CT-e with the same pago (each ~6% + imp. of the whole NF) — no devolução to explain it.
   const overchargeFlag = !!(identicalDistinct && nCte >= 2 && !g.temDevolucao);
   const overchargeEach = overchargeFlag ? num(ctes.find(c => num(c.pago) > 0)?.pago) : 0;
+  // Same pattern with a devolução: each return needs a responsible party (Delta or Unilog).
+  const devExplainFlag = !!(identicalDistinct && nCte >= 2 && g.temDevolucao);
 
   let status, motivo;
   // Legacy lines (no distinct Num. CTE) repeating the NF-level frete → classify like a single charge.
@@ -4076,6 +4080,9 @@ function buildNfRecord(g) {
     const eachPct = g.valorNF > 0 ? overchargeEach / g.valorNF : 0;
     motivo += ` 💰 Possível cobrança a mais: ${nCte} CT-e distintos com o mesmo valor (${fmtMoney(overchargeEach)} cada ≈ ${fmtPct(eachPct)} da NF inteira) — total ${fmtMoney(pago)} vs esperado ${fmtMoney(esperado)}.`;
   }
+  if (devExplainFlag) {
+    motivo += ` ↩ Devolução por explicar: ${nCte} CT-e distintos com o mesmo valor — indicar responsabilidade (Delta ou Unilog).`;
+  }
 
   return {
     nf: g.nf, cliente: g.cliente || '', transportador: g.transportador, modalidade: g.modalidade,
@@ -4089,6 +4096,7 @@ function buildNfRecord(g) {
     pagoCoalescedOnce: !!coalescedOnce,
     overchargeFlag,
     overchargeEach,
+    devExplainFlag,
     qzDupCount: qzDupCtes.length,
     qzDupPago,
     mesKey: g.mesKey || g.qzMesKey || null,
@@ -4694,6 +4702,9 @@ function nfExportRow(x) {
     'CT-e em 2 quinzenas': x.qzDupCount || 0,
     'Valor repetido (2ª quinzena)': x.qzDupPago || 0,
     'Possível cobrança a mais': x.overchargeFlag ? 'Sim' : 'Não',
+    'Devolução por explicar': x.devExplainFlag ? 'Sim' : 'Não',
+    'Responsabilidade devolução': x.temDevolucao ? nfRespLabel(getNfResp(x.nf)?.resp) : '',
+    'Nota devolução': x.temDevolucao ? (getNfResp(x.nf)?.nota || '') : '',
     'Esperado (6%)': x.esperado,
     'Diferença': x.diff,
     '% Pago': x.pct,
@@ -4800,6 +4811,9 @@ function exportFullWorkbook() {
   const overList = overchargeNFs();
   if (overList.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overchargeExportRows(overList)), 'Possível cobrança a mais');
 
+  const devList = devExplainNFs();
+  if (devList.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(devExpExportRows(devList)), 'Devolução por explicar');
+
   const mensal = buildMonthlyExportRows(monthlyRows);
   if (mensal.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mensal), 'Por mês');
 
@@ -4848,6 +4862,7 @@ function getFilteredNFs() {
   const sapMissingF = $('filterSapMissing')?.checked;
   const qzDupF = $('filterQzDup')?.checked;
   const overchargeF = $('filterOvercharge')?.checked;
+  const devExpF = $('filterDevExplain')?.checked;
   let list = currentNFs;
   if (statusF) list = list.filter(x => x.status === statusF);
   if (transpF) list = list.filter(x => x.transportador === transpF);
@@ -4856,6 +4871,7 @@ function getFilteredNFs() {
   if (sapMissingF) list = list.filter(x => x.sapMissing);
   if (qzDupF) list = list.filter(x => x.qzDupCount > 0);
   if (overchargeF) list = list.filter(x => x.overchargeFlag);
+  if (devExpF) list = list.filter(x => x.devExplainFlag);
   if (searchF) list = list.filter(x =>
     String(x.nf).includes(searchF) ||
     String(x.cliente || '').toLowerCase().includes(searchF)
@@ -4968,6 +4984,7 @@ function renderAll() {
     <div class="kpi${s.byStatus.fix165 ? ' flag' : ''}"><div class="label">Sobretaxa ~R$165</div><div class="value">${s.byStatus.fix165}</div><div class="sub">excedente R$160–170 · padrão recorrente</div></div>
     <div class="kpi flag"><div class="label">NFs a investigar ⚠️</div><div class="value">${s.byStatus.flag}</div><div class="sub">múltiplos CT-e sem devolução</div></div>
     ${overchargeKpiHtml()}
+    ${devExplainKpiHtml()}
     ${qzDupKpiHtml()}
     ${sapKpi}
   `;
@@ -5254,6 +5271,324 @@ function exportOverchargeWorkbook() {
   fteToast(`${list.length} NF exportadas (possível cobrança a mais).`);
 }
 
+// ── Responsabilidade das devoluções — per company + NF, debounced autosave to the cloud ──
+const NF_RESP_SLOT = 'fretes_nf_responsabilidade';
+const NF_RESP_SAVE_DELAY_MS = 1000;
+const NF_RESP_OPTIONS = [
+  { value: '', label: 'Por definir' },
+  { value: 'Delta', label: 'Delta' },
+  { value: 'Unilog', label: 'Unilog' }
+];
+/** co → { nfKey: { nf, resp, nota, updatedAt } } */
+const nfRespByCo = {};
+const nfRespLoaded = new Set();
+/** co → Set(nfKey) edited locally and not yet saved */
+const nfRespDirty = {};
+let nfRespTimer = null;
+let nfRespSaving = null;
+let nfRespStatusTimer = null;
+let devExpSort = { col: 'diff', dir: -1 };
+
+function fteEscAttr(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function decodeNfRespRec(rec) {
+  if (!rec?.file_data) return {};
+  try {
+    return JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(rec.file_data)))?.entries || {};
+  } catch (err) {
+    console.warn('[fretes] responsabilidade parse', err);
+    return {};
+  }
+}
+
+async function loadNfResp(co = fteCompany()) {
+  try {
+    const remote = decodeNfRespRec(await fetchExcelRecForCompany(co, NF_RESP_SLOT, true));
+    const local = nfRespByCo[co] || {};
+    (nfRespDirty[co] || new Set()).forEach(k => { if (local[k]) remote[k] = local[k]; });
+    nfRespByCo[co] = remote;
+    nfRespLoaded.add(co);
+  } catch (err) {
+    console.warn('[fretes] load responsabilidade', co, err);
+    if (!nfRespByCo[co]) nfRespByCo[co] = {};
+  }
+  return nfRespByCo[co];
+}
+
+function getNfResp(nf, co = fteCompany()) {
+  return nfRespByCo[co]?.[normNFKey(nf)] || null;
+}
+
+function nfRespLabel(resp) {
+  return (NF_RESP_OPTIONS.find(o => o.value === (resp || '')) || NF_RESP_OPTIONS[0]).label;
+}
+
+function setNfRespStatus(msg, ok) {
+  document.querySelectorAll('.fte-resp-status').forEach(el => {
+    el.textContent = msg;
+    el.style.color = ok === false ? '#b3261e' : 'var(--muted)';
+  });
+  clearTimeout(nfRespStatusTimer);
+  if (ok) nfRespStatusTimer = setTimeout(() => setNfRespStatus('', null), 2500);
+}
+
+function setNfResp(nf, patch) {
+  const co = fteCompany();
+  const k = normNFKey(nf);
+  if (!k) return;
+  const map = nfRespByCo[co] || (nfRespByCo[co] = {});
+  const cur = map[k] || { nf: String(nf), resp: '', nota: '' };
+  map[k] = { ...cur, ...patch, nf: String(nf), updatedAt: new Date().toISOString() };
+  (nfRespDirty[co] || (nfRespDirty[co] = new Set())).add(k);
+  setNfRespStatus('A guardar…', null);
+  clearTimeout(nfRespTimer);
+  nfRespTimer = setTimeout(() => { flushNfResp(); }, NF_RESP_SAVE_DELAY_MS);
+}
+
+/** Read-merge-write: only locally edited NFs change; empty entries (Por definir + sem nota) are removed. */
+async function flushNfResp() {
+  clearTimeout(nfRespTimer);
+  nfRespTimer = null;
+  if (nfRespSaving) await nfRespSaving;
+  const cos = Object.keys(nfRespDirty).filter(co => nfRespDirty[co]?.size);
+  if (!cos.length) return true;
+  nfRespSaving = (async () => {
+    let ok = true;
+    for (const co of cos) {
+      const keys = [...nfRespDirty[co]];
+      nfRespDirty[co] = new Set();
+      try {
+        const entries = decodeNfRespRec(await fetchExcelRecForCompany(co, NF_RESP_SLOT, true));
+        const local = nfRespByCo[co] || {};
+        keys.forEach(k => {
+          const e = local[k];
+          if (!e || (!e.resp && !String(e.nota || '').trim())) delete entries[k];
+          else entries[k] = e;
+        });
+        const json = JSON.stringify({ version: 1, company: co, updatedAt: new Date().toISOString(), entries });
+        const n = Object.keys(entries).length;
+        await upsertExcelB64ForCompany(co, NF_RESP_SLOT, `responsabilidade_${n}_nf.json`,
+          arrayBufferToBase64(new TextEncoder().encode(json).buffer));
+        const next = { ...entries };
+        nfRespDirty[co].forEach(k => { if (local[k]) next[k] = local[k]; });
+        nfRespByCo[co] = next;
+        nfRespLoaded.add(co);
+        console.log('[fretes] responsabilidade guardada', co, NF_RESP_SLOT, 'entries', n, 'changed', keys.length);
+      } catch (err) {
+        ok = false;
+        keys.forEach(k => nfRespDirty[co].add(k));
+        console.error('[fretes] guardar responsabilidade', co, err);
+      }
+    }
+    setNfRespStatus(ok ? 'Guardado ✓' : 'Erro ao guardar — nova tentativa em 5 s', ok);
+    if (!ok) nfRespTimer = setTimeout(() => { flushNfResp(); }, 5000);
+    return ok;
+  })();
+  try { return await nfRespSaving; } finally { nfRespSaving = null; }
+}
+
+function devExplainNFs(list = currentNFs) {
+  return (list || []).filter(x => x.devExplainFlag);
+}
+
+function devExpBadge(x) {
+  if (!x?.devExplainFlag) return '';
+  const resp = getNfResp(x.nf)?.resp || '';
+  const txt = resp ? `↩ Dev.: ${resp}` : '↩ Dev. por explicar';
+  return ` <span class="badge b-devexp${resp ? ' done' : ''}" data-devexp-nf="${fteEscAttr(x.nf)}" title="Devolução com ${x.nCte} CT-e distintos de valor igual — responsabilidade: ${nfRespLabel(resp)}">${txt}</span>`;
+}
+
+function refreshDevExpBadges(nf) {
+  const x = currentNFs.find(n => String(n.nf) === String(nf));
+  if (!x) return;
+  document.querySelectorAll(`.b-devexp[data-devexp-nf="${CSS.escape(String(nf))}"]`).forEach(el => {
+    el.outerHTML = devExpBadge(x).trim();
+  });
+}
+
+function devExpTotals(list = devExplainNFs()) {
+  const out = {};
+  NF_RESP_OPTIONS.forEach(o => { out[o.value] = { label: o.label, n: 0, pago: 0, excesso: 0 }; });
+  list.forEach(x => {
+    const t = out[getNfResp(x.nf)?.resp || ''] || out[''];
+    t.n++;
+    t.pago += x.pago;
+    t.excesso += x.diff;
+  });
+  return out;
+}
+
+function devExplainKpiHtml() {
+  const list = devExplainNFs();
+  if (!list.length) return '';
+  const t = devExpTotals(list);
+  return `<div class="kpi flag qz-kpi-filter" id="fte-devExpKpi" data-cte-goto="devexp" role="button" tabindex="0" title="Ver devoluções por explicar e indicar responsabilidade">
+    <div class="label">Devolução — por explicar ↩</div><div class="value">${t[''].n} / ${list.length}</div>
+    <div class="sub">Unilog ${t.Unilog.n} · ${fmtMoney(t.Unilog.excesso)} · Delta ${t.Delta.n} · ${fmtMoney(t.Delta.excesso)}</div></div>`;
+}
+
+function updateDevExpKpi() {
+  const el = document.getElementById('fte-devExpKpi');
+  if (!el) return;
+  const html = devExplainKpiHtml();
+  if (!html) return;
+  el.outerHTML = html;
+  document.getElementById('fte-devExpKpi')?.addEventListener('click', () => switchCteSub('devexp'));
+}
+
+function updateDevExpTabCount() {
+  const el = $('devExpTabCount');
+  if (!el) return;
+  const list = devExplainNFs();
+  const open = list.filter(x => !getNfResp(x.nf)?.resp).length;
+  el.textContent = list.length ? `(${open}/${list.length})` : '';
+}
+
+function renderDevExpSummary() {
+  const el = $('devExpSummary');
+  if (!el) return;
+  const t = devExpTotals();
+  el.innerHTML = `<table class="cte-detail-table" style="max-width:520px"><thead><tr>
+      <th>Responsabilidade</th><th class="right">NF</th><th class="right">Total pago</th><th class="right">Excesso vs 6%</th>
+    </tr></thead><tbody>${['Unilog', 'Delta', ''].map(k => `<tr>
+      <td>${t[k].label}${k === 'Unilog' ? ' <span class="muted">(a reclamar)</span>' : ''}</td>
+      <td class="right">${t[k].n}</td><td class="right">${fmtMoney(t[k].pago)}</td><td class="right">${fmtMoney(t[k].excesso)}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function updateDevExpCount() {
+  const el = $('devExpCount');
+  if (!el) return;
+  const list = devExplainNFs();
+  const open = list.filter(x => !getNfResp(x.nf)?.resp).length;
+  el.textContent = list.length ? `${list.length} NF · ${open} por definir` : 'Nenhuma';
+}
+
+function onNfRespEdited(nf) {
+  updateDevExpCount();
+  renderDevExpSummary();
+  updateDevExpKpi();
+  updateDevExpTabCount();
+  refreshDevExpBadges(nf);
+}
+
+function nfRespSelectHtml(nf, resp) {
+  return `<select class="nf-resp-sel" data-nf="${fteEscAttr(nf)}">${NF_RESP_OPTIONS.map(o =>
+    `<option value="${o.value}"${o.value === (resp || '') ? ' selected' : ''}>${o.label}</option>`).join('')}</select>`;
+}
+
+function nfRespNotaHtml(nf, nota) {
+  return `<input type="text" class="nf-resp-nota" data-nf="${fteEscAttr(nf)}" value="${fteEscAttr(nota)}" placeholder="Explicação…">`;
+}
+
+function bindNfRespInputs(root) {
+  root.querySelectorAll('.nf-resp-sel').forEach(sel => {
+    sel.addEventListener('click', e => e.stopPropagation());
+    sel.addEventListener('change', () => {
+      setNfResp(sel.dataset.nf, { resp: sel.value });
+      onNfRespEdited(sel.dataset.nf);
+    });
+  });
+  root.querySelectorAll('.nf-resp-nota').forEach(inp => {
+    inp.addEventListener('click', e => e.stopPropagation());
+    inp.addEventListener('input', () => setNfResp(inp.dataset.nf, { nota: inp.value }));
+  });
+}
+
+const DEV_EXP_COLUMNS = [
+  { key: 'nf', label: 'Nota Fiscal', type: 'string' },
+  { key: 'dtNF', label: 'Data NF', type: 'date' },
+  { key: 'cliente', label: 'Cliente', type: 'string' },
+  { key: 'transportador', label: 'Transportador', type: 'string' },
+  { key: 'ctesTxt', label: 'CT-e (pago)', type: 'string' },
+  { key: 'nCte', label: 'Qtd CT-e', type: 'number', right: true },
+  { key: 'pago', label: 'Total pago', type: 'number', right: true },
+  { key: 'esperado', label: 'Esperado (6%)', type: 'number', right: true },
+  { key: 'diff', label: 'Excesso', type: 'number', right: true, title: 'Pago − 6% da NF' },
+  { key: 'respLabel', label: 'Responsabilidade', type: 'string' },
+  { key: 'nota', label: 'Nota', type: 'string' }
+];
+
+function devExpRowData(x) {
+  const e = getNfResp(x.nf);
+  return {
+    x, nf: x.nf, dtNF: x.dtNF, cliente: x.cliente || '', transportador: x.transportador || '',
+    ctesTxt: (x.ctes || []).map(c => `${c.numCte || '-'}: ${fmtMoney(num(c.pago))}${c.devolucao ? ' (dev.)' : ''}`).join(' · '),
+    nCte: x.nCte, pago: x.pago, esperado: x.esperado, diff: x.diff,
+    resp: e?.resp || '', respLabel: nfRespLabel(e?.resp), nota: e?.nota || ''
+  };
+}
+
+function renderDevExplainPanel() {
+  const body = $('devExpTableBody');
+  if (!body) return;
+  const co = fteCompany();
+  if (!nfRespLoaded.has(co)) {
+    loadNfResp(co).then(() => { if (fteCompany() === co) { renderDevExplainPanel(); updateDevExpKpi(); updateDevExpTabCount(); } });
+  }
+  renderSortableHead('devExpTableHead', DEV_EXP_COLUMNS, devExpSort, renderDevExplainPanel);
+  const rows = sortRows(devExplainNFs().map(devExpRowData), DEV_EXP_COLUMNS, devExpSort);
+  updateDevExpCount();
+  renderDevExpSummary();
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="${DEV_EXP_COLUMNS.length}" class="empty">Nenhuma devolução com CT-e distintos de valor igual.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(r => `<tr class="row-clickable" data-nf="${fteEscAttr(r.nf)}">
+      <td>${r.nf}${qzDupBadge(r.x)}${overchargeBadge(r.x)}</td><td>${fmtDate(r.dtNF)}</td>
+      <td>${r.cliente || '-'}</td><td>${r.transportador || '-'}</td>
+      <td style="font-size:11px">${r.ctesTxt || '-'}</td>
+      <td class="right">${r.nCte}</td>
+      <td class="right">${fmtMoney(r.pago)}</td>
+      <td class="right">${fmtMoney(r.esperado)}</td>
+      <td class="right" style="color:${r.diff > 0.5 ? '#b3261e' : 'inherit'}">${fmtMoney(r.diff)}</td>
+      <td>${nfRespSelectHtml(r.nf, r.resp)}</td>
+      <td>${nfRespNotaHtml(r.nf, r.nota)}</td>
+    </tr>`).join('');
+  bindNfRespInputs(body);
+  body.querySelectorAll('tr.row-clickable').forEach(tr => {
+    tr.addEventListener('click', e => {
+      if (e.target.closest('select,input')) return;
+      $('searchNF').value = tr.dataset.nf;
+      switchCteSub('detalhe');
+      renderTable();
+      $('nfTable')?.scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+}
+
+function devExpExportRows(list) {
+  return list.map(x => {
+    const r = devExpRowData(x);
+    return {
+      'Nota Fiscal': r.nf,
+      'Data NF': parseCteDateValue(r.dtNF) || (r.dtNF ? new Date(r.dtNF) : ''),
+      'Cliente': r.cliente,
+      'Transportador': r.transportador,
+      'CT-e (pago)': (x.ctes || []).map(c => `${c.numCte || '-'}: ${num(c.pago).toFixed(2)}${c.devolucao ? ' (dev.)' : ''}`).join('; '),
+      'Qtd CT-e': r.nCte,
+      'Total pago': r.pago,
+      'Esperado (6%)': r.esperado,
+      'Excesso': r.diff,
+      'Responsabilidade': r.respLabel,
+      'Nota': r.nota,
+      'CT-e em 2 quinzenas': x.qzDupCount || 0
+    };
+  });
+}
+
+function exportDevExplainWorkbook() {
+  const list = sortRows(devExplainNFs().map(devExpRowData), DEV_EXP_COLUMNS, devExpSort).map(r => r.x);
+  if (!list.length) { fteToast('Sem devoluções por explicar.'); return; }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(devExpExportRows(list)), 'Devolução por explicar');
+  downloadWorkbook(wb, `Devolucao_por_explicar_${fteCompany()}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  fteToast(`${list.length} NF exportadas (devolução por explicar).`);
+}
+
 function renderAnomaliesPanel() {
   const section = $('anomaliesSection');
   const hint = $('anomaliesHint');
@@ -5452,7 +5787,7 @@ function renderTable() {
       + (x.sapValorMismatch ? ' nf-val-mismatch' : '')
       + (x.sapMissing ? ' nf-sap-missing' : '');
     parts.push(`<tr class="${cls}" data-nf-i="${i}">
-      <td>${x.nf}${qzDupBadge(x)}${overchargeBadge(x)}</td>
+      <td>${x.nf}${qzDupBadge(x)}${overchargeBadge(x)}${devExpBadge(x)}</td>
       <td>${fmtDate(x.dtNF)}</td>
       <td>${x.cliente || '-'}</td>
       <td>${x.transportador}</td>
@@ -5528,8 +5863,15 @@ function toggleDetail(tr, x) {
     : (x.sapFound ? `<p style="margin:0 0 8px;font-size:11px;color:var(--muted);">
     <strong>SAP:</strong> ${fmtDate(x.dtNF)} · ${x.cliente || '-'} · Unilog ${fmtMoney(x.valorUnilog ?? x.valorNF)} vs SAP ${fmtMoney(x.valorSAP)}${x.sapValorMismatch ? ` — <span style="color:#b3261e;font-weight:600">Δ relevante ${fmtMoney(x.valorDiff)}</span>` : (x.valorDiff != null && Math.abs(num(x.valorDiff)) > SAP_VALOR_NEAR_EPS ? ` (Δ ${fmtMoney(x.valorDiff)})` : ' — valores alinhados')}
   </p>` : '');
+  const respEntry = x.temDevolucao ? getNfResp(x.nf) : null;
+  const respBlock = x.temDevolucao
+    ? `<p class="nf-resp-edit" style="margin:0 0 8px;font-size:11px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <strong>Responsabilidade da devolução:</strong> ${nfRespSelectHtml(x.nf, respEntry?.resp)}
+      ${nfRespNotaHtml(x.nf, respEntry?.nota)} <span class="fte-resp-status muted"></span></p>`
+    : '';
   dr.innerHTML = `<td colspan="${nfColCount()}"><div class="detail-inner">
     <p style="margin:0 0 6px;"><strong>Análise:</strong> ${x.motivo}</p>
+    ${respBlock}
     ${sapBlock}
     ${summaryExtra}
     <table class="cte-detail-table"><thead><tr>
@@ -5537,6 +5879,7 @@ function toggleDetail(tr, x) {
     </tr></thead><tbody>${ctesRows}</tbody></table>
   </div></td>`;
   tr.parentNode.insertBefore(dr, tr.nextSibling);
+  bindNfRespInputs(dr);
   if (multi) {
     dr.querySelectorAll('.cte-val-btn').forEach(btn => {
       btn.addEventListener('click', e => {
@@ -5879,6 +6222,7 @@ async function _loadSavedFretesFilesImpl(silent = false) {
   // 1) Restore quinzenais (structured JSON) — preferred source of truth
   await fteYield('A restaurar quinzenais…');
   const qzLoaded = await loadSavedQuinzenalPack(silent, meta, { deferCompare: true, skipRender: true });
+  await loadNfResp(co);
   if (qzLoaded) console.log('[fretes] restore quinzenal', co, quinzenalPack?.files?.length || 0, 'files');
   // Free QZ base64 slot from meta after parse
   if (meta[fteQuinzenalSlot()]) meta[fteQuinzenalSlot()].file_data = null;
@@ -8082,6 +8426,7 @@ function exportQuinzenalWorkbook() {
 }
 
 function reloadFretesForCompany() {
+  flushNfResp();
   _fteLoadedCompany = null;
   currentNFs = [];
   currentSummary = null;
@@ -8227,8 +8572,12 @@ function initFretes() {
   $('exportB2bMismatchBtn')?.addEventListener('click', () => exportB2bMismatchWorkbook());
   $('exportQzDupBtn')?.addEventListener('click', () => exportQzDupWorkbook());
   $('exportOverchargeBtn')?.addEventListener('click', () => exportOverchargeWorkbook());
+  $('exportDevExpBtn')?.addEventListener('click', () => exportDevExplainWorkbook());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushNfResp();
+  });
 
-  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff', 'filterSapMissing', 'filterQzDup', 'filterOvercharge'].forEach(id => {
+  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff', 'filterSapMissing', 'filterQzDup', 'filterOvercharge', 'filterDevExplain'].forEach(id => {
     const el = $(id);
     if (!el) return;
     el.addEventListener('input', () => {
