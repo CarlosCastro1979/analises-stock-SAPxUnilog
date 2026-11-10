@@ -1,5 +1,5 @@
-// fretes.js v1.8.110 — ZFACT acumula sempre: mapa SAP da cloud entra em RAM antes do merge; gravação nunca encolhe o mapa
-const FRETES_JS_VERSION = '1.8.110';
+// fretes.js v1.8.111 — mapa SAP acumulado gravado por mês de emissão (1 linha/mês + índice): sem limite de 6 MB
+const FRETES_JS_VERSION = '1.8.111';
 /** Bump when a stored quinzenal pack needs a one-time repair on load (persisted as pack.cleanup.version). */
 const QZ_PACK_CLEANUP_VERSION = 1;
 /** Pre-repair copy of the quinzenal pack (written once per company, never overwritten). */
@@ -31,8 +31,10 @@ let fteInited = false;
 let sapNfMap = {};
 /** Provenance of merged ZFACT loads (persisted with sap map pack). */
 let sapMapSourceFiles = [];
-/** Company whose cloud `fretes_sap_map` is already merged into sapNfMap — persist must not write before this. */
+/** Company whose cloud SAP map is already merged into sapNfMap — persist must not write before this. */
 let _sapMapCloudMergedCo = null;
+/** Cloud chunk state at last load/persist: { co, hashes:{chunk:hash}, keys:{chunk:Set}, manifestUpdatedAt, legacyUploadedAt }. */
+let _sapChunkState = null;
 let lastCtePack = null;
 
 let currentNFs = [];
@@ -143,9 +145,24 @@ function fteSapSlot() {
   return typeof EXCEL_SLOTS !== 'undefined' ? EXCEL_SLOTS.FRETES_SAP_NF : 'fretes_sap_nf';
 }
 
-/** Accumulated SAP NF map (JSON) — history across partial ZFACT uploads. */
+/**
+ * Legacy single-row accumulated SAP NF map (≤ v1.8.110). Read once to migrate (and to fold in
+ * writes from old open tabs); never written by v1.8.111+.
+ */
 function fteSapMapSlot() {
   return typeof EXCEL_SLOTS !== 'undefined' ? EXCEL_SLOTS.FRETES_SAP_MAP : 'fretes_sap_map';
+}
+
+/** Accumulated SAP NF map v2: one row per emission month (`fretes_sap_map_m_YYYY-MM` / `_nodate`) + index row. */
+const SAP_MAP_FORMAT = 2;
+const SAP_MAP_CHUNK_PREFIX = 'fretes_sap_map_m_';
+
+function fteSapMapIdxSlot() {
+  return 'fretes_sap_map_idx';
+}
+
+function fteSapMapChunkSlot(chunk) {
+  return SAP_MAP_CHUNK_PREFIX + chunk;
 }
 
 function fteQuinzenalSlot() {
@@ -2897,8 +2914,15 @@ function isRelevantValorDiff(unilogVal, sapVal) {
   return (diff / ref) > SAP_VALOR_DIFF_MIN_PCT;
 }
 
+/** Map object last seen non-empty — NFs are never deleted in place, so "loaded" holds until sapNfMap is reassigned. */
+let _sapLoadedRef = null;
+
 function isSapLoaded() {
-  return Object.keys(sapNfMap).length > 0;
+  // Hot path (per CT-e row): enumerating a 30k+ NF map on every call froze Análise CT-e for ~20 s.
+  if (_sapLoadedRef === sapNfMap) return true;
+  if (!Object.keys(sapNfMap).length) return false;
+  _sapLoadedRef = sapNfMap;
+  return true;
 }
 
 function buildSapMissingReason(nf) {
@@ -3167,7 +3191,7 @@ function slimSapNfMapForPersist(map) {
   return out;
 }
 
-/** NF count of the cloud map from its file name (`sap_nf_map_<N>.json`) — metadata only, no download. */
+/** NF count of the legacy single-row map from its file name (`sap_nf_map_<N>.json`) — metadata only. */
 async function fetchCloudSapMapNfCount() {
   if (typeof fetchExcelFileMeta !== 'function') return 0;
   try {
@@ -3187,22 +3211,121 @@ async function fetchCloudSapMapNfCount() {
 async function ensureCloudSapMapMerged() {
   const co = fteCompany();
   if (_sapMapCloudMergedCo === co) return true;
-  if (typeof fetchExcelFiles !== 'function') return false;
-  let meta;
-  try {
-    meta = await fetchExcelFiles([fteSapMapSlot()]);
-  } catch (err) {
-    console.error('[fretes] ensure cloud sap map fetch', co, err);
-    return false;
+  await loadSavedSapNfMap(null, { silent: true, preferRam: true });
+  return _sapMapCloudMergedCo === co;
+}
+
+/** FNV-1a 32-bit — detects unchanged month chunks so a merge only rewrites the months it touched. */
+function fteHash32(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
   }
-  if (fteCompany() !== co) return false;
-  const rec = meta[fteSapMapSlot()];
-  if (!rec?.file_data) {
-    _sapMapCloudMergedCo = co;
-    return true;
+  return (h >>> 0).toString(16);
+}
+
+function sapMapChunkKey(dt) {
+  return typeof dt === 'string' && /^\d{4}-\d{2}/.test(dt) ? dt.slice(0, 7) : 'nodate';
+}
+
+function decodeExcelRecText(rec) {
+  if (!rec?.file_data || typeof base64ToArrayBuffer !== 'function') return null;
+  const b64 = rec.file_data;
+  rec.file_data = null;
+  return new TextDecoder().decode(base64ToArrayBuffer(b64));
+}
+
+async function fetchCloudSapManifest() {
+  const meta = await fetchExcelFiles([fteSapMapIdxSlot()]);
+  const text = decodeExcelRecText(meta[fteSapMapIdxSlot()]);
+  return text ? JSON.parse(text) : null;
+}
+
+/**
+ * Read the cloud SAP map in whichever format exists. Throws on network errors.
+ * format 'chunks': v2 month rows (+ legacy row folded in when an old tab wrote it after migration).
+ * format 'legacy': only the ≤ v1.8.110 single row — caller migrates by persisting.
+ */
+async function fetchCloudSapMapRaw() {
+  const out = {
+    format: null, raw: null, files: [], version: SAP_NF_MAP_PARSER_VERSION,
+    hashes: {}, keys: {}, manifest: null, legacyRaw: null, legacyUploadedAt: null,
+    needsPersist: false, label: ''
+  };
+  const allMeta = await fetchExcelFileMeta();
+  const legacySlot = fteSapMapSlot();
+  const idxSlot = fteSapMapIdxSlot();
+  const legacyMeta = allMeta?.[legacySlot] || null;
+  const chunkSlots = Object.keys(allMeta || {}).filter(s => s.startsWith(SAP_MAP_CHUNK_PREFIX)).sort();
+
+  if (chunkSlots.length || allMeta?.[idxSlot]) {
+    out.format = 'chunks';
+    const slots = [idxSlot, ...chunkSlots];
+    const groups = [];
+    for (let i = 0; i < slots.length; i += 3) groups.push(slots.slice(i, i + 3));
+    const recs = Object.assign({}, ...(await Promise.all(groups.map(g => fetchExcelFiles(g)))));
+    const idxText = decodeExcelRecText(recs[idxSlot]);
+    out.manifest = idxText ? JSON.parse(idxText) : null;
+    const raw = {};
+    const owner = {};
+    let minVersion = SAP_NF_MAP_PARSER_VERSION;
+    for (const slot of chunkSlots) {
+      const text = decodeExcelRecText(recs[slot]);
+      if (!text) throw new Error('mapa SAP: linha sem dados ' + slot);
+      const chunk = slot.slice(SAP_MAP_CHUNK_PREFIX.length);
+      const parsed = JSON.parse(text);
+      const map = parsed?.map || {};
+      out.hashes[chunk] = fteHash32(text);
+      out.keys[chunk] = new Set(Object.keys(map));
+      minVersion = Math.min(minVersion, Number(parsed?.version) || 1);
+      Object.keys(map).forEach(k => {
+        // An NF that moved month may sit in two rows after an interrupted write — keep the row matching its date.
+        if (raw[k] && sapMapChunkKey(raw[k].dtEmissao) === owner[k]) return;
+        raw[k] = map[k];
+        owner[k] = chunk;
+      });
+      await fteYield();
+    }
+    out.raw = raw;
+    out.version = minVersion;
+    out.files = Array.isArray(out.manifest?.files) ? out.manifest.files : [];
+    out.label = `${chunkSlots.length} mês(es)`;
+    if (!out.manifest) out.needsPersist = true;
+    const marker = out.manifest?.legacy?.uploadedAt || null;
+    const legacyNewer = legacyMeta && (!out.manifest
+      || !marker || new Date(legacyMeta.uploaded_at).getTime() > new Date(marker).getTime());
+    if (legacyNewer) {
+      // An old (≤ v1.8.110) tab wrote the legacy row after migration — fold its NFs in.
+      const lrec = (await fetchExcelFiles([legacySlot]))[legacySlot];
+      const parsed = parseSapNfMapFromRec(lrec);
+      if (!parsed?.raw) throw new Error('mapa SAP: linha legada ilegível');
+      out.legacyRaw = parsed.raw;
+      const byName = new Map(out.files.map(f => [f.fileName, f]));
+      (parsed.files || []).forEach(f => { if (f?.fileName && !byName.has(f.fileName)) byName.set(f.fileName, f); });
+      out.files = [...byName.values()];
+      out.legacyUploadedAt = legacyMeta.uploaded_at;
+      out.needsPersist = true;
+    } else {
+      out.legacyUploadedAt = marker || legacyMeta?.uploaded_at || null;
+    }
+    return out;
   }
-  const ok = await loadSavedSapNfMap(meta, { silent: true, preferRam: true });
-  return ok && _sapMapCloudMergedCo === co;
+
+  if (legacyMeta) {
+    const lrec = (await fetchExcelFiles([legacySlot]))[legacySlot];
+    out.label = lrec?.file_name || legacySlot;
+    out.format = 'unreadable';
+    const parsed = parseSapNfMapFromRec(lrec);
+    if (!parsed?.raw) return out;
+    out.format = 'legacy';
+    out.raw = parsed.raw;
+    out.files = parsed.files || [];
+    out.version = parsed.version || 1;
+    out.legacyUploadedAt = legacyMeta.uploaded_at;
+    out.needsPersist = true;
+  }
+  return out;
 }
 
 async function persistSapNfMap(map, opts = {}) {
@@ -3220,43 +3343,129 @@ async function persistSapNfMap(map, opts = {}) {
       return false;
     }
   }
+  const co = fteCompany();
+  const abort = (msg, ...log) => {
+    console.error('[fretes] persist sap map ABORT —', ...log, co);
+    if (!opts.silent) fteToastError('Mapa SAP não gravado: ' + msg);
+    return false;
+  };
+  let cloudManifest;
+  try {
+    cloudManifest = await fetchCloudSapManifest();
+    if (useRam && cloudManifest && cloudManifest.updatedAt !== _sapChunkState?.manifestUpdatedAt) {
+      // Another tab/device saved after our load — fold its NFs in before writing.
+      console.warn('[fretes] sap map changed in cloud since load — re-merging', co, cloudManifest.updatedAt);
+      _sapMapCloudMergedCo = null;
+      if (!(await ensureCloudSapMapMerged())) return abort('não foi possível reler o mapa da cloud.', 'cloud re-merge failed');
+      cloudManifest = await fetchCloudSapManifest();
+    }
+  } catch (err) {
+    return abort('não foi possível ler o índice do mapa na cloud.', 'manifest fetch', err);
+  }
+  if (fteCompany() !== co) return false;
   const m = useRam ? sapNfMap : map;
   const n = Object.keys(m || {}).length;
   if (!n) {
     console.warn('[fretes] persist sap map skip — empty');
     return false;
   }
-  const cloudN = await fetchCloudSapMapNfCount();
+  const cloudN = cloudManifest ? (Number(cloudManifest.total) || 0) : await fetchCloudSapMapNfCount();
   if (cloudN > n) {
-    console.error('[fretes] persist sap map ABORT — would shrink cloud map', fteCompany(), cloudN, '→', n);
-    if (!opts.silent) fteToastError(`Mapa SAP não gravado: a cloud tem ${cloudN} NFs e o novo só ${n} (nunca se removem NFs).`);
-    return false;
+    return abort(`a cloud tem ${cloudN} NFs e o novo só ${n} (nunca se removem NFs).`, 'would shrink total', cloudN, '→', n);
   }
-  const pack = {
-    version: SAP_NF_MAP_PARSER_VERSION,
-    updatedAt: new Date().toISOString(),
-    files: sapMapSourceFiles || [],
-    map: slimSapNfMapForPersist(m)
-  };
-  const json = JSON.stringify(pack);
-  const buf = new TextEncoder().encode(json).buffer;
-  const jsonBytes = buf.byteLength;
-  if (jsonBytes > QZ_PERSIST_MAX_JSON_BYTES) {
-    const msg = `Mapa SAP demasiado grande (${fmtByteSize(jsonBytes)}).`;
-    console.error('[fretes] persist sap map too large', fteCompany(), jsonBytes);
-    if (!opts.silent) fteToastError(msg);
-    return false;
+
+  const slim = slimSapNfMapForPersist(m);
+  const groups = {};
+  Object.keys(slim).sort().forEach(k => {
+    const c = sapMapChunkKey(slim[k].dtEmissao);
+    (groups[c] || (groups[c] = {}))[k] = slim[k];
+  });
+  const state = _sapChunkState?.co === co ? _sapChunkState : { hashes: {}, keys: {} };
+  // Months now empty (all their NFs changed date) are rewritten empty so restore never resurrects stale copies.
+  Object.keys(state.keys || {}).forEach(c => { if (!groups[c]) groups[c] = {}; });
+  Object.keys(cloudManifest?.chunks || {}).forEach(c => { if (!groups[c]) groups[c] = {}; });
+
+  // Never shrink, per month: every NF stored in a cloud month must still exist (here or in another month).
+  for (const c of Object.keys(groups)) {
+    const loaded = state.keys?.[c];
+    if (loaded) {
+      for (const k of loaded) {
+        if (!slim[k]) return abort(`a NF ${k} (${c}) desapareceria.`, 'would drop NF', k, c);
+      }
+    } else {
+      const chunkCloudN = Number(cloudManifest?.chunks?.[c]?.n) || 0;
+      const newN = Object.keys(groups[c]).length;
+      if (chunkCloudN > newN) return abort(`o mês ${c} tem ${chunkCloudN} NFs na cloud e o novo só ${newN}.`, 'would shrink chunk', c, chunkCloudN, '→', newN);
+    }
   }
-  const slot = fteSapMapSlot();
-  const fileName = `sap_nf_map_${n}.json`;
-  console.log('[fretes] persist sap map', fteCompany(), slot, n, 'NFs', 'jsonBytes', jsonBytes);
+
+  const version = SAP_NF_MAP_PARSER_VERSION;
+  const chunkInfo = {};
+  const writes = [];
+  for (const c of Object.keys(groups).sort()) {
+    const json = JSON.stringify({ format: SAP_MAP_FORMAT, version, chunk: c, map: groups[c] });
+    const hash = fteHash32(json);
+    const buf = new TextEncoder().encode(json).buffer;
+    const nc = Object.keys(groups[c]).length;
+    if (buf.byteLength > QZ_PERSIST_MAX_JSON_BYTES) {
+      return abort(`o mês ${c} é demasiado grande (${fmtByteSize(buf.byteLength)}).`, 'chunk too large', c, buf.byteLength);
+    }
+    chunkInfo[c] = { n: nc, bytes: buf.byteLength, hash };
+    const inCloud = !!(cloudManifest?.chunks?.[c] || state.hashes?.[c]);
+    if (!(inCloud && state.hashes?.[c] === hash)) writes.push({ c, buf, n: nc, hash });
+    await fteYield();
+  }
+  const files = sapMapSourceFiles || [];
+  const legacyUploadedAt = (useRam ? state.legacyUploadedAt : null) || cloudManifest?.legacy?.uploadedAt || null;
+  const manifestStale = !cloudManifest
+    || (cloudManifest.legacy?.uploadedAt || null) !== legacyUploadedAt
+    || JSON.stringify(cloudManifest.files || []) !== JSON.stringify(files)
+    || Number(cloudManifest.version) !== version;
+  if (!writes.length && !manifestStale) {
+    console.log('[fretes] persist sap map — no month changed', co, n, 'NFs');
+    return true;
+  }
+  const largest = Object.entries(chunkInfo).sort((a, b) => b[1].bytes - a[1].bytes)[0];
+  console.log('[fretes] persist sap map', co, n, 'NFs ·', Object.keys(chunkInfo).length, 'month(s) ·',
+    'writing', writes.map(w => w.c).join(',') || '(index only)',
+    '· largest', largest?.[0], largest?.[1]?.bytes);
   try {
-    await upsertExcelBinary(slot, fileName, buf);
-    console.log('[fretes] persist sap map ok', fteCompany(), slot, fileName);
+    for (const w of writes) {
+      await upsertExcelBinary(fteSapMapChunkSlot(w.c), `sap_nf_map_${w.c}_${w.n}.json`, w.buf);
+      state.hashes = state.hashes || {};
+      state.hashes[w.c] = w.hash;
+    }
+    const manifest = {
+      format: SAP_MAP_FORMAT,
+      version,
+      updatedAt: new Date().toISOString(),
+      total: n,
+      files,
+      chunks: chunkInfo,
+      legacy: {
+        slot: fteSapMapSlot(),
+        uploadedAt: legacyUploadedAt,
+        migratedAt: cloudManifest?.legacy?.migratedAt || new Date().toISOString()
+      }
+    };
+    await upsertExcelBinary(fteSapMapIdxSlot(), `sap_nf_map_idx_${n}.json`,
+      new TextEncoder().encode(JSON.stringify(manifest)).buffer);
+    if (useRam) {
+      const keys = {};
+      Object.keys(groups).forEach(c => { keys[c] = new Set(Object.keys(groups[c])); });
+      _sapChunkState = {
+        co,
+        hashes: Object.fromEntries(Object.entries(chunkInfo).map(([c, i]) => [c, i.hash])),
+        keys,
+        manifestUpdatedAt: manifest.updatedAt,
+        legacyUploadedAt
+      };
+    }
+    console.log('[fretes] persist sap map ok', co, n, 'NFs', writes.length, 'month row(s) written');
     if (!opts.silent) fteToast(`Mapa SAP acumulado guardado (${n} NFs).`);
     return true;
   } catch (err) {
-    console.error('[fretes] persist sap map', fteCompany(), slot, err);
+    console.error('[fretes] persist sap map', co, err);
     if (!opts.silent) {
       if (typeof isExcelFilesTableMissing === 'function' && isExcelFilesTableMissing(err)) {
         fteToastError('Tabela logistica_excel_files em falta no Supabase.');
@@ -3463,20 +3672,26 @@ function repairSapNfMapInPlace(map) {
 
 /** Restore accumulated SAP map from cloud JSON (does not clear keys absent from Excel). */
 async function loadSavedSapNfMap(meta, opts = {}) {
-  if (typeof fetchExcelFiles !== 'function') return false;
+  if (typeof fetchExcelFiles !== 'function' || typeof fetchExcelFileMeta !== 'function') return false;
   try {
     const co = fteCompany();
-    const m = meta || await fetchExcelFiles([fteSapMapSlot()]);
-    const rec = m[fteSapMapSlot()];
-    if (!rec) {
+    if (meta?.[fteSapMapSlot()]) meta[fteSapMapSlot()].file_data = null;
+    await fteYield('A carregar mapa SAP…');
+    const cloud = await fetchCloudSapMapRaw();
+    if (fteCompany() !== co) return false;
+    const rec = { file_name: cloud.label };
+    if (!cloud.format || (cloud.format === 'chunks' && !Object.keys(cloud.raw || {}).length
+      && !(Number(cloud.manifest?.total) > 0))) {
       _sapMapCloudMergedCo = co;
+      _sapChunkState = {
+        co, hashes: cloud.hashes, keys: cloud.keys,
+        manifestUpdatedAt: cloud.manifest?.updatedAt || null, legacyUploadedAt: cloud.legacyUploadedAt
+      };
       return false;
     }
-    if (!rec.file_data) return false;
-    await fteYield('A descodificar mapa SAP…');
-    const parsed = parseSapNfMapFromRec(rec);
-    if (!parsed?.raw || typeof parsed.raw !== 'object') {
-      console.warn('[fretes] sap map parse empty', fteCompany(), rec.file_name);
+    const parsed = { raw: cloud.raw, files: cloud.files, version: cloud.version };
+    if (!parsed.raw || !Object.keys(parsed.raw).length) {
+      console.warn('[fretes] sap map parse empty', co, cloud.format, rec.file_name);
       return false;
     }
     // Stale parser: still LOAD the map (dates/cliente). Do NOT auto-reparse multi-MB ZFACT
@@ -3487,10 +3702,17 @@ async function loadSavedSapNfMap(meta, opts = {}) {
         + ' < ' + SAP_NF_MAP_PARSER_VERSION
         + ' — repair from stored docVal/ghost scrub; persist mapa v' + SAP_NF_MAP_PARSER_VERSION);
     }
-    const revived = await reviveSapNfMapAsync(parsed.raw);
+    let revived = await reviveSapNfMapAsync(parsed.raw);
     if (!Object.keys(revived).length) {
       console.warn('[fretes] sap map parse empty', fteCompany(), rec.file_name);
       return false;
+    }
+    if (cloud.legacyRaw) {
+      // Month rows win on shared NFs; the legacy row only adds NFs an old tab saved.
+      const nBefore = Object.keys(revived).length;
+      revived = mergeSapNfMaps(await reviveSapNfMapAsync(cloud.legacyRaw), revived);
+      console.warn('[fretes] sap map: folded legacy row written by an old tab', co,
+        '+' + (Object.keys(revived).length - nBefore), 'NF(s)');
     }
     const nFixed = repairSapNfMapInPlace(revived);
     fteSapMapNeedsReprocess = !!(stale && nFixed === 0);
@@ -3498,6 +3720,10 @@ async function loadSavedSapNfMap(meta, opts = {}) {
     // preferRam: RAM holds a just-processed ZFACT newer than the cloud copy.
     sapNfMap = opts.preferRam ? mergeSapNfMaps(revived, sapNfMap) : mergeSapNfMaps(sapNfMap, revived);
     _sapMapCloudMergedCo = co;
+    _sapChunkState = {
+      co, hashes: cloud.hashes, keys: cloud.keys,
+      manifestUpdatedAt: cloud.manifest?.updatedAt || null, legacyUploadedAt: cloud.legacyUploadedAt
+    };
     // Re-run repair on merged map (incoming may revive ghosts wiped in revived-only pass).
     const nMergedFix = repairSapNfMapInPlace(sapNfMap);
     const totalFixed = nFixed + nMergedFix;
@@ -3509,8 +3735,11 @@ async function loadSavedSapNfMap(meta, opts = {}) {
       });
       sapMapSourceFiles = [...byName.values()];
     }
-    if (totalFixed > 0 || stale) {
-      // Auto-persist corrected map — user must not remember to Processar ZFACT.
+    if (cloud.format === 'legacy') {
+      console.warn('[fretes] sap map: migrating legacy single row → month rows', co, Object.keys(sapNfMap).length, 'NFs');
+    }
+    if (totalFixed > 0 || stale || cloud.needsPersist) {
+      // Auto-persist corrected / migrated map — user must not remember to Processar ZFACT.
       try {
         await persistSapNfMap(sapNfMap, { silent: true });
         fteSapMapNeedsReprocess = false;
@@ -6209,8 +6438,8 @@ async function ensureCteLoadedForQz(silent = true) {
   if (currentNFs.length) return true;
   if (typeof fetchExcelFiles !== 'function' || typeof base64ToArrayBuffer !== 'function') return false;
   try {
-    const meta = await fetchExcelFiles([fteCteSlot(), fteSapMapSlot(), fteSapSlot()]);
-    await loadSavedSapNfMap(meta, { silent: true });
+    const meta = await fetchExcelFiles([fteCteSlot(), fteSapSlot()]);
+    await loadSavedSapNfMap(null, { silent: true });
     const ok = await restoreCteFromRec(meta[fteCteSlot()], meta[fteSapSlot()], silent);
     if (ok) refreshQuinzenalCompare();
     return ok;
@@ -6272,9 +6501,9 @@ async function _loadSavedFretesFilesImpl(silent = false) {
 
   let meta = {};
   try {
-    await fteYield('A descarregar Fretes (QZ + mapa)…');
-    // Slim first: quinzenal pack JSON + SAP NF map only — NOT ZFACT/CTE Excel binaries.
-    meta = await fetchExcelFiles([fteQuinzenalSlot(), fteSapMapSlot()]);
+    await fteYield('A descarregar Fretes (quinzenais)…');
+    // Slim first: quinzenal pack JSON only — NOT ZFACT/CTE Excel binaries. SAP map rows load in step 4.
+    meta = await fetchExcelFiles([fteQuinzenalSlot()]);
   } catch (err) {
     console.error('[fretes] load saved', co, err);
     if (!silent) {
@@ -8507,6 +8736,7 @@ function reloadFretesForCompany() {
   sapNfMap = {};
   sapMapSourceFiles = [];
   _sapMapCloudMergedCo = null;
+  _sapChunkState = null;
   invalidateZfactMonthsCache();
   lastCtePack = null;
   cteAnalysisSource = null;
