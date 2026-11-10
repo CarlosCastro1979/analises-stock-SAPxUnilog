@@ -1,5 +1,5 @@
-// fretes.js v1.8.109 — «Devolução — por explicar»: responsabilidade Delta/Unilog por NF com autosave na cloud
-const FRETES_JS_VERSION = '1.8.109';
+// fretes.js v1.8.110 — ZFACT acumula sempre: mapa SAP da cloud entra em RAM antes do merge; gravação nunca encolhe o mapa
+const FRETES_JS_VERSION = '1.8.110';
 /** Bump when a stored quinzenal pack needs a one-time repair on load (persisted as pack.cleanup.version). */
 const QZ_PACK_CLEANUP_VERSION = 1;
 /** Pre-repair copy of the quinzenal pack (written once per company, never overwritten). */
@@ -31,6 +31,8 @@ let fteInited = false;
 let sapNfMap = {};
 /** Provenance of merged ZFACT loads (persisted with sap map pack). */
 let sapMapSourceFiles = [];
+/** Company whose cloud `fretes_sap_map` is already merged into sapNfMap — persist must not write before this. */
+let _sapMapCloudMergedCo = null;
 let lastCtePack = null;
 
 let currentNFs = [];
@@ -3165,15 +3167,69 @@ function slimSapNfMapForPersist(map) {
   return out;
 }
 
+/** NF count of the cloud map from its file name (`sap_nf_map_<N>.json`) — metadata only, no download. */
+async function fetchCloudSapMapNfCount() {
+  if (typeof fetchExcelFileMeta !== 'function') return 0;
+  try {
+    const meta = await fetchExcelFileMeta([fteSapMapSlot()]);
+    const m = String(meta?.[fteSapMapSlot()]?.file_name || '').match(/sap_nf_map_(\d+)\.json$/i);
+    return m ? parseInt(m[1], 10) : 0;
+  } catch (err) {
+    console.warn('[fretes] sap map meta', err);
+    return 0;
+  }
+}
+
+/**
+ * Merge the cloud accumulated map into RAM once per company (RAM wins on shared NFs).
+ * Returns false only when a cloud map exists but could not be read — callers must then not persist.
+ */
+async function ensureCloudSapMapMerged() {
+  const co = fteCompany();
+  if (_sapMapCloudMergedCo === co) return true;
+  if (typeof fetchExcelFiles !== 'function') return false;
+  let meta;
+  try {
+    meta = await fetchExcelFiles([fteSapMapSlot()]);
+  } catch (err) {
+    console.error('[fretes] ensure cloud sap map fetch', co, err);
+    return false;
+  }
+  if (fteCompany() !== co) return false;
+  const rec = meta[fteSapMapSlot()];
+  if (!rec?.file_data) {
+    _sapMapCloudMergedCo = co;
+    return true;
+  }
+  const ok = await loadSavedSapNfMap(meta, { silent: true, preferRam: true });
+  return ok && _sapMapCloudMergedCo === co;
+}
+
 async function persistSapNfMap(map, opts = {}) {
   if (typeof upsertExcelBinary !== 'function') {
     if (!opts.silent) fteToastError('Persistência Excel indisponível — recarrega a página.');
     return false;
   }
-  const m = map || sapNfMap;
+  // The cloud map is the only ZFACT history: never write RAM over it before merging it in.
+  const useRam = !map || map === sapNfMap;
+  if (useRam) {
+    const merged = await ensureCloudSapMapMerged();
+    if (!merged) {
+      console.error('[fretes] persist sap map ABORT — cloud map not merged into RAM', fteCompany());
+      if (!opts.silent) fteToastError('Mapa SAP não gravado: não foi possível ler o mapa acumulado da cloud (evita perder meses).');
+      return false;
+    }
+  }
+  const m = useRam ? sapNfMap : map;
   const n = Object.keys(m || {}).length;
   if (!n) {
     console.warn('[fretes] persist sap map skip — empty');
+    return false;
+  }
+  const cloudN = await fetchCloudSapMapNfCount();
+  if (cloudN > n) {
+    console.error('[fretes] persist sap map ABORT — would shrink cloud map', fteCompany(), cloudN, '→', n);
+    if (!opts.silent) fteToastError(`Mapa SAP não gravado: a cloud tem ${cloudN} NFs e o novo só ${n} (nunca se removem NFs).`);
     return false;
   }
   const pack = {
@@ -3409,9 +3465,14 @@ function repairSapNfMapInPlace(map) {
 async function loadSavedSapNfMap(meta, opts = {}) {
   if (typeof fetchExcelFiles !== 'function') return false;
   try {
+    const co = fteCompany();
     const m = meta || await fetchExcelFiles([fteSapMapSlot()]);
     const rec = m[fteSapMapSlot()];
-    if (!rec?.file_data) return false;
+    if (!rec) {
+      _sapMapCloudMergedCo = co;
+      return false;
+    }
+    if (!rec.file_data) return false;
     await fteYield('A descodificar mapa SAP…');
     const parsed = parseSapNfMapFromRec(rec);
     if (!parsed?.raw || typeof parsed.raw !== 'object') {
@@ -3433,7 +3494,10 @@ async function loadSavedSapNfMap(meta, opts = {}) {
     }
     const nFixed = repairSapNfMapInPlace(revived);
     fteSapMapNeedsReprocess = !!(stale && nFixed === 0);
-    sapNfMap = mergeSapNfMaps(sapNfMap, revived);
+    if (fteCompany() !== co) return false;
+    // preferRam: RAM holds a just-processed ZFACT newer than the cloud copy.
+    sapNfMap = opts.preferRam ? mergeSapNfMaps(revived, sapNfMap) : mergeSapNfMaps(sapNfMap, revived);
+    _sapMapCloudMergedCo = co;
     // Re-run repair on merged map (incoming may revive ghosts wiped in revived-only pass).
     const nMergedFix = repairSapNfMapInPlace(sapNfMap);
     const totalFixed = nFixed + nMergedFix;
@@ -3739,6 +3803,15 @@ async function processAndSaveFretes() {
       const ok = await processQuinzenalPending();
       if (!ok) return;
       qzProcessed = true;
+    }
+
+    // ZFACT accumulates: the new file merges on top of the cloud map, never replaces it.
+    if (hasSap) {
+      fteSetProcessing(true, 'A carregar mapa SAP acumulado…');
+      if (!(await ensureCloudSapMapMerged())) {
+        fteToastError('Não foi possível ler o mapa SAP acumulado da cloud — ZFACT não processado (evita perder meses). Tenta de novo.');
+        return;
+      }
     }
 
     if (hasCte) {
@@ -8433,6 +8506,7 @@ function reloadFretesForCompany() {
   currentUploadId = null;
   sapNfMap = {};
   sapMapSourceFiles = [];
+  _sapMapCloudMergedCo = null;
   invalidateZfactMonthsCache();
   lastCtePack = null;
   cteAnalysisSource = null;
