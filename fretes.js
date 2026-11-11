@@ -1,5 +1,5 @@
-// fretes.js v1.8.112 — lê o export Unilog «LOGISTICA EXTERNA» (formato B) além do quinzenal «Gestão de Frete»
-const FRETES_JS_VERSION = '1.8.112';
+// fretes.js v1.8.113 — B2C Dados novo layout (Fatura Total / Região de Cobrança) + nomes 1Q/(002)
+const FRETES_JS_VERSION = '1.8.113';
 /** Bump when a stored quinzenal pack needs a one-time repair on load (persisted as pack.cleanup.version). */
 const QZ_PACK_CLEANUP_VERSION = 1;
 /** Pre-repair copy of the quinzenal pack (written once per company, never overwritten). */
@@ -6810,8 +6810,9 @@ const QZ_B2C_ALIASES = {
   destinatario: ['nome destinatario', 'nome destinatário', 'destinatario', 'destinatário'],
   valorProdutos: ['valor produtos', 'valor produto', 'vl produtos'],
   valorNF: ['total nf', 'valor total nf'],
-  pago: ['valor fatura', 'total fatura', 'frete'],
-  zona: ['zona entrega', 'zona de entrega', 'regiao entrega', 'região entrega']
+  // "Fatura Total" (Out/2026+ layout) = Frete Peso + AD Valorem + GRIS; must win over the "frete" fuzzy match on "Frete Peso".
+  pago: ['valor fatura', 'total fatura', 'fatura total', 'frete'],
+  zona: ['zona entrega', 'zona de entrega', 'regiao entrega', 'região entrega', 'regiao de cobranca', 'regiao cobranca']
 };
 
 function findQzField(row, field, aliasesMap) {
@@ -6838,13 +6839,35 @@ function nfFromNfeKey(key) {
   return s.replace(/^0+/, '') || '';
 }
 
+/** Drop copy/revision suffixes: " (002)", " - Cópia", " rev01", " v2", " final", " copy". */
+function stripQzNameSuffixes(base) {
+  let s = String(base || '').trim();
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(/\s*\(\d{1,3}\)\s*$/, '')
+      .replace(/\s*[-_]?\s*(?:c[oó]pia|copy|final)\s*$/i, '')
+      .replace(/\s*[-_]?\s*(?:rev\.?\s*\d+|v\d+)\s*$/i, '')
+      .trim();
+  } while (s !== prev);
+  return s;
+}
+
+/** 1ªQ / 1Q / 1aQ / 1a Q / 1º Q / 1 Quinzena / 1ª quinzena (and 2…). */
+function qzQuinzenaFromName(s) {
+  const m = String(s || '').match(/(?:^|\D)([12])\s*(?:[ªº°]|[ao](?=\s*\.?\s*q))?\s*\.?\s*q(?:uinzena|z)?(?![a-z])/i);
+  if (m) return parseInt(m[1], 10);
+  return /1\s*ª?\s*Q|1aQ/i.test(s) ? 1 : (/2\s*ª?\s*Q|2aQ/i.test(s) ? 2 : null);
+}
+
 function parseQuinzenalFileName(name) {
   const canal = /B2B/i.test(name) ? 'B2B' : (/B2C/i.test(name) ? 'B2C' : null);
-  const quinzena = /1\s*ª?\s*Q|1aQ/i.test(name) ? 1 : (/2\s*ª?\s*Q|2aQ/i.test(name) ? 2 : null);
+  const baseName = stripQzNameSuffixes(String(name || '').replace(/\.xlsx?$/i, ''));
+  const quinzena = qzQuinzenaFromName(baseName);
   let mes = null;
   let ano = null;
-  const baseName = String(name || '').replace(/\.xlsx?$/i, '');
-  const ym = baseName.match(/(\d{4})\s*$/) || String(name || '').match(/(\d{4})/);
+  const years = [...baseName.matchAll(/(?:^|\D)(20\d{2})(?!\d)/g)];
+  const ym = years.length ? years[years.length - 1] : String(name || '').match(/(\d{4})/);
   if (ym) ano = parseInt(ym[1], 10);
   const norm = baseName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   for (const [k, v] of Object.entries(QZ_MESES)) {
@@ -6945,7 +6968,7 @@ function isQzB2BHeader(cells) {
 
 function isQzB2CHeader(cells) {
   const n = cells.map(c => normCol(c));
-  const hasFrete = n.some(c => c.includes('valor fatura') || c.includes('valor produto') || c.includes('valor produtos'));
+  const hasFrete = n.some(c => c.includes('valor fatura') || c === 'fatura total' || c.includes('valor produto') || c.includes('valor produtos'));
   const hasId = n.some(c => c.includes('total nf') || c.includes('pedido') || c.includes('chave') || c.includes('nota fiscal'));
   return hasFrete && hasId;
 }
@@ -6974,7 +6997,10 @@ function normalizeQzB2BRow(row) {
 
 function normalizeQzB2CRow(row) {
   const chave = findQzField(row, 'chaveNF', QZ_B2C_ALIASES);
-  const pedido = findQzField(row, 'pedido', QZ_B2C_ALIASES);
+  // "CNPJ Expedidor" contains "pedido" — keep it out of the fuzzy pedido match.
+  const pedido = findQzField(
+    Object.fromEntries(Object.entries(row).filter(([k]) => !normCol(k).includes('expedidor'))),
+    'pedido', QZ_B2C_ALIASES);
   const nfDirect = findQzField(row, 'nf', QZ_B2C_ALIASES);
   const nfRaw = chave && /^\d{1,12}$/.test(String(chave).trim()) ? String(chave).trim() : null;
   let nf = nfRaw || (nfDirect ? String(nfDirect).trim() : null) || nfFromNfeKey(chave);
@@ -8298,7 +8324,7 @@ function diagnoseQzParseFailure(wb, canal) {
   const headerFn = canal === 'B2B' ? isQzB2BHeader : isQzB2CHeader;
   const headerHint = canal === 'B2B'
     ? 'Nota fiscal + Total fatura'
-    : 'Pedido/chave NF + Valor fatura ou Valor produto';
+    : 'Pedido/chave NF + Valor fatura, Fatura Total ou Valor produto';
   for (const name of sheetNames) {
     const raw = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: null });
     if (!raw.length) continue;
