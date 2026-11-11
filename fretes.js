@@ -1,5 +1,5 @@
-// fretes.js v1.8.111 — mapa SAP acumulado gravado por mês de emissão (1 linha/mês + índice): sem limite de 6 MB
-const FRETES_JS_VERSION = '1.8.111';
+// fretes.js v1.8.112 — lê o export Unilog «LOGISTICA EXTERNA» (formato B) além do quinzenal «Gestão de Frete»
+const FRETES_JS_VERSION = '1.8.112';
 /** Bump when a stored quinzenal pack needs a one-time repair on load (persisted as pack.cleanup.version). */
 const QZ_PACK_CLEANUP_VERSION = 1;
 /** Pre-repair copy of the quinzenal pack (written once per company, never overwritten). */
@@ -414,26 +414,93 @@ function fmtByteSize(n) {
  * - Same fileName → replace that file's rows/meta (re-upload).
  * - Different fileName → keep both (1ªQ+2ªQ of same month accumulate; Fev–Ago stay).
  * - Same operator+canal+quinzenaKey → replace (renamed re-upload); DELTA never replaces Q-BRASIL.
+ * - Export (LOGISTICA EXTERNA) and quinzenal report never replace each other: they coexist and
+ *   pruneQzExportOverlaps drops the export's CT-e already in a quinzenal (same NF + Num. CTE).
  * Do NOT drop rows by NF across files — an NF in Jan must not erase Fev/other quinzenas.
  */
 function qzFileReplaceKey(f) {
   const qk = f?.quinzenaKey || '';
   const canal = f?.canal || '';
-  return qk && canal ? `${qzOperatorOf(f)}|${canal}|${qk}` : '';
+  return qk && canal ? `${qzOperatorOf(f)}|${canal}|${qk}|${f?.format === 'export' ? 'export' : 'qz'}` : '';
+}
+
+/** Original Excel name — an export split per quinzena keeps it in sourceFileName. */
+function qzSourceFileName(f) {
+  return f?.sourceFileName || f?.fileName || '';
+}
+
+/**
+ * An export overlapping a quinzenal report is the same CT-e, not double billing: drop from export rows
+ * every CT-e (operator + NF + Num. CTE) already in a quinzenal file or in an earlier export.
+ * Quinzenal rows are never touched (their pago is scaled to the authoritative Resumo).
+ */
+function pruneQzExportOverlaps(pack) {
+  const files = pack?.files || [];
+  const exportNames = new Set(files.filter(f => f.format === 'export').map(f => f.fileName));
+  if (!exportNames.size) return 0;
+  const cteKey = (r, c) => {
+    const k = qzCteNumKey(c);
+    const nf = r.nfKey || normNFKey(r.nf);
+    return k && nf ? `${qzOperatorOf(r)}|${nf}|${k}` : '';
+  };
+  const seen = new Set();
+  (pack.b2bRows || []).forEach(r => {
+    if (exportNames.has(r.fileName)) return;
+    (r.ctes || []).forEach(c => { const k = cteKey(r, c); if (k) seen.add(k); });
+  });
+  const skipped = new Map();
+  let removed = 0;
+  pack.b2bRows = (pack.b2bRows || []).filter(r => {
+    if (!exportNames.has(r.fileName) || !Array.isArray(r.ctes)) return true;
+    const keep = [];
+    r.ctes.forEach(c => {
+      const k = cteKey(r, c);
+      if (k && seen.has(k)) {
+        const s = skipped.get(r.fileName) || { n: 0, pago: 0 };
+        s.n++;
+        s.pago += num(c.pago);
+        skipped.set(r.fileName, s);
+        removed++;
+        return;
+      }
+      if (k) seen.add(k);
+      keep.push(c);
+    });
+    if (keep.length === r.ctes.length) return true;
+    r.ctes = keep;
+    r.pago = keep.reduce((s, c) => s + num(c.pago), 0);
+    r.nCte = keep.length;
+    r.temDevolucao = keep.some(c => c.devolucao);
+    return keep.length > 0;
+  });
+  files.forEach(f => {
+    const s = skipped.get(f.fileName);
+    if (!s) return;
+    const rows = pack.b2bRows.filter(r => r.fileName === f.fileName);
+    f.overlapSkippedCte = (f.overlapSkippedCte || 0) + s.n;
+    f.overlapSkippedPago = (f.overlapSkippedPago || 0) + s.pago;
+    f.nfCount = rows.length;
+    f.totalCte = rows.reduce((t, r) => t + num(r.nCte), 0);
+    f.totalPago = rows.reduce((t, r) => t + num(r.pago), 0);
+  });
+  if (removed) console.log('[fretes] qz export overlap', removed, 'CT-e já em quinzenais — contados 1×', [...skipped.entries()]);
+  return removed;
 }
 
 function mergeQuinzenalPacks(prev, next) {
   if (!prev?.files?.length) return next;
   if (!next?.files?.length) return prev;
-  const replaceNames = new Set((next.files || []).map(f => f.fileName).filter(Boolean));
+  const replaceNames = new Set((next.files || []).map(qzSourceFileName).filter(Boolean));
   const replaceQzKeys = new Set((next.files || []).map(qzFileReplaceKey).filter(Boolean));
   const prevFileByName = new Map((prev.files || []).map(f => [f.fileName, f]));
-  const fileReplaced = f => !!((f.fileName && replaceNames.has(f.fileName)) || replaceQzKeys.has(qzFileReplaceKey(f)));
+  const fileReplaced = f => !!((qzSourceFileName(f) && replaceNames.has(qzSourceFileName(f))) || replaceQzKeys.has(qzFileReplaceKey(f)));
   const keepPrevFile = f => !fileReplaced(f);
   const keepPrevRow = canal => r => {
     const fm = prevFileByName.get(r.fileName);
     return !fileReplaced({
       fileName: r.fileName,
+      sourceFileName: fm?.sourceFileName,
+      format: fm?.format,
       quinzenaKey: r.quinzenaKey || fm?.quinzenaKey,
       canal: fm?.canal || canal,
       operator: r.operator || fm?.operator
@@ -453,7 +520,7 @@ function mergeQuinzenalPacks(prev, next) {
   ];
   const failKeys = new Set((next.failedFiles || []).map(f => f.fileName));
   const failedFiles = [
-    ...(prev.failedFiles || []).filter(f => !failKeys.has(f.fileName)),
+    ...(prev.failedFiles || []).filter(f => !failKeys.has(f.fileName) && !replaceNames.has(f.fileName)),
     ...(next.failedFiles || [])
   ];
   const pack = {
@@ -462,9 +529,10 @@ function mergeQuinzenalPacks(prev, next) {
     cleanup: prev.cleanup || next.cleanup,
     files, failedFiles, b2bRows, b2cRows
   };
-  pack.b2bCompare = buildB2BCompare(b2bRows);
-  pack.b2bMonthTotals = buildB2BMonthTotals(b2bRows);
-  pack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(b2bRows);
+  pruneQzExportOverlaps(pack);
+  pack.b2bCompare = buildB2BCompare(pack.b2bRows);
+  pack.b2bMonthTotals = buildB2BMonthTotals(pack.b2bRows);
+  pack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(pack.b2bRows);
   pack.b2cMonthTotals = buildB2CMonthTotals(b2cRows);
   pack.b2cQuinzenaTotals = buildB2CQuinzenaTotals(b2cRows);
   pack.b2cRegionTotals = buildB2CRegionTotals(b2cRows);
@@ -560,6 +628,7 @@ function cleanQuinzenalPackRows(pack) {
   (pack.b2cRows || []).forEach(r => {
     r.operator = r.operator || fileOp.get(r.fileName) || qzOperatorOf(r);
   });
+  pruneQzExportOverlaps(pack);
   return stats;
 }
 
@@ -3918,7 +3987,8 @@ async function processQuinzenalPending() {
   }
   const pendingNames = fteQzPendingFiles.map(f => f.name);
   console.log('[fretes] qz process pending', pendingNames.length, pendingNames);
-  const results = await Promise.all(fteQzPendingFiles.map(f => processQuinzenalFile(f)));
+  const results = (await Promise.all(fteQzPendingFiles.map(f => processQuinzenalFile(f))))
+    .flatMap(r => (r.ok && r.parts) ? r.parts : [r]);
   const ok = results.filter(r => r.ok);
   const fail = results.filter(r => !r.ok);
   if (fail.length) {
@@ -6703,12 +6773,17 @@ const QZ_MESES = {
   janeiro: 1, fevereiro: 2, marco: 3, março: 3, abril: 4, maio: 5, junho: 6,
   julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12
 };
+const QZ_MESES_ABREV = {
+  jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12
+};
+/** Unilog Resumo impostos: 2% ISS + 9,25% PIS/COFINS gross-up on the frete (every Resumo so far = ×1,126761). */
+const QZ_UNILOG_TAX_GROSSUP = 1 / (1 - 0.1125);
 
 const QZ_B2B_ALIASES = {
   nf: ['nota fiscal', 'nf', 'n nota fiscal'],
   valorNF: ['valor nf', 'valor da nf', 'vl nf'],
   numCte: ['num. cte', 'num cte', 'numero cte', 'numeros cte', 'n cte', 'numero do cte', 'nº cte'],
-  pago: ['total fatura rev.', 'total fatura rev', 'total fatura', 'valor fatura'],
+  pago: ['total fatura revisada', 'total fatura rev.', 'total fatura rev', 'total fatura', 'valor fatura'],
   transportador: ['transportador', 'transportadora'],
   dtNF: [
     'dt nf', 'data nf', 'datanf', 'data da nf', 'data nota fiscal', 'dt nota fiscal',
@@ -6775,6 +6850,14 @@ function parseQuinzenalFileName(name) {
   for (const [k, v] of Object.entries(QZ_MESES)) {
     const kk = k.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (norm.includes(kk)) { mes = v; break; }
+  }
+  if (!mes) {
+    // Export names: "LOGISTICA EXTERNA DELTA Set_26 rev01" (abbreviated month + 2-digit year)
+    const ab = norm.match(/(?:^|[^a-z])(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)(?=[^a-z]|$)[\s_.\/-]*(\d{2}(?!\d))?/);
+    if (ab) {
+      mes = QZ_MESES_ABREV[ab[1]];
+      if (!ano && ab[2]) ano = 2000 + parseInt(ab[2], 10);
+    }
   }
   const mesKey = ano && mes ? `${ano}-${String(mes).padStart(2, '0')}` : null;
   const mesLabel = mesKey ? fmtMesLabel(mesKey) : null;
@@ -6920,6 +7003,7 @@ function parseQzSheetRows(sheet, canal) {
   const headerRow = raw[headerIdx] || [];
   const headers = headerRow.map(h => String(h || '').trim()).filter(Boolean);
   const rows = [];
+  let totalRowPago = null;
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const line = raw[i];
     if (!Array.isArray(line) || line.every(c => c === null || c === undefined || c === '')) continue;
@@ -6929,14 +7013,17 @@ function parseQzSheetRows(sheet, canal) {
     if (canal === 'B2B') {
       if (!row.nf || String(row.nf).trim() === '') continue;
       const nfStr = String(row.nf).trim().toLowerCase();
+      if (nfStr === 'total' || nfStr === 'total geral') totalRowPago = num(row.pago);
       if (nfStr.includes('total') || nfStr === 'na') continue;
+      // Export footer "Filtros aplicados: … 2026 (Ano) …" sits in the NF column — not a CT-e
+      if (/filtros|[\r\n]/.test(nfStr) || (row.numCte == null && row.pago == null && row.valorNF == null)) continue;
     } else {
       if (!row.pago && !row.valorNF && !row.pedido) continue;
       if (String(row.pedido || '').toLowerCase().includes('pedido')) continue;
     }
     rows.push(row);
   }
-  return { rows, headers };
+  return { rows, headers, totalRowPago };
 }
 
 /**
@@ -7052,6 +7139,117 @@ function loadQuinzenalFromWorkbook(wb, fileMeta) {
     if (parsed.rows.length > best.valid) best = { ...parsed, sheetName: name, valid: parsed.rows.length };
   }
   return { ...best, meta: fileMeta, canal };
+}
+
+/**
+ * Unilog "LOGISTICA EXTERNA <operador> <Mês>_<aa>" export (format B): one "Export" sheet with the same
+ * CT-e columns as the quinzenal Dados plus Situação CTE / Validação CC / Total Fatura Revisada,
+ * a "Total" row, a "Filtros aplicados" footer (Ano / Mês / Quinzena CTE) and no Resumo sheet.
+ */
+function isQzExportHeader(cells) {
+  if (!isQzB2BHeader(cells)) return false;
+  const n = cells.map(c => normCol(c));
+  return n.some(c => c === 'situacao cte' || c === 'validacao cc' || c === 'eventointernoid' || c === 'total fatura revisada');
+}
+
+function detectQzExportWorkbook(wb) {
+  const names = wb?.SheetNames || [];
+  if (names.some(n => /resumo/i.test(String(n)))) return null;
+  for (const name of names) {
+    const raw = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: null });
+    const headerIdx = raw.slice(0, 30).findIndex(row => Array.isArray(row) && isQzExportHeader(row));
+    if (headerIdx < 0) continue;
+    let filtros = '';
+    for (let i = raw.length - 1; i > headerIdx && i >= raw.length - 20 && !filtros; i--) {
+      const cell = (raw[i] || []).find(c => c != null && /filtros aplicados/i.test(String(c)));
+      if (cell) filtros = String(cell);
+    }
+    return { sheetName: name, filtros };
+  }
+  return null;
+}
+
+function parseQzExportFiltros(text) {
+  const t = normCol(String(text || '').replace(/[\r\n]+/g, ' '));
+  if (!t) return {};
+  const out = {};
+  const y = t.match(/(20\d{2})\s*\(ano\)/);
+  if (y) out.ano = parseInt(y[1], 10);
+  const m = t.match(/([a-z]+)\s*\(mes\)/);
+  if (m) out.mes = QZ_MESES[m[1]] || QZ_MESES_ABREV[m[1].slice(0, 3)] || null;
+  const q = t.match(/([12])\s*[ªaº°]?\s*quinzena/);
+  if (q) out.quinzena = parseInt(q[1], 10);
+  const op = qzOperatorFromText(t);
+  if (op) out.operator = op;
+  return out;
+}
+
+/** Tax gross-up for an export without Resumo: same operator's latest quinzenal Resumo, else 11,25%. */
+function qzExportTaxFactor(operator) {
+  const ref = (quinzenalPack?.files || [])
+    .filter(f => f.format !== 'export' && f.canal === 'B2B' && qzOperatorOf(f) === operator
+      && num(f.resumoTotalFrete) > 0.01 && num(f.resumoTotalComImpostos) > 0.01)
+    .sort((a, b) => String(b.quinzenaKey || '').localeCompare(String(a.quinzenaKey || '')))[0];
+  return ref ? num(ref.resumoTotalComImpostos) / num(ref.resumoTotalFrete) : QZ_UNILOG_TAX_GROSSUP;
+}
+
+/**
+ * Period of an export: footer filter (Ano/Mês/Quinzena CTE) → file name → Dt CTE.
+ * Footer with a quinzena = that quinzena only; otherwise the full month split by Dt CTE (day ≤ 15 → 1ªQ).
+ * Returns one loaded part per quinzena (same shape as loadQuinzenalFromWorkbook), with Resumo-like totals.
+ */
+function splitQzExportByQuinzena(loaded, meta, exp) {
+  const f = parseQzExportFiltros(exp?.filtros);
+  if (f.operator) meta.operator = f.operator;
+  const rowDate = r => parseSapBrDate(r.dtCte) || parseSapBrDate(r.dtNF);
+  let ano = f.ano || meta.ano || null;
+  let mes = f.mes || meta.mes || null;
+  if (!ano || !mes) {
+    const cnt = {};
+    loaded.rows.forEach(r => { const d = rowDate(r); if (d) { const k = monthKey(d); cnt[k] = (cnt[k] || 0) + 1; } });
+    const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+    if (top) { ano = parseInt(top[0].slice(0, 4), 10); mes = parseInt(top[0].slice(5, 7), 10); }
+  }
+  if (!ano || !mes) return null;
+  const mesKey = `${ano}-${String(mes).padStart(2, '0')}`;
+  const fixedQ = f.quinzena || meta.quinzena || null;
+  const byQ = { 1: [], 2: [] };
+  const undated = [];
+  loaded.rows.forEach(r => {
+    if (fixedQ) { byQ[fixedQ].push(r); return; }
+    const d = rowDate(r);
+    if (!d) { undated.push(r); return; }
+    const k = monthKey(d);
+    const q = k === mesKey ? (d.getDate() <= 15 ? 1 : 2) : (k < mesKey ? 1 : 2);
+    byQ[q].push(r);
+  });
+  if (undated.length) byQ[byQ[1].length > byQ[2].length ? 1 : 2].push(...undated);
+  const qs = [1, 2].filter(q => byQ[q].length);
+  const factor = qzExportTaxFactor(qzOperatorOf(meta));
+  const ext = (String(meta.fileName).match(/\.xlsx?$/i) || ['.xlsx'])[0];
+  const base = String(meta.fileName).replace(/\.xlsx?$/i, '');
+  return qs.map(q => {
+    const rows = byQ[q];
+    const totalFrete = rows.reduce((s, r) => s + num(r.pago), 0);
+    const partMeta = {
+      ...meta,
+      format: 'export',
+      sourceFileName: meta.fileName,
+      fileName: qs.length > 1 ? `${base} (${q}ªQ)${ext}` : meta.fileName,
+      canal: 'B2B', ano, mes, quinzena: q, mesKey, mesLabel: fmtMesLabel(mesKey),
+      quinzenaKey: `${mesKey}-Q${q}`,
+      quinzenaLabel: `${q}ªQ ${MESES_PT[mes - 1]}/${ano}`,
+      exportPeriod: fixedQ ? 'quinzena' : 'mes',
+      exportFiltros: exp?.filtros ? String(exp.filtros).replace(/\s*[\r\n]+\s*/g, ' · ').slice(0, 300) : '',
+      exportTotalRow: qs.length === 1 && loaded.totalRowPago != null ? loaded.totalRowPago : null,
+      resumoTotalFrete: totalFrete,
+      resumoImpostos: totalFrete * (factor - 1),
+      resumoTotalComImpostos: totalFrete * factor,
+      taxDerived: true,
+      taxFactor: factor
+    };
+    return { ok: true, rows, headers: loaded.headers, sheetName: loaded.sheetName, meta: partMeta, canal: 'B2B' };
+  });
 }
 
 function aggregateQzB2BRows(rows, fileMeta) {
@@ -7813,7 +8011,12 @@ function buildQuinzenalPack(fileResults, fileBinaries) {
         resumoTotalFrete: meta.resumoTotalFrete || null,
         resumoImpostos: meta.resumoImpostos || null,
         resumoTotalComImpostos: meta.resumoTotalComImpostos || null,
-        totalCte: agg.reduce((s, x) => s + x.nCte, 0)
+        totalCte: agg.reduce((s, x) => s + x.nCte, 0),
+        ...(meta.format === 'export' ? {
+          format: 'export', sourceFileName: meta.sourceFileName, exportPeriod: meta.exportPeriod,
+          exportFiltros: meta.exportFiltros, exportTotalRow: meta.exportTotalRow,
+          taxDerived: true, taxFactor: meta.taxFactor
+        } : {})
       });
     } else {
       const taxFactor = qzTaxFactor(meta);
@@ -7848,9 +8051,10 @@ function buildQuinzenalPack(fileResults, fileBinaries) {
     cleanup: { version: QZ_PACK_CLEANUP_VERSION, at: new Date().toISOString() },
     files, failedFiles, b2bRows, b2cRows, fileBinaries: binaries
   };
-  pack.b2bCompare = buildB2BCompare(b2bRows);
-  pack.b2bMonthTotals = buildB2BMonthTotals(b2bRows);
-  pack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(b2bRows);
+  pruneQzExportOverlaps(pack);
+  pack.b2bCompare = buildB2BCompare(pack.b2bRows);
+  pack.b2bMonthTotals = buildB2BMonthTotals(pack.b2bRows);
+  pack.b2bQuinzenaTotals = buildB2BQuinzenaTotals(pack.b2bRows);
   pack.b2cMonthTotals = buildB2CMonthTotals(b2cRows);
   pack.b2cQuinzenaTotals = buildB2CQuinzenaTotals(b2cRows);
   pack.b2cRegionTotals = buildB2CRegionTotals(b2cRows);
@@ -7876,6 +8080,10 @@ function qzFileCountNoteHtml() {
   if (janB2b.length) {
     const pago = janB2b.reduce((sum, f) => sum + num(f.totalPago), 0);
     s += ` · Jan/26 B2B: ${janB2b.length}Q · ${fmtMoney(pago)}`;
+  }
+  const noMes = (quinzenalPack?.files || []).filter(f => !f.mesKey);
+  if (noMes.length) {
+    s += ` · ${noMes.length} sem mês/quinzena (volta a carregar: ${noMes.map(f => f.fileName).join(', ')})`;
   }
   if (c.failed) {
     const details = (quinzenalPack.failedFiles || []).map(f => {
@@ -7944,7 +8152,9 @@ function syncQzUploadZone() {
     zone?.classList.add('loaded');
     if (list) {
       list.style.display = 'block';
-      list.innerHTML = quinzenalPack.files.map(f => `<div>${f.fileName}</div>`).join('');
+      list.innerHTML = quinzenalPack.files.map(f => f.format === 'export'
+        ? `<div>${f.fileName} <span style="color:var(--muted)">— export Unilog · ${f.quinzenaLabel || f.mesLabel || ''}</span></div>`
+        : `<div>${f.fileName}</div>`).join('');
     }
   } else {
     if (fn) fn.textContent = '';
@@ -8125,6 +8335,21 @@ function processQuinzenalFile(file) {
         if (!loaded.rows.length) {
           const err = diagnoseQzParseFailure(wb, meta.canal) || 'Sem linhas de detalhe';
           resolve({ ok: false, fileName: file.name, error: err });
+          return;
+        }
+        const exp = meta.canal === 'B2B' ? detectQzExportWorkbook(wb) : null;
+        if (exp) {
+          const parts = splitQzExportByQuinzena(loaded, meta, exp);
+          if (!parts?.length) {
+            resolve({ ok: false, fileName: file.name, error: 'Export Unilog sem mês (filtros, nome ou Dt CTE)' });
+            return;
+          }
+          parts[0].arrayBuffer = buf;
+          console.log('[fretes] qz export ok', file.name, 'filtros', parts[0].meta.exportFiltros,
+            'parts', parts.map(p => `${p.meta.quinzenaKey}: ${p.rows.length} linhas, frete ${p.meta.resumoTotalFrete.toFixed(2)}`
+              + ` → c/ imp ${p.meta.resumoTotalComImpostos.toFixed(2)}`).join(' | '),
+            'linha Total', loaded.totalRowPago);
+          resolve({ ok: true, fileName: file.name, parts });
           return;
         }
         console.log('[fretes] qz file ok', file.name,
