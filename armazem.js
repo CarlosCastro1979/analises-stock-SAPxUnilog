@@ -1,8 +1,14 @@
-// armazem.js v1.0.42 — soft company reset; free pack base64 after parse
-const ARMAZEM_JS_VERSION = '1.0.42';
+// armazem.js v1.0.43 — QB igual à DFB (dados por empresa), taxa NF configurável, leitura read-only p/ Total Brasil
+const ARMAZEM_JS_VERSION = '1.0.43';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
-const ARM_NF_RATE = 0.055;
+/** Contract rate on expedited NF — default for every company; a company pack may override it (pack.contract.nfRate). */
+const ARM_NF_RATE_DEFAULT = 0.055;
+/** Depositante name/CNPJ expected in the Unilog Receita_Custo files per company (warning only). */
+const ARM_COMPANY_DEPOSITANTE = {
+  DFB: { re: /DELTA FOODS|14830817000100/i, label: 'Delta Foods Brasil' },
+  QB: { re: /QUALITY|Q[\s._-]?BRASIL/i, label: 'Quality Brands (Q-Brasil)' }
+};
 const ARM_IMPOSTOS_RATE = 0.1125;
 const ARM_NET_FACTOR = 1 - ARM_IMPOSTOS_RATE; // 0,8875 — fator líquido Unilog
 const ARM_IMPOSTOS_LABEL = 'Impostos — 2% (ISS) + 9,25% (PIS/COFINS) = 11,25% (gross-up s/ subtotal)';
@@ -120,6 +126,32 @@ function armCompany() {
   return typeof company !== 'undefined' ? company : 'DFB';
 }
 
+/** Company whose data armPack / draft hold — a late load or autosave must never cross into another company. */
+let armPackCompany = null;
+/** Company whose cloud pack was read successfully (row found or confirmed absent) — no persist before that. */
+let armPackLoadedCo = null;
+/** Months in the cloud pack at last load/persist — a persist with fewer months is refused. */
+let armCloudMonthCount = 0;
+let _armLoadPromise = null;
+let _armLoadPromiseCo = null;
+/** Set while computing another company's pack read-only (Total Brasil) — synchronous use only. */
+let armRateOverride = null;
+
+function armPackNfRate(pack) {
+  const r = Number(pack?.contract?.nfRate);
+  return r > 0 && r < 1 ? r : ARM_NF_RATE_DEFAULT;
+}
+
+/** NF expedida rate for the pack on screen (or the pack being computed read-only). */
+function armNfRate() {
+  if (armRateOverride != null) return armRateOverride;
+  return armPackNfRate(armPack);
+}
+
+function armNfRatePctLabel() {
+  return fmtArmPct(armNfRate() * 100, 2);
+}
+
 function armSlot() {
   return typeof EXCEL_SLOTS !== 'undefined' ? EXCEL_SLOTS.ARMAZEM : 'armazem_monthly';
 }
@@ -168,13 +200,14 @@ function parseBrNum(v) {
     }
     const intPart = parts[0];
     const fracPart = parts[1] || '';
+    // pt-BR thousands ("100.000" as shown by fmtArmNum after blur) — must win over the zero-fraction rule.
+    if (/^-?\d{1,3}$/.test(intPart) && !/^-?0$/.test(intPart) && fracPart.length === 3) {
+      const n = parseFloat(intPart + fracPart);
+      if (Number.isFinite(n)) return n;
+    }
     if (!fracPart || /^0+$/.test(fracPart)) {
       const n = parseFloat(intPart);
       return Number.isFinite(n) ? n : 0;
-    }
-    if (intPart !== '0' && fracPart.length === 3 && intPart.length >= 1 && intPart.length <= 3) {
-      const n = parseFloat(intPart + fracPart);
-      if (Number.isFinite(n)) return n;
     }
     const n = parseFloat(s);
     return Number.isFinite(n) ? n : 0;
@@ -305,7 +338,7 @@ function armFmtResumoQty(v, isNf) {
 }
 
 function armFmtResumoUnit(v, isNf, unitVaries) {
-  if (isNf) return fmtArmPct(ARM_NF_RATE * 100);
+  if (isNf) return fmtArmPct(armNfRate() * 100);
   if (unitVaries || v == null) return '—';
   return fmtArmUnit(v);
 }
@@ -350,7 +383,7 @@ function aggregateResumoByNorm(months) {
   return Object.values(map).map(r => {
     const unitVaries = !r.isNf && r.unitValues.size > 1;
     let valorUnit = null;
-    if (r.isNf) valorUnit = ARM_NF_RATE;
+    if (r.isNf) valorUnit = armNfRate();
     else if (!unitVaries && r.unitQty) valorUnit = r.unitWeighted / r.unitQty;
     return {
       normName: r.normName,
@@ -610,12 +643,13 @@ function armRefreshLancamentoMonthOptions() {
 
 function armBlankLancamentoDraft(mesKey) {
   return {
+    company: armCompany(),
     mesKey,
     mesLabel: armMesNomeLong(mesKey, ''),
     impostos: 0,
     impostosManual: false,
     entrySource: '',
-    servicos: [armBuildServicoFromEntry('PERCENTUAL SOBRE NF EXPEDIDA', 0, ARM_NF_RATE)]
+    servicos: [armBuildServicoFromEntry('PERCENTUAL SOBRE NF EXPEDIDA', 0, armNfRate())]
   };
 }
 
@@ -631,6 +665,7 @@ function armLoadLancamentoDraft() {
     const subtotal = armServiceSubtotal(servicos);
     const impostosManual = !!existing.impostosManual;
     armLancamentoDraft = {
+      company: armCompany(),
       mesKey,
       mesLabel: armMesLabel(existing),
       entrySource: existing.entrySource || (existing.format === 'manual' ? 'manual' : 'excel'),
@@ -662,7 +697,7 @@ function armServiceSelectOptions(selected) {
 function armLancamentoRowHtml(s, idx) {
   const isNf = !!s.isNf;
   const qtyVal = isNf ? fmtArmNum(s.qtde, 2) : fmtArmNum(s.qtde, 2);
-  const unitVal = isNf ? fmtArmPct(ARM_NF_RATE * 100) : fmtArmNum(s.valorUnit, 2);
+  const unitVal = isNf ? fmtArmPct(armNfRate() * 100) : fmtArmNum(s.valorUnit, 2);
   const unitReadonly = isNf ? 'readonly tabindex="-1"' : '';
   return `<tr class="arm-entry-row" data-idx="${idx}">
     <td><select data-field="servico" onchange="armLancamentoServicoChange(${idx})">${armServiceSelectOptions(s.rawName || s.normName)}</select></td>
@@ -769,7 +804,7 @@ function armLancamentoRowCommit(idx) {
   const unitInp = vals.row.querySelector('[data-field=unit]');
   if (qtInp) qtInp.value = fmtArmNum(s.qtde, 2);
   if (unitInp && !s.isNf) unitInp.value = fmtArmNum(s.valorUnit, 2);
-  else if (unitInp && s.isNf) unitInp.value = fmtArmPct(ARM_NF_RATE * 100);
+  else if (unitInp && s.isNf) unitInp.value = fmtArmPct(armNfRate() * 100);
   const valCell = vals.row.querySelector('.arm-val-calc');
   if (valCell) valCell.textContent = armFmtMoney(s.valor || 0);
   armRefreshLancamentoSummary();
@@ -847,40 +882,43 @@ function armLancamentoCommitAllRows() {
 function armScheduleLancamentoAutosave() {
   clearTimeout(armLancamentoAutosaveTimer);
   armLancamentoAutosaveTimer = setTimeout(() => {
+    armLancamentoAutosaveTimer = null;
     armSaveLancamento({ silent: true }).catch(e => console.warn('[armazem] autosave', e));
   }, 1200);
 }
 
-async function armSaveLancamento(opts = {}) {
-  const silent = !!opts.silent;
-  if (armLancamentoSaving) {
-    if (silent) armScheduleLancamentoAutosave();
-    return;
-  }
-  if (armCompany() !== 'DFB') {
-    if (!silent) armToast('Avaliação Armazém disponível apenas para DFB.', 'error');
-    return;
-  }
-  if (!armLancamentoDraft) armLoadLancamentoDraft();
+/** Company switch: write the pending autosave to the company it was typed for (DOM still shows its rows). */
+function armFlushPendingAutosave() {
+  if (!armLancamentoAutosaveTimer) return;
+  clearTimeout(armLancamentoAutosaveTimer);
+  armLancamentoAutosaveTimer = null;
+  const co = armLancamentoDraft?.company;
+  if (!co || !armPack || armPackCompany !== co || armPackLoadedCo !== co) return;
   armLancamentoCommitAllRows();
   const draft = armLancamentoDraft;
-  if (!draft?.mesKey) {
-    if (!silent) armToast('Seleciona mês de referência.', 'error');
-    return;
-  }
   const impInp = $arm('lancImpostos');
-  draft.impostos = armNum(impInp?.value);
+  if (draft.impostosManual) draft.impostos = armNum(impInp?.value);
+  const pack = armPack;
+  const month = armBuildMonthFromDraft(draft, armNfUploadRows, pack);
+  if (!month) return;
+  armPutMonthInPack(pack, month);
+  console.log('[armazem] flush autosave on company switch', co, month.mesKey);
+  persistArmPack(pack, { company: co, skipIfUnchanged: true })
+    .then(ok => { if (ok && typeof showSaveIndicator === 'function') showSaveIndicator(); })
+    .catch(e => console.warn('[armazem] flush autosave', co, e));
+}
+
+/** Month record from the Lançamento draft (null when there is nothing to save). */
+function armBuildMonthFromDraft(draft, nfUploadRows, pack) {
+  if (!draft?.mesKey) return null;
   if (!draft.impostosManual) {
     draft.impostos = armCalcImpostos(armServiceSubtotal(draft.servicos));
   }
   const servicosToSave = (draft.servicos || []).filter(s => (s.valor || 0) > 0 || (s.qtde || 0) > 0);
-  if (!servicosToSave.length) {
-    if (!silent) armToast('Adiciona pelo menos uma linha com quantidade ou valor.', 'error');
-    return;
-  }
+  if (!servicosToSave.length) return null;
 
-  const prevMonth = (armPack?.months || []).find(m => m.mesKey === draft.mesKey);
-  const nfSource = armNfUploadRows.length ? armNfUploadRows : (prevMonth?.nfRows || []);
+  const prevMonth = (pack?.months || []).find(m => m.mesKey === draft.mesKey);
+  const nfSource = nfUploadRows?.length ? nfUploadRows : (prevMonth?.nfRows || []);
 
   const month = armRecalcMonthTotals(armNormalizeMonth({
     mesKey: draft.mesKey,
@@ -901,28 +939,67 @@ async function armSaveLancamento(opts = {}) {
     if (nfSum > 0) {
       let nfSvc = armFindNfServico(month);
       if (!nfSvc) {
-        nfSvc = armBuildServicoFromEntry('PERCENTUAL SOBRE NF EXPEDIDA', nfSum, ARM_NF_RATE);
+        nfSvc = armBuildServicoFromEntry('PERCENTUAL SOBRE NF EXPEDIDA', nfSum, armNfRate());
         month.servicos.unshift(nfSvc);
       } else {
         nfSvc.qtde = nfSum;
-        nfSvc.valorUnit = ARM_NF_RATE;
-        nfSvc.valor = nfSum * ARM_NF_RATE;
+        nfSvc.valorUnit = armNfRate();
+        nfSvc.valor = nfSum * armNfRate();
         nfSvc.isNf = true;
       }
       armRecalcMonthTotals(month);
     }
   }
+  return month;
+}
 
-  armEnsurePack();
-  armPack.version = 3;
-  armPack.updatedAt = new Date().toISOString();
-  const others = (armPack.months || []).filter(m => m.mesKey !== month.mesKey);
-  armPack.months = [...others, month].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
-  // Silent autosave: skip NF SAP rewalk (unchanged by typing) — keeps UI responsive
-  if (!silent) refreshAllSapOnNfs();
+function armPutMonthInPack(pack, month) {
+  pack.version = 3;
+  pack.updatedAt = new Date().toISOString();
+  const others = (pack.months || []).filter(m => m.mesKey !== month.mesKey);
+  pack.months = [...others, month].sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
+}
+
+async function armSaveLancamento(opts = {}) {
+  const silent = !!opts.silent;
+  if (armLancamentoSaving) {
+    if (silent) armScheduleLancamentoAutosave();
+    return;
+  }
+  const co = armCompany();
+  if (armLancamentoDraft && armLancamentoDraft.company && armLancamentoDraft.company !== co) {
+    console.warn('[armazem] save skipped — draft belongs to', armLancamentoDraft.company, 'not', co);
+    return;
+  }
+  if (!armLancamentoDraft) armLoadLancamentoDraft();
+  armLancamentoCommitAllRows();
+  const draft = armLancamentoDraft;
+  if (!draft?.mesKey) {
+    if (!silent) armToast('Seleciona mês de referência.', 'error');
+    return;
+  }
+  const impInp = $arm('lancImpostos');
+  draft.impostos = armNum(impInp?.value);
   armLancamentoSaving = true;
   try {
-    const saved = await persistArmPack(armPack, { skipIfUnchanged: silent });
+    // Never write before this company's cloud pack is in RAM — a 1-month pack would replace all saved months.
+    if (!(await armEnsurePackLoaded(co))) {
+      armToast(`Não foi possível ler os dados Armazém ${co} da cloud — não guardado (para não apagar meses). Tenta de novo.`, 'error');
+      return;
+    }
+    if (armCompany() !== co) return;
+    const month = armBuildMonthFromDraft(draft, armNfUploadRows, armPack);
+    if (!month) {
+      if (!silent) armToast('Adiciona pelo menos uma linha com quantidade ou valor.', 'error');
+      return;
+    }
+    armEnsurePack();
+    armPackCompany = co;
+    armPutMonthInPack(armPack, month);
+    // Silent autosave: skip NF SAP rewalk (unchanged by typing) — keeps UI responsive
+    if (!silent) refreshAllSapOnNfs();
+    const saved = await persistArmPack(armPack, { company: co, skipIfUnchanged: silent });
+    if (armCompany() !== co) return;
     updateArmFileZone();
     armRefreshLancamentoMonthOptions();
     if (silent) {
@@ -959,8 +1036,8 @@ function parseNfListFromWorkbook(wb, fileName, mesKey) {
         const fee = armCellNum(m, r, 3);
         if (!nf || nf === '-') continue;
         nfRows.push({
-          data: parseBrDate(dt), nf, valorNF, taxa: ARM_NF_RATE,
-          fee: fee || valorNF * ARM_NF_RATE, mesKey, fileName
+          data: parseBrDate(dt), nf, valorNF, taxa: armNfRate(),
+          fee: fee || valorNF * armNfRate(), mesKey, fileName
         });
       }
     }
@@ -987,8 +1064,8 @@ function parseNfListFromWorkbook(wb, fileName, mesKey) {
       if (!nf || nf === '-' || !valorNF) continue;
       if (!/^\d/.test(String(nf).trim()) && !/[A-Z0-9]{5,}/i.test(String(nf))) continue;
       nfRows.push({
-        data: '', nf, valorNF, taxa: ARM_NF_RATE,
-        fee: valorNF * ARM_NF_RATE, mesKey, fileName
+        data: '', nf, valorNF, taxa: armNfRate(),
+        fee: valorNF * armNfRate(), mesKey, fileName
       });
     }
   }
@@ -1106,7 +1183,7 @@ function armCleanFileBase(fileName) {
     .replace(/\.xlsx?$/i, '')
     .replace(/[_\s.-]+$/g, '')
     .trim()
-    .replace(/^receita[_\s]*(?:e[_\s]*)?custo\s*delta\s*[-–—:]?\s*/i, '')
+    .replace(/^receita[_\s]*(?:e[_\s]*)?custo[_\s]*(?:delta|q[_\s.-]?brasil|quality(?:[_\s]*brands)?)\s*[-–—:]?\s*/i, '')
     .trim();
 }
 
@@ -1318,18 +1395,18 @@ function armNfBaseFromServico(row) {
   const q = armNum(row.qtde);
   const fee = armNum(row.valor);
   if (q <= 0) {
-    if (fee > 0) return fee / ARM_NF_RATE;
+    if (fee > 0) return fee / armNfRate();
     return 0;
   }
   if (fee > 0) {
-    const expectedFee = q * ARM_NF_RATE;
+    const expectedFee = q * armNfRate();
     const relErr = Math.abs(expectedFee - fee) / Math.max(expectedFee, fee, 1);
     if (relErr < 0.08) return q;
     // qtde ≈ valor → both read the fee column, not the NF base
-    if (Math.abs(q - fee) / Math.max(q, fee, 1) < 0.03) return q / ARM_NF_RATE;
+    if (Math.abs(q - fee) / Math.max(q, fee, 1) < 0.03) return q / armNfRate();
   }
   if (q >= 500000) return q;
-  const asBase = q / ARM_NF_RATE;
+  const asBase = q / armNfRate();
   if (asBase >= 500000) return asBase;
   return q;
 }
@@ -1341,8 +1418,8 @@ function armRepairNfServico(month) {
   const base = armNfBaseFromServico(row);
   if (base > 0) {
     row.qtde = base;
-    row.valorUnit = ARM_NF_RATE;
-    row.valor = base * ARM_NF_RATE;
+    row.valorUnit = armNfRate();
+    row.valor = base * armNfRate();
   }
 }
 
@@ -1353,6 +1430,8 @@ function armGetVendasLiq(month) {
 
 async function armSetVendasLiq(mesKey, rawVal) {
   const val = armNum(rawVal);
+  const co = armCompany();
+  if (armPackCompany !== co || armPackLoadedCo !== co) return;
   const pack = armEnsurePack();
   const month = (pack.months || []).find(m => m.mesKey === mesKey);
   if (!month) return;
@@ -1362,7 +1441,7 @@ async function armSetVendasLiq(mesKey, rawVal) {
   else delete month.vendasLiq;
   month.vendasLiqUpdatedAt = new Date().toISOString();
   pack.updatedAt = new Date().toISOString();
-  const saved = await persistArmPack(pack);
+  const saved = await persistArmPack(pack, { company: co });
   if (saved) armToast('Vendas Liq guardadas.');
   if (armActiveTab === 'mensal') renderArmMensal();
   if (armActiveTab === 'adicionais') renderArmAdicionais();
@@ -1384,7 +1463,7 @@ function armGetVendasBrutas(month) {
   const base = armGetNfBase(month);
   if (base > 0) return base;
   const fee = armGetArmazenagemRubricaValor(month);
-  if (fee > 0) return fee / ARM_NF_RATE;
+  if (fee > 0) return fee / armNfRate();
   return 0;
 }
 
@@ -1395,7 +1474,7 @@ function armGetNfFee(month) {
     const fee = armNum(row.valor);
     const base = armNfBaseFromServico(row);
     if (fee > 0 && base > 0) {
-      const expected = base * ARM_NF_RATE;
+      const expected = base * armNfRate();
       const relErr = Math.abs(expected - fee) / Math.max(expected, fee, 1);
       if (relErr < 0.08) return fee;
       if (Math.abs(armNum(row.qtde) - fee) / Math.max(fee, 1) < 0.03) return expected;
@@ -1403,10 +1482,10 @@ function armGetNfFee(month) {
       return expected;
     }
     if (fee > 0 && fee < 500000) return fee;
-    if (base > 0) return Math.round(base * ARM_NF_RATE * 100) / 100;
+    if (base > 0) return Math.round(base * armNfRate() * 100) / 100;
   }
   const nfBase = armGetNfBase(month);
-  return nfBase > 0 ? Math.round(nfBase * ARM_NF_RATE * 100) / 100 : 0;
+  return nfBase > 0 ? Math.round(nfBase * armNfRate() * 100) / 100 : 0;
 }
 
 function armGetAdicionaisSum(month) {
@@ -1735,8 +1814,8 @@ function armLogParsedMonth(record, fileName) {
 function armFinishServico(rawName, qtde, valorUnit, valor, isNf) {
   const q = armNum(qtde);
   if (isNf) {
-    const v = q * ARM_NF_RATE;
-    return { qtde: q, valorUnit: ARM_NF_RATE, valor: v };
+    const v = q * armNfRate();
+    return { qtde: q, valorUnit: armNfRate(), valor: v };
   }
   const u = armNum(valorUnit);
   const calc = q * u;
@@ -1857,7 +1936,7 @@ function parseArmazemV2(wb, fileName, opts) {
           const fee = armCellNum(m, r, 3);
           if (!nf || nf === '-') continue;
           nfRows.push({
-            data: parseBrDate(dt), nf, valorNF, taxa: ARM_NF_RATE,
+            data: parseBrDate(dt), nf, valorNF, taxa: armNfRate(),
             fee, mesKey: meta.mesKey, fileName
           });
         }
@@ -1878,7 +1957,7 @@ function parseArmazemV2(wb, fileName, opts) {
           const fee = armCellNum(m, r, 4);
           if (!nf || nf === '-') continue;
           nfRows.push({
-            data: parseBrDate(dt), nf, valorNF, taxa: ARM_NF_RATE, fee,
+            data: parseBrDate(dt), nf, valorNF, taxa: armNfRate(), fee,
             mesKey: meta.mesKey, fileName
           });
         }
@@ -1911,7 +1990,7 @@ function parseArmazemV1(wb, fileName, opts) {
       for (let r = 0; r < Math.min(20, m.length); r++) {
         for (let c = 0; c < 10; c++) {
           const v = cellText(m, r, c);
-          if (/DELTA FOODS|14830817000100/i.test(v)) depositante = v;
+          if (/DELTA FOODS|14830817000100|QUALITY BRANDS|Q[\s._-]?BRASIL/i.test(v)) depositante = v;
         }
       }
     }
@@ -1938,7 +2017,7 @@ function parseArmazemV1(wb, fileName, opts) {
         const nf = cellText(m, rr, 7);
         const dt = cellText(m, rr, 1);
         const valorNF = armCellNum(m, rr, 28);
-        const taxa = armCellNum(m, rr, 32) || ARM_NF_RATE;
+        const taxa = armCellNum(m, rr, 32) || armNfRate();
         const fee = armCellNum(m, rr, 36);
         if (!nf) continue;
         nfRows.push({
@@ -1994,11 +2073,10 @@ function buildMonthRecord(opts) {
 function parseArmazemWorkbook(wb, fileName, opts) {
   const hasV2 = !!findResumoSheetName(wb);
   const rec = hasV2 ? parseArmazemV2(wb, fileName, opts) : parseArmazemV1(wb, fileName, opts);
-  if (armCompany() !== 'DFB') {
-    rec.companyWarning = 'Módulo configurado para Delta Foods Brasil (DFB).';
-  }
-  if (rec.depositante && !/DELTA FOODS/i.test(rec.depositante)) {
-    rec.depositWarning = 'Depositante não parece ser Delta Foods Brasil.';
+  const dep = ARM_COMPANY_DEPOSITANTE[armCompany()];
+  if (rec.depositante && dep && !dep.re.test(rec.depositante)) {
+    rec.depositWarning = `Depositante «${rec.depositante}» não parece ser ${dep.label} (${armCompany()}).`;
+    armToast(`${fileName}: ${rec.depositWarning}`, 'error');
   }
   return rec;
 }
@@ -2038,9 +2116,9 @@ function armSapStatusHtml() {
   const api = sapApi();
   if (api?.isSapLoaded?.()) {
     const n = Object.keys(api.getMap()).length;
-    return `✓ SAP NF (ZFACT) carregado — <strong>${n.toLocaleString('pt-BR')}</strong> NFs disponíveis (partilhado com Fretes, sem re-upload).`;
+    return `✓ SAP NF (ZFACT) <strong>${armEsc(armCompany())}</strong> carregado — <strong>${n.toLocaleString('pt-BR')}</strong> NFs ${armEsc(armCompany())} disponíveis (mapa da empresa, partilhado com Fretes, sem re-upload).`;
   }
-  return '⚠ <strong>Carrega ZFACT em Dados/Fretes primeiro</strong> — menu '
+  return `⚠ <strong>Carrega o ZFACT ${armEsc(armCompany())} em Fretes primeiro</strong> — menu `
     + '<a href="#" class="arm-link-fretes">Fretes CT-e</a> → Excel SAP NF. '
     + 'Não é necessário carregar outra vez aqui no Armazém.';
 }
@@ -2070,7 +2148,7 @@ function applySapToArmNf(row) {
   const out = { ...row };
   out.valorUnilog = armNum(row.valorNF);
   out.feeUnilog = armNum(row.fee);
-  out.feeExpected = out.valorUnilog * ARM_NF_RATE;
+  out.feeExpected = out.valorUnilog * armNfRate();
   out.feeDelta = out.feeUnilog - out.feeExpected;
 
   const sapLoaded = !!(api && api.isSapLoaded());
@@ -2194,6 +2272,7 @@ function slimArmPackForPersist(pack) {
   return {
     version: pack.version || 3,
     updatedAt: new Date().toISOString(),
+    contract: pack.contract || undefined,
     customServices: pack.customServices || [],
     months: (pack.months || []).map(m => {
       const n = armNormalizeMonth({ ...m });
@@ -2216,32 +2295,64 @@ function slimArmPackForPersist(pack) {
   };
 }
 
+/** Run fn with the NF rate of `pack` (another company's pack computed read-only). Synchronous fn only. */
+function armWithPackRate(pack, fn) {
+  const prev = armRateOverride;
+  armRateOverride = armPackNfRate(pack);
+  try { return fn(); } finally { armRateOverride = prev; }
+}
+
+/**
+ * Writes the pack to the given company's row only (company is explicit — never the selector at write time).
+ * Refuses when that company's cloud pack was not read first, or when it would drop saved months.
+ */
 async function persistArmPack(pack, opts = {}) {
-  if (!pack?.months?.length || typeof upsertExcelBinary !== 'function') return false;
-  const slim = slimArmPackForPersist(pack);
+  const co = opts.company || armPackCompany || armCompany();
+  const nMonths = pack?.months?.length || 0;
+  if (!pack || (!nMonths && !pack.contract) || typeof db === 'undefined') return false;
+  if (armPackLoadedCo !== co) {
+    console.warn('[armazem] persist refused — cloud pack not loaded for', co);
+    return false;
+  }
+  if (nMonths < armCloudMonthCount) {
+    console.error('[armazem] persist refused — would shrink', co, armCloudMonthCount, '→', nMonths);
+    armToast(`Guardar recusado: ficaria com ${nMonths} mês(es) e a cloud ${co} tem ${armCloudMonthCount}. Recarrega a página.`, 'error');
+    return false;
+  }
+  const slim = armWithPackRate(pack, () => slimArmPackForPersist(pack));
   // Strip volatile timestamp so identical content doesn't re-upload every keystroke
-  const forHash = { ...slim, updatedAt: '' };
-  const json = JSON.stringify(slim);
-  const hashJson = JSON.stringify(forHash);
+  const hashJson = co + '|' + JSON.stringify({ ...slim, updatedAt: '' });
   if (opts.skipIfUnchanged && hashJson === armLastPersistedJson) return false;
-  const bytes = new TextEncoder().encode(json);
+  const bytes = new TextEncoder().encode(JSON.stringify(slim));
   if (bytes.length > ARM_PERSIST_MAX_JSON_BYTES) {
     armToast('Dados demasiado grandes para guardar na cloud — reduz ficheiros ou meses com muitas NFs.', 'error');
     return false;
   }
-  const label = `${pack.months.length} mês(es) armazém`;
+  const label = `${nMonths} mês(es) armazém`;
   try {
-    await upsertExcelBinary(armSlot(), label, bytes.buffer);
-    armLastPersistedJson = hashJson;
+    console.log('[armazem] save', co, armSlot(), label, 'bytes', bytes.length);
+    const { error } = await db.from('logistica_excel_files').upsert({
+      company: co, slot: armSlot(), file_name: label,
+      uploaded_at: new Date().toISOString(), file_data: arrayBufferToBase64(bytes.buffer)
+    }, { onConflict: 'company,slot' });
+    if (error) throw error;
+    if (armPackLoadedCo === co) {
+      armLastPersistedJson = hashJson;
+      armCloudMonthCount = Math.max(armCloudMonthCount, nMonths);
+    }
     return true;
   } catch (e) {
-    console.error('[armazem] persist', e);
-    armToast('Erro ao guardar na cloud: ' + (e.message || e), 'error');
+    console.error('[armazem] persist', co, e);
+    armToast(`Erro ao guardar Armazém ${co} na cloud: ` + (e.message || e), 'error');
     return false;
   }
 }
 
-function parseArmPackFromRec(rec) {
+/**
+ * Parse a stored pack. opts.readOnly: another company's pack (Total Brasil) — no SAP enrichment,
+ * computed with that pack's own NF rate.
+ */
+function parseArmPackFromRec(rec, opts = {}) {
   if (!rec?.file_data || typeof base64ToArrayBuffer !== 'function') return null;
   try {
     const b64 = rec.file_data;
@@ -2251,15 +2362,38 @@ function parseArmPackFromRec(rec) {
       if (!pack.customServices) pack.customServices = [];
       pack.months.forEach(m => {
         m.impostos = armNum(m.impostos);
-        m.nfRows = (m.nfRows || []).map(applySapToArmNf);
+        if (!opts.readOnly) m.nfRows = (m.nfRows || []).map(applySapToArmNf);
       });
-      armNormalizePackMonths(pack);
+      armWithPackRate(pack, () => armNormalizePackMonths(pack));
     }
     return pack;
   } catch (e) {
     console.error('[armazem] parse pack', e);
     return null;
   }
+}
+
+async function armFetchPackRec(co, withData) {
+  const cols = withData ? 'slot,file_name,uploaded_at,file_data' : 'slot,file_name,uploaded_at';
+  const { data, error } = await db.from('logistica_excel_files').select(cols).eq('company', co).eq('slot', armSlot());
+  if (error) throw error;
+  return (data || [])[0] || null;
+}
+
+/** Read-only pack of any company (Total Brasil) — never touches armPack / the selected company. */
+async function armFetchPackForCompany(co) {
+  const rec = await armFetchPackRec(co, true);
+  if (!rec?.file_data) return { pack: null, rec };
+  await armYield();
+  return { pack: parseArmPackFromRec(rec, { readOnly: true }), rec };
+}
+
+/** Ensure armPack holds this company's cloud pack (loaded once); false when the cloud could not be read. */
+async function armEnsurePackLoaded(co) {
+  co = co || armCompany();
+  if (armPackLoadedCo === co && (!armPack || armPackCompany === co)) return true;
+  await loadSavedArmazem(true);
+  return armPackLoadedCo === co && armCompany() === co;
 }
 
 function aggregateByCatalog(months) {
@@ -2371,10 +2505,70 @@ function renderArmActiveTab() {
   if (typeof scheduleColResize === 'function') scheduleColResize();
 }
 
+/** Company context (title + contract rate) — every company has its own Armazém data. */
 function renderArmDfbGate() {
   const gate = $arm('dfbGate');
-  if (!gate) return;
-  gate.style.display = armCompany() === 'DFB' ? 'none' : 'block';
+  if (gate) gate.style.display = 'none';
+  const co = armCompany();
+  const title = $arm('companyTitle');
+  if (title) title.textContent = co;
+  const rateInp = $arm('nfRate');
+  if (rateInp && document.activeElement !== rateInp) {
+    rateInp.value = fmtArmNum(armNfRate() * 100, 4);
+  }
+  const rateNote = $arm('nfRateNote');
+  if (rateNote) {
+    const custom = armPack?.contract?.nfRate > 0;
+    rateNote.textContent = custom
+      ? `Taxa contratual ${co} (guardada com os dados ${co}).`
+      : `Padrão ${fmtArmPct(ARM_NF_RATE_DEFAULT * 100, 2)} — altera se o contrato ${co} for diferente.`;
+  }
+  document.querySelectorAll('#page-armazem [data-arm-rate-label]').forEach(el => {
+    el.textContent = armNfRatePctLabel();
+  });
+}
+
+let armContractAutosaveTimer = null;
+
+/** Contract NF rate typed in Lançamento — debounced autosave into this company's pack. */
+function armOnNfRateInput() {
+  const inp = $arm('nfRate');
+  if (!inp) return;
+  const pct = armNum(inp.value);
+  clearTimeout(armContractAutosaveTimer);
+  if (!(pct > 0 && pct < 100)) return;
+  const co = armCompany();
+  armContractAutosaveTimer = setTimeout(async () => {
+    armContractAutosaveTimer = null;
+    if (armCompany() !== co) return;
+    if (!(await armEnsurePackLoaded(co))) {
+      armToast(`Não foi possível ler os dados Armazém ${co} — taxa não guardada.`, 'error');
+      return;
+    }
+    if (armCompany() !== co) return;
+    const pack = armEnsurePack();
+    armPackCompany = co;
+    const rate = Math.round(pct * 10000) / 1000000;
+    if (armPackNfRate(pack) === rate && pack.contract?.nfRate) return;
+    // Base (qtde) stays; fee follows the new rate before normalize so armNfBaseFromServico sees consistent rows.
+    (pack.months || []).forEach(m => {
+      const nf = armFindNfServico(m);
+      if (nf && armNum(nf.qtde) > 0) {
+        nf.valorUnit = rate;
+        nf.valor = armNum(nf.qtde) * rate;
+      }
+    });
+    pack.contract = { ...(pack.contract || {}), nfRate: rate, updatedAt: new Date().toISOString() };
+    armNormalizePackMonths(pack);
+    if (armLancamentoDraft) {
+      armLancamentoDraft.servicos = (armLancamentoDraft.servicos || []).map(s =>
+        s.isNf ? armBuildServicoFromEntry(s.rawName || s.normName, s.qtde, rate) : s);
+    }
+    const saved = await persistArmPack(pack, { company: co });
+    renderArmDfbGate();
+    renderArmActiveTab();
+    if (saved && typeof showSaveIndicator === 'function') showSaveIndicator();
+  }, 1000);
 }
 
 function armIsExcelFile(file) {
@@ -2526,9 +2720,9 @@ function armMensalMonthRowHtml(m) {
   const vlDisplay = vendasLiq ? fmtArmNum(vendasLiq, 2) : '';
   return `<tr class="arm-mensal-month-row">
     <td>${armEsc(armMesLabel(m))}${partial}</td>
-    <td class="right" title="Base NF / faturação bruta Unilog (armazenagem 5,5%)">${vendasBrutas > 0 ? armFmtMoney(vendasBrutas) : '—'}</td>
+    <td class="right" title="Base NF / faturação bruta Unilog (armazenagem ${armNfRatePctLabel()})">${vendasBrutas > 0 ? armFmtMoney(vendasBrutas) : '—'}</td>
     <td class="right"><input type="text" class="fi arm-vendas-liq-input" data-mes="${armEsc(m.mesKey)}" value="${armEsc(vlDisplay)}" placeholder="R$ …" onblur="typeof armSetVendasLiq==='function'&&armSetVendasLiq('${armEsc(m.mesKey)}',this.value)" style="width:110px;text-align:right;font-size:11px;padding:4px 6px;"></td>
-    <td class="right" title="Taxa 5,5% sobre NF expedida">${armFee > 0 ? armFmtMoney(armFee) : '—'}</td>
+    <td class="right" title="Taxa ${armNfRatePctLabel()} sobre NF expedida">${armFee > 0 ? armFmtMoney(armFee) : '—'}</td>
     <td class="right" title="Armazenagem ÷ Vendas Liq">${pctArm}</td>
     <td class="right">${addVal > 0 ? armFmtMoney(addVal) : '—'}</td>
     <td class="right" title="Adicionais ÷ Vendas Liq">${pctAdic}</td>
@@ -2629,7 +2823,7 @@ function renderArmMensal() {
       <div class="kpi"><div class="label">Meses</div><div class="value">${months.length}</div></div>
       <div class="kpi"><div class="label">Total pago (s/ imp.)</div><div class="value">${armFmtMoney(totalPago)}</div></div>
       <div class="kpi"><div class="label">Total pago (c/ imp.)</div><div class="value">${armFmtMoney(totalComImp)}</div></div>
-      <div class="kpi"><div class="label">Armazenagem (5,5%)</div><div class="value">${armFmtMoney(totalArmFee)}</div><div class="sub">Taxa NF expedida</div></div>
+      <div class="kpi"><div class="label">Armazenagem (${armNfRatePctLabel()})</div><div class="value">${armFmtMoney(totalArmFee)}</div><div class="sub">Taxa NF expedida</div></div>
       <div class="kpi"><div class="label">Adicionais</div><div class="value">${armFmtMoney(totalAdicionais)}</div></div>`;
   }
 
@@ -2683,7 +2877,7 @@ function renderArmMensal() {
       ${sortTh('mensal', 'mesLabel', 'Mês')}
       ${sortTh('mensal', 'vendasBrutas', 'Vendas Brutas', 'right')}
       ${sortTh('mensal', 'vendasLiq', 'Vendas Liq', 'right')}
-      ${sortTh('mensal', 'armazenagemFee', 'Armazenagem (5,5%)', 'right')}
+      ${sortTh('mensal', 'armazenagemFee', `Armazenagem (${armNfRatePctLabel()})`, 'right')}
       ${sortTh('mensal', 'pctArmazenagemVl', '% arm. s/ vendas liq', 'right')}
       ${sortTh('mensal', 'adicionais', 'Adicionais', 'right')}
       ${sortTh('mensal', 'pctAdicionaisVl', '% adic. s/ vendas liq', 'right')}
@@ -2799,7 +2993,7 @@ function renderArmNf() {
       ${sortTh('nf', 'sapValor', 'Valor ZFACT/SAP', 'right')}
       <th>Δ valor</th>
       <th>Cliente SAP</th>
-      ${sortTh('nf', 'fee', 'Taxa 5,5%', 'right')}
+      ${sortTh('nf', 'fee', `Taxa ${armNfRatePctLabel()}`, 'right')}
       <th>Estado</th>`;
   }
 
@@ -3105,17 +3299,18 @@ async function processOneArmFile(file) {
 }
 
 async function processArmFiles() {
-  if (armCompany() !== 'DFB') {
-    armToast('Avaliação Armazém disponível apenas para DFB.', 'error');
-    return;
-  }
   if (!armPendingFiles.length) {
     armToast('Seleciona ficheiros Excel para processar.', 'error');
     return;
   }
+  const co = armCompany();
   const pending = [...armPendingFiles];
   armSetProcessing(true, `A processar 0/${pending.length}…`);
   try {
+    if (!(await armEnsurePackLoaded(co))) {
+      armToast(`Não foi possível ler os dados Armazém ${co} da cloud — nada processado (para não apagar meses).`, 'error');
+      return;
+    }
     const results = [];
     for (let i = 0; i < pending.length; i++) {
       const file = pending[i];
@@ -3146,12 +3341,19 @@ async function processArmFiles() {
       armToast('Nenhum dado extraído dos ficheiros.', 'error');
       return;
     }
+    if (armCompany() !== co) {
+      armToast(`Empresa mudou durante o processamento — ficheiros não guardados em ${armCompany()}.`, 'error');
+      return;
+    }
+    const contract = armPack?.contract;
     armPack = mergeArmPack(armPack, built);
+    if (contract) armPack.contract = contract;
+    armPackCompany = co;
     refreshAllSapOnNfs();
     armLogPackMonths('after process');
     armPendingFiles = [];
     updateArmFileZone();
-    const saved = await persistArmPack(armPack);
+    const saved = await persistArmPack(armPack, { company: co });
     const totalMonths = armPack.months.length;
     armToast(
       `Processado: ${okN} novo(s), ${totalMonths} mês(es) no total` +
@@ -3170,37 +3372,71 @@ async function processArmFiles() {
 }
 
 async function loadSavedArmazem(silent) {
-  if (typeof fetchExcelFiles !== 'function') return false;
+  if (typeof db === 'undefined') return false;
+  const co = armCompany();
+  if (_armLoadPromise && _armLoadPromiseCo === co) return _armLoadPromise;
+  _armLoadPromiseCo = co;
+  _armLoadPromise = _loadSavedArmazemImpl(co, silent).finally(() => {
+    if (_armLoadPromiseCo === co) { _armLoadPromise = null; _armLoadPromiseCo = null; }
+  });
+  return _armLoadPromise;
+}
+
+function armFetchPackRecWithTimeout(co, ms) {
+  return Promise.race([
+    armFetchPackRec(co, true),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+  ]);
+}
+
+async function _loadSavedArmazemImpl(co, silent) {
   if (!silent) armSetProcessing(true, 'A carregar da cloud…');
   try {
-    const m = await Promise.race([
-      fetchExcelFiles([armSlot()]),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 25_000))
-    ]);
-    const rec = m[armSlot()];
+    let rec;
+    try {
+      rec = await armFetchPackRecWithTimeout(co, 15_000);
+    } catch (e) {
+      if (armCompany() !== co) return false;
+      console.warn('[armazem] load retry', co, e?.message || e);
+      rec = await armFetchPackRecWithTimeout(co, 20_000);
+    }
+    // Company switched while fetching — this pack belongs to another company.
+    if (armCompany() !== co) {
+      console.warn('[armazem] load discarded — company changed', co, '→', armCompany());
+      return false;
+    }
     const pack = parseArmPackFromRec(rec);
-    if (pack?.months?.length) {
-      armPack = armNormalizePackMonths(pack);
+    armPackLoadedCo = co;
+    if (pack?.months?.length || pack?.contract) {
+      armPack = armWithPackRate(pack, () => armNormalizePackMonths(pack));
+      armPackCompany = co;
+      armCloudMonthCount = armPack.months?.length || 0;
       refreshAllSapOnNfs();
       try {
         const slim = slimArmPackForPersist(armPack);
-        armLastPersistedJson = JSON.stringify({ ...slim, updatedAt: '' });
+        armLastPersistedJson = co + '|' + JSON.stringify({ ...slim, updatedAt: '' });
       } catch (_) { armLastPersistedJson = ''; }
-      armLogPackMonths('loaded from cloud');
+      armLogPackMonths(`loaded from cloud (${co})`);
       updateArmFileZone();
+      renderArmDfbGate();
       if (armInited) renderArmActiveTab();
       const stale = (armPack.months || []).filter(m => !(m.servicos?.length)).length;
       if (!silent) {
         armToast(
-          `${armPack.months.length} mês(es) carregado(s) da cloud` +
+          `${armPack.months.length} mês(es) ${co} carregado(s) da cloud` +
           (stale ? ` — ${stale} sem resumo (processar de novo)` : '') + '.',
           stale ? 'error' : 'success'
         );
       }
       return true;
     }
+    // No row yet for this company — confirmed empty, first save may create it.
+    armCloudMonthCount = 0;
+    if (armPackCompany !== co) { armPack = null; armPackCompany = co; }
+    console.log('[armazem] no saved pack for', co);
+    if (!silent) armToast(`Sem dados Armazém guardados para ${co}.`, 'info');
   } catch (e) {
-    console.warn('[armazem] load saved', e);
+    console.warn('[armazem] load saved', co, e);
   } finally {
     if (!silent) armSetProcessing(false);
   }
@@ -3217,7 +3453,7 @@ function exportResumoSheetRows(rows, title) {
     aoa.push([
       s.rawName || s.normName,
       s.isNf ? s.qtde : s.qtde,
-      s.isNf ? ARM_NF_RATE : s.valorUnit,
+      s.isNf ? armNfRate() : s.valorUnit,
       s.valor
     ]);
   });
@@ -3265,16 +3501,26 @@ function exportArmazemWorkbook() {
   })));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ad), 'Adicionais');
 
-  XLSX.writeFile(wb, `armazem_delta_${armCompany()}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.writeFile(wb, `armazem_${armCompany()}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   armToast('Excel exportado.');
 }
 
-async function reloadArmazemForCompany() {
+function armClearCompanyState() {
+  armFlushPendingAutosave();
+  clearTimeout(armContractAutosaveTimer);
+  armContractAutosaveTimer = null;
   armPack = null;
+  armPackCompany = null;
+  armPackLoadedCo = null;
+  armCloudMonthCount = 0;
   armPendingFiles = [];
   armLancamentoDraft = null;
   armNfUploadRows = [];
   armLastPersistedJson = '';
+}
+
+async function reloadArmazemForCompany() {
+  armClearCompanyState();
   armInvalidateVendasCache();
   loadCatalogOverrides();
   await loadSavedArmazem(true);
@@ -3285,19 +3531,14 @@ async function reloadArmazemForCompany() {
 
 /** Soft reset on company switch — no cloud pull until Armazém tab opens. */
 function resetArmazemForCompany() {
-  armPack = null;
-  armPendingFiles = [];
-  armLancamentoDraft = null;
-  armNfUploadRows = [];
-  armLastPersistedJson = '';
+  armClearCompanyState();
   armInvalidateVendasCache();
   loadCatalogOverrides();
   updateArmFileZone();
   renderArmDfbGate();
   if (armInited && document.getElementById('page-armazem')?.classList.contains('active')) {
-    loadSavedArmazem(true).then(() => {
-      if (armInited) renderArmActiveTab();
-    }).catch(() => {});
+    renderArmActiveTab();
+    armLoadCompanyPackThenRender();
   }
 }
 window.resetArmazemForCompany = resetArmazemForCompany;
@@ -3312,6 +3553,7 @@ function initArmazem() {
     renderArmDfbGate();
     updateArmFileZone();
     renderArmActiveTab();
+    if (armPackLoadedCo !== armCompany()) armLoadCompanyPackThenRender();
     if (!sapApi()?.isSapLoaded?.()) {
       armEnsureSapLoaded().then(ok => {
         if (ok) {
@@ -3395,21 +3637,43 @@ function initArmazem() {
   });
   $arm('exportBtn')?.addEventListener('click', () => exportArmazemWorkbook());
 
+  $arm('nfRate')?.addEventListener('input', () => armOnNfRateInput());
+
   renderArmDfbGate();
   updateArmFileZone();
-  Promise.all([
-    loadSavedArmazem(true),
-    armEnsureSapLoaded()
-  ]).then(() => {
+  renderArmActiveTab();
+  armLoadCompanyPackThenRender();
+  const co = armCompany();
+  armEnsureSapLoaded().then(ok => {
+    if (!ok || armCompany() !== co) return;
     refreshAllSapOnNfs();
-    if (armActiveTab === 'lancamento') armLoadLancamentoDraft();
-    else renderArmActiveTab();
-  }).catch(e => console.warn('[armazem] load saved', e));
+    armNfUploadRows = armNfUploadRows.map(r => applySapToArmNf(r));
+    renderArmActiveTab();
+  }).catch(e => console.warn('[armazem] ensure sap', e));
+}
+
+/** Load the selected company's pack, then reload the Lançamento draft from it (unless the company changed). */
+function armLoadCompanyPackThenRender() {
+  const co = armCompany();
+  loadSavedArmazem(true).then(() => {
+    if (armCompany() !== co) return;
+    if (!armIsCompanyPackLoaded(co)) {
+      armToast(`Não foi possível carregar os dados Armazém ${co} da cloud — usa «Carregar último guardado» em Carregamento Excel. Nada é gravado até carregar.`, 'error');
+    }
+    renderArmDfbGate();
+    updateArmFileZone();
+    if (armActiveTab === 'lancamento' && !armLancamentoAutosaveTimer && !armLancamentoSaving) {
+      armInitLancamentoSelectors();
+      armRefreshLancamentoMonthOptions();
+      armLoadLancamentoDraft();
+    } else renderArmActiveTab();
+  }).catch(e => console.warn('[armazem] load saved', co, e));
 }
 
 /** Monthly rows for Total Custo Unilog — Vendas Brutas/Liq + armazenagem c/ impostos. */
-function getArmMonthlyCustoRows() {
-  return (armPack?.months || [])
+/** Monthly cost rows of any company's pack, computed with that pack's NF rate. */
+function armMonthlyCustoRowsFromPack(pack) {
+  return armWithPackRate(pack, () => (pack?.months || [])
     .filter(m => m.mesKey && /^\d{4}-\d{2}$/.test(String(m.mesKey)))
     .map(m => {
       const armComImp = armGetMonthPagoComImp(m) || 0;
@@ -3424,10 +3688,26 @@ function getArmMonthlyCustoRows() {
         hasData: !!(m.servicos?.length || m.nfRows?.length || armComImp > 0 || vendasLiq || vendasBrutas)
       };
     })
-    .sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey)));
+    .sort((a, b) => String(a.mesKey).localeCompare(String(b.mesKey))));
+}
+
+/** Rows of the selected company only — empty while armPack still holds (or is loading) another company. */
+function getArmMonthlyCustoRows() {
+  if (armPackCompany !== armCompany()) return [];
+  return armMonthlyCustoRowsFromPack(armPack);
+}
+
+/** True once the selected company's Armazém pack was read from the cloud (rows may still be empty). */
+function armIsCompanyPackLoaded(co) {
+  return armPackLoadedCo === (co || armCompany());
 }
 
 window.getArmMonthlyCustoRows = getArmMonthlyCustoRows;
+window.armMonthlyCustoRowsFromPack = armMonthlyCustoRowsFromPack;
+window.armFetchPackForCompany = armFetchPackForCompany;
+window.armIsCompanyPackLoaded = armIsCompanyPackLoaded;
+window.armEnsurePackLoaded = armEnsurePackLoaded;
+window.armOnNfRateInput = armOnNfRateInput;
 window.initArmazem = initArmazem;
 window.refreshArmazemSapValidation = refreshArmazemSapValidation;
 window.armSetVendasLiq = armSetVendasLiq;
