@@ -1,9 +1,19 @@
-// fretes.js v1.8.114 — Q-BRASIL «Detalhamento Fatura» export: período do rodapé Excluídos + nomes 2ªQZSET2026
-const FRETES_JS_VERSION = '1.8.114';
-/** Bump when a stored quinzenal pack needs a one-time repair on load (persisted as pack.cleanup.version). */
-const QZ_PACK_CLEANUP_VERSION = 1;
+// fretes.js v1.8.116 — período de cada quinzenal/export pelas datas dos documentos (Dt CTE), nome/rodapé só cross-check
+const FRETES_JS_VERSION = '1.8.116';
+/**
+ * Bump when a stored quinzenal pack needs a one-time repair on load (persisted as pack.cleanup.version).
+ * v2: period of every stored file re-derived from its own Dt CTE / Data coleta (backup slot per version first).
+ */
+const QZ_PACK_CLEANUP_VERSION = 2;
 /** Pre-repair copy of the quinzenal pack (written once per company, never overwritten). */
 const QZ_PACK_BACKUP_SLOT = 'fretes_quinzenal_backup_v1';
+/** Copy of the stored pack before this version's one-time repair (`fretes_quinzenal_backup_pre_v1.8.1xx`). */
+const QZ_PACK_VERSION_BACKUP_SLOT = `fretes_quinzenal_backup_pre_v${FRETES_JS_VERSION}`;
+/**
+ * A file is a full-month report (split by date into 1ªQ + 2ªQ) when the smaller half of its month holds at least
+ * this share of the dated lines. Real quinzenais: late CT-e ≤ 23% (DFB 1ªQ Fev/2026: 65 of 279 dated 18–21 Feb).
+ */
+const QZ_PERIOD_SPLIT_SHARE = 0.35;
 /** Unilog report operator → company whose Fretes pack owns it. */
 const QZ_OPERATOR_COMPANY = { DELTA: 'DFB', QBRASIL: 'QB' };
 const QZ_OPERATOR_LABEL = { DELTA: 'DELTA', QBRASIL: 'Q-BRASIL' };
@@ -381,6 +391,7 @@ function slimB2cRowForPersist(r) {
   return {
     nf: r.nf, pedido: r.pedido, dtColeta: persistDateValue(r.dtColeta) || r.dtColeta,
     dtNF: persistDateValue(r.dtNF) || r.dtNF,
+    dtCte: persistDateValue(r.dtCte) || undefined,
     numCte: r.numCte, transportador: r.transportador, destinatario: r.destinatario,
     valorProdutos: r.valorProdutos, valorNF: r.valorNF, pago: r.pago, zona: r.zona,
     quinzenaKey: r.quinzenaKey, quinzenaLabel: r.quinzenaLabel, fileName: r.fileName,
@@ -429,36 +440,77 @@ function qzSourceFileName(f) {
   return f?.sourceFileName || f?.fileName || '';
 }
 
+/** One half of a report split by date (month export or full-month quinzenal), not a renamed re-send. */
+function qzIsSplitPart(f) {
+  return !!(f?.periodSplit || (f?.format === 'export' && f.exportPeriod === 'mes' && f.sourceFileName && f.sourceFileName !== f.fileName));
+}
+
 /** Same report regardless of copy/revision suffix: "X rev01.xlsx" ≡ "X rev01 (3).xlsx" ≡ "X - Cópia.xlsx". */
 function qzReportNameKey(name) {
   const s = String(name || '');
   return s ? stripQzNameSuffixes(s.replace(/\.xlsx?$/i, '')).normalize('NFC').toLowerCase() : '';
 }
 
+/** Dated lines of a stored file: B2B one per CT-e (Dt CTE, NF's Dt NF), B2C one per row (Data CT-e / coleta / NF). */
+function qzStoredFileLines(f, rowsByFile) {
+  const rows = rowsByFile.get(f.fileName) || [];
+  if (f.canal !== 'B2B') return rows;
+  return rows.flatMap(r => (r.ctes?.length
+    ? r.ctes.map(c => ({ dtCte: c.dtCte, dtNF: r.dtNF, pago: c.pago }))
+    : [{ dtNF: r.dtNF, pago: r.pago }]));
+}
+
 /**
- * Exports saved before v1.8.114 read "Excluídos … 1ª Quinzena" as the period (Q-BRASIL "Detalhamento
- * Fatura … 2ªQZSET2026" landed in 1ªQ). Re-key from the stored footer; whole-month splits are left alone.
+ * Re-derive the period of every stored file from the dates of its own lines (idempotent). The file keeps its
+ * rows and billed total; only mesKey / quinzenaKey (file + rows) move when the dates disagree with what it was
+ * saved under. Stored full-month files are not split here — they get a warning to re-upload.
  */
-function repairQzExportPeriods(pack) {
-  let fixed = 0;
+function rederiveQzFilePeriods(pack) {
+  const changed = [];
+  const byFile = canalRows => {
+    const m = new Map();
+    (canalRows || []).forEach(r => {
+      if (!m.has(r.fileName)) m.set(r.fileName, []);
+      m.get(r.fileName).push(r);
+    });
+    return m;
+  };
+  const b2bByFile = byFile(pack?.b2bRows);
+  const b2cByFile = byFile(pack?.b2cRows);
   (pack?.files || []).forEach(f => {
-    if (f.format !== 'export' || f.exportPeriod !== 'quinzena' || !f.exportFiltros) return;
-    const flt = parseQzExportFiltros(f.exportFiltros);
-    const [y, mm] = String(f.mesKey || '').split('-').map(Number);
-    const ano = flt.ano || y;
-    const mes = flt.mes || mm;
-    if (!flt.quinzena || !ano || !mes) return;
-    const mesKey = `${ano}-${String(mes).padStart(2, '0')}`;
-    const quinzenaKey = `${mesKey}-Q${flt.quinzena}`;
-    if (quinzenaKey === f.quinzenaKey) return;
-    const quinzenaLabel = `${flt.quinzena}ªQ ${MESES_PT[mes - 1]}/${ano}`;
-    console.log('[fretes] qz export period repair', f.fileName, f.quinzenaKey, '→', quinzenaKey);
-    const patch = { mesKey, mesLabel: fmtMesLabel(mesKey), quinzenaKey, quinzenaLabel };
-    Object.assign(f, patch);
-    (pack.b2bRows || []).forEach(r => { if (r.fileName === f.fileName) Object.assign(r, patch); });
-    fixed++;
+    const rowsByFile = f.canal === 'B2B' ? b2bByFile : b2cByFile;
+    const splitPart = qzIsSplitPart(f);
+    const per = qzPeriodFromLines(qzStoredFileLines(f, rowsByFile), f.canal, {
+      monthOnly: f.format === 'export' && f.exportPeriod === 'mes' && !splitPart
+    });
+    if (!per) return;
+    const qk = per.quinzenaKey;
+    const out = { n: 0, v: 0, byKey: {} };
+    Object.entries(per.by).forEach(([k, b]) => {
+      if (k === qk) return;
+      out.n += b.n;
+      out.v += b.v;
+      out.byKey[k] = b.n;
+    });
+    const warnings = (f.periodWarnings || []).filter(w => !/fora da quinzena|volta a carregar para dividir/.test(w));
+    if (out.n) warnings.push(qzOutlierNote(out, f.canal, per.field));
+    if (per.split && !splitPart) warnings.push(`Ficheiro com o mês inteiro (${per.field}) — volta a carregar para dividir em 1ªQ + 2ªQ`);
+    f.periodSource = 'datas';
+    f.periodField = per.field;
+    f.foraQz = out.n ? { n: out.n, pago: out.v } : undefined;
+    if (qk !== f.quinzenaKey) {
+      const from = f.quinzenaKey || f.mesKey || '';
+      const p = qzPeriodFields(qk);
+      const patch = { mesKey: p.mesKey, mesLabel: p.mesLabel, quinzenaKey: qk, quinzenaLabel: p.quinzenaLabel };
+      warnings.unshift(`Guardado como ${from ? qzKeyLabel(from) : 'sem quinzena'}, datas (${per.field}) indicam ${p.quinzenaLabel} — corrigido para ${p.quinzenaLabel}`);
+      Object.assign(f, patch);
+      (rowsByFile.get(f.fileName) || []).forEach(r => Object.assign(r, patch));
+      changed.push({ fileName: f.fileName, canal: f.canal, from, to: qk, totalPago: num(f.totalPago) });
+      console.log('[fretes] qz period by date', f.fileName, from, '→', qk, per.by);
+    }
+    f.periodWarnings = warnings.length ? warnings : undefined;
   });
-  return fixed;
+  return changed;
 }
 
 /**
@@ -524,9 +576,34 @@ function mergeQuinzenalPacks(prev, next) {
   if (!next?.files?.length) return prev;
   const replaceNames = new Set((next.files || []).map(f => qzReportNameKey(qzSourceFileName(f))).filter(Boolean));
   const replaceQzKeys = new Set((next.files || []).map(qzFileReplaceKey).filter(Boolean));
+  const nextPeriodsByName = new Map();
+  (next.files || []).forEach(f => {
+    const k = qzReportNameKey(qzSourceFileName(f));
+    if (!k) return;
+    if (!nextPeriodsByName.has(k)) nextPeriodsByName.set(k, new Set());
+    nextPeriodsByName.get(k).add(f.quinzenaKey || '');
+  });
   const prevFileByName = new Map((prev.files || []).map(f => [f.fileName, f]));
-  const fileReplaced = f => !!(replaceNames.has(qzReportNameKey(qzSourceFileName(f))) || replaceQzKeys.has(qzFileReplaceKey(f)));
+  // Same name replaces only within the same period (a re-send named "1ªQ" whose dates say 2ªQ must not drop
+  // the real 1ªQ), a stored copy without period, or another date-split part of the same report.
+  const sameReport = f => {
+    const periods = nextPeriodsByName.get(qzReportNameKey(qzSourceFileName(f)));
+    if (!periods) return false;
+    return !f.quinzenaKey || periods.has(f.quinzenaKey) || periods.has('') || qzIsSplitPart(f);
+  };
+  const fileReplaced = f => !!(replaceQzKeys.has(qzFileReplaceKey(f)) || sameReport(f));
   const keepPrevFile = f => !fileReplaced(f);
+  // fileName links rows to their file: an incoming file named like a kept one of another period gets the period appended.
+  const keptNames = new Set((prev.files || []).filter(keepPrevFile).map(f => f.fileName));
+  (next.files || []).forEach(f => {
+    if (!keptNames.has(f.fileName)) return;
+    const old = f.fileName;
+    const ext = (String(old).match(/\.xlsx?$/i) || ['.xlsx'])[0];
+    f.sourceFileName = f.sourceFileName || old;
+    f.fileName = `${String(old).replace(/\.xlsx?$/i, '')} [${f.quinzenaLabel || f.quinzenaKey || 'sem quinzena'}]${ext}`;
+    [...(next.b2bRows || []), ...(next.b2cRows || [])].forEach(r => { if (r.fileName === old) r.fileName = f.fileName; });
+    console.warn('[fretes] qz name clash with another period — renamed', old, '→', f.fileName);
+  });
   const keepPrevRow = canal => r => {
     const fm = prevFileByName.get(r.fileName);
     return !fileReplaced({
@@ -660,8 +737,8 @@ function cleanQuinzenalPackRows(pack) {
   (pack.b2cRows || []).forEach(r => {
     r.operator = r.operator || fileOp.get(r.fileName) || qzOperatorOf(r);
   });
-  stats.exportPeriodFixed = repairQzExportPeriods(pack);
   pruneQzExportOverlaps(pack);
+  stats.periodChanged = rederiveQzFilePeriods(pack);
   return stats;
 }
 
@@ -714,6 +791,21 @@ async function backupQuinzenalPackOnce(co, rawB64, rawName) {
   return true;
 }
 
+/** Stored pack as it was before this version's one-time repair (slot per version, written once). */
+async function backupQuinzenalPackForVersion(co, rawB64, rawName) {
+  if (!rawB64) return false;
+  const existing = await fetchExcelRecForCompany(co, QZ_PACK_VERSION_BACKUP_SLOT, false);
+  if (existing?.file_name) return true;
+  const name = `backup_pre_v${FRETES_JS_VERSION}_${rawName || 'quinzenal.json'}`;
+  await upsertExcelB64ForCompany(co, QZ_PACK_VERSION_BACKUP_SLOT, name, rawB64);
+  console.log('[fretes] quinzenal backup', co, QZ_PACK_VERSION_BACKUP_SLOT, name, 'b64len', rawB64.length);
+  return true;
+}
+
+function qzPeriodChangedNote(changed) {
+  return (changed || []).map(c => `${c.fileName}: ${c.from ? qzKeyLabel(c.from) : 'sem quinzena'} → ${qzKeyLabel(c.to)}`).join(' · ');
+}
+
 function encodeQuinzenalPackB64(pack) {
   const json = JSON.stringify(slimQuinzenalPackForPersist(pack));
   const buf = new TextEncoder().encode(json).buffer;
@@ -732,7 +824,12 @@ async function mergeQzPartIntoCompanyPack(targetCo, part) {
     await backupQuinzenalPackOnce(targetCo, rec.file_data, rec.file_name);
     prev = JSON.parse(new TextDecoder().decode(base64ToArrayBuffer(rec.file_data)));
     if (prev?.fileBinaries) delete prev.fileBinaries;
-    cleanQuinzenalPackRows(prev);
+    if (num(prev?.cleanup?.version) < QZ_PACK_CLEANUP_VERSION) await backupQuinzenalPackForVersion(targetCo, rec.file_data, rec.file_name);
+    const st = cleanQuinzenalPackRows(prev);
+    if (st.periodChanged?.length) {
+      console.log('[fretes] quinzenal period by date', targetCo, st.periodChanged);
+      prev.cleanup = { ...(prev.cleanup || {}), periodByDate: [...(prev.cleanup?.periodByDate || []), ...st.periodChanged] };
+    }
   }
   const merged = prev?.files?.length ? mergeQuinzenalPacks(prev, part) : { ...part };
   merged.cleanup = { ...(prev?.cleanup || {}), version: QZ_PACK_CLEANUP_VERSION, at: new Date().toISOString() };
@@ -753,10 +850,12 @@ async function migrateQuinzenalPackOnLoad(pack, rawB64, rawName) {
   const ownOp = qzCompanyOperator(co);
   const stats = cleanQuinzenalPackRows(pack);
   const foreign = splitQzPackForeignOperators(pack, ownOp);
-  const needRepairPersist = num(pack.cleanup?.version) < QZ_PACK_CLEANUP_VERSION;
-  if (!needRepairPersist && !foreign.size) return;
+  const versionRepair = num(pack.cleanup?.version) < QZ_PACK_CLEANUP_VERSION;
+  const periodChanged = stats.periodChanged || [];
+  if (!versionRepair && !periodChanged.length && !foreign.size) return;
   try {
     await backupQuinzenalPackOnce(co, rawB64, rawName);
+    if (versionRepair || periodChanged.length) await backupQuinzenalPackForVersion(co, rawB64, rawName);
   } catch (err) {
     console.error('[fretes] quinzenal backup failed — repair kept in RAM only', co, err);
     return;
@@ -780,12 +879,14 @@ async function migrateQuinzenalPackOnLoad(pack, rawB64, rawName) {
     at: new Date().toISOString(),
     fixedRows: (pack.cleanup?.fixedRows || 0) + stats.fixedRows,
     removedCteCopies: (pack.cleanup?.removedCteCopies || 0) + (stats.before - stats.after),
-    moved: [...(pack.cleanup?.moved || []), ...moved]
+    moved: [...(pack.cleanup?.moved || []), ...moved],
+    periodByDate: [...(pack.cleanup?.periodByDate || []), ...periodChanged.map(c => ({ ...c, at: new Date().toISOString() }))]
   };
   const ok = await persistQuinzenalPack(pack, { silent: true });
   console.log('[fretes] quinzenal repair', co, 'persisted', ok, 'fixedRows', stats.fixedRows,
-    'ctes', stats.before, '→', stats.after, 'moved', moved);
+    'ctes', stats.before, '→', stats.after, 'moved', moved, 'periodByDate', periodChanged);
   const parts = [];
+  if (periodChanged.length) parts.push(`período corrigido pelas datas em ${periodChanged.length} ficheiro(s) (${qzPeriodChangedNote(periodChanged)})`);
   if (stats.fixedRows) parts.push(`${stats.before - stats.after} cópias de CT-e removidas em ${stats.fixedRows} NF`);
   moved.forEach(m => parts.push(`${m.files.length} quinzenal(is) ${QZ_OPERATOR_LABEL[m.operator] || m.operator} movidos para ${m.company}`));
   if (parts.length && ok) fteToast('Quinzenais corrigidos e guardados: ' + parts.join(' · ') + ' (backup na cloud).');
@@ -4006,6 +4107,9 @@ function selectSapFile(file) {
   reader.readAsArrayBuffer(file);
 }
 
+/** Period warnings of the last quinzenal upload (name/footer vs dates, full-month split, outliers) for the result toast. */
+let _qzLastUploadWarnings = [];
+
 async function processQuinzenalPending() {
   if (!fteQzPendingFiles.length) return true;
   // ALWAYS merge into existing pack — load cloud first if RAM empty so partial
@@ -4024,6 +4128,11 @@ async function processQuinzenalPending() {
     .flatMap(r => (r.ok && r.parts) ? r.parts : [r]);
   const ok = results.filter(r => r.ok);
   const fail = results.filter(r => !r.ok);
+  _qzLastUploadWarnings = [...new Set(ok.flatMap(r => (r.meta?.periodWarnings || [])
+    .filter(w => !/fora da quinzena/.test(w))
+    .map(w => `${qzSourceFileName(r.meta)}: ${w}`)))];
+  const foraN = ok.reduce((s, r) => s + num(r.meta?.foraQz?.n), 0);
+  if (foraN) _qzLastUploadWarnings.push(`${foraN} CT-e/linha(s) fora da quinzena — ficam no total do ficheiro (ver lista de ficheiros e filtro «Só CT-e fora da quinzena»)`);
   if (fail.length) {
     const details = fail.map(f => {
       const short = String(f.fileName || '').replace(/^Gest[aã]o de [Ff]rete DELTA[_ ]?/i, '');
@@ -4220,7 +4329,9 @@ async function processAndSaveFretes() {
       parts.push(`quinzenais (${c.b2c} B2C · ${c.b2b} B2B)`);
     }
     if (qzCteBuilt) parts.push('Análise CT-e via QZ');
-    fteToast('Processado e guardado na cloud: ' + parts.join(', ') + '.');
+    if (qzProcessed && _qzLastUploadWarnings.length) {
+      fteToastError('Processado e guardado: ' + parts.join(', ') + '. ⚠ Quinzenais (período pelas datas dos documentos) — ' + _qzLastUploadWarnings.join(' · '));
+    } else fteToast('Processado e guardado na cloud: ' + parts.join(', ') + '.');
     const hasQz = !!(quinzenalPack?.files?.length);
     if (cteProcessed || qzCteBuilt) switchFteTab('analise-cte');
     else if (hasQz && !cteProcessed) switchFteTab(quinzenalPack?.b2cRows?.length ? 'analise-b2c' : 'cte-vs-qz');
@@ -4481,6 +4592,12 @@ function buildNfRecord(g) {
   if (qzDupCtes.length) {
     motivo += ` ⚠️ ${qzDupCtes.length} CT-e faturado(s) em 2 quinzenas (${fmtMoney(qzDupPago)} repetido) — contado 1× aqui; reclamar à Unilog.`;
   }
+  const qzForaCtes = ctes.filter(c => c.qzForaQz);
+  const qzForaPago = qzForaCtes.reduce((s, c) => s + num(c.pago), 0);
+  if (qzForaCtes.length) {
+    const where = [...new Set(qzForaCtes.map(c => `Dt CTE em ${c.qzForaQz.label}, faturado em ${c.qzFirst?.quinzenaLabel || '?'}`))].join('; ');
+    motivo += ` 📅 ${qzForaCtes.length} CT-e fora da quinzena (${where}) — fica no total do ficheiro que o faturou.`;
+  }
   if (overchargeFlag) {
     const eachPct = g.valorNF > 0 ? overchargeEach / g.valorNF : 0;
     motivo += ` 💰 Possível cobrança a mais: ${nCte} CT-e distintos com o mesmo valor (${fmtMoney(overchargeEach)} cada ≈ ${fmtPct(eachPct)} da NF inteira) — total ${fmtMoney(pago)} vs esperado ${fmtMoney(esperado)}.`;
@@ -4504,6 +4621,8 @@ function buildNfRecord(g) {
     devExplainFlag,
     qzDupCount: qzDupCtes.length,
     qzDupPago,
+    qzForaCount: qzForaCtes.length,
+    qzForaPago,
     mesKey: g.mesKey || g.qzMesKey || null,
     qzMesKey: g.qzMesKey || g.mesKey || null
   };
@@ -4581,7 +4700,7 @@ function processRows(rows, fileName, sheetName, headers, opts = {}) {
       numCte: r.numCte, dtCte: r.dtCte, pago: num(r.pago),
       devolucao: isDev,
       tipoOp: r.tipoOp, peso: num(r.peso),
-      qzFirst: r.qzFirst || null, qzAlsoIn: r.qzAlsoIn || null
+      qzFirst: r.qzFirst || null, qzAlsoIn: r.qzAlsoIn || null, qzForaQz: r.qzForaQz || null
     });
     if (isDev) g.temDevolucao = true;
   });
@@ -4654,7 +4773,7 @@ async function processRowsAsync(rows, fileName, sheetName, headers, opts = {}) {
         numCte: r.numCte, dtCte: r.dtCte, pago: num(r.pago),
         devolucao: isDev,
         tipoOp: r.tipoOp, peso: num(r.peso),
-        qzFirst: r.qzFirst || null, qzAlsoIn: r.qzAlsoIn || null
+        qzFirst: r.qzFirst || null, qzAlsoIn: r.qzAlsoIn || null, qzForaQz: r.qzForaQz || null
       });
       if (isDev) g.temDevolucao = true;
     }
@@ -5106,6 +5225,7 @@ function nfExportRow(x) {
     'Pago': x.pago,
     'CT-e em 2 quinzenas': x.qzDupCount || 0,
     'Valor repetido (2ª quinzena)': x.qzDupPago || 0,
+    'CT-e fora da quinzena': x.qzForaCount || 0,
     'Possível cobrança a mais': x.overchargeFlag ? 'Sim' : 'Não',
     'Devolução por explicar': x.devExplainFlag ? 'Sim' : 'Não',
     'Responsabilidade devolução': x.temDevolucao ? nfRespLabel(getNfResp(x.nf)?.resp) : '',
@@ -5140,7 +5260,8 @@ function cteExportRows() {
         'Explicação': c.explicacao || '',
         'Validação': c.validacao || 'pendente',
         'Estado NF': (statusMeta[x.status] || {}).label || x.status,
-        'Também faturado em': (c.qzAlsoIn || []).map(w => `${w.quinzenaLabel || w.quinzenaKey} (${w.fileName})`).join('; ')
+        'Também faturado em': (c.qzAlsoIn || []).map(w => `${w.quinzenaLabel || w.quinzenaKey} (${w.fileName})`).join('; '),
+        'Fora da quinzena (Dt CTE)': c.qzForaQz ? `${c.qzForaQz.label} (faturado em ${c.qzFirst?.quinzenaLabel || '?'})` : ''
       });
     });
   });
@@ -5212,6 +5333,8 @@ function exportFullWorkbook() {
 
   const dupRows = qzDupRows();
   if (dupRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(qzDupExportRows(dupRows)), 'CT-e 2 quinzenas');
+  const foraRows = qzForaRows();
+  if (foraRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(qzForaExportRows(foraRows)), 'CT-e fora da quinzena');
 
   const overList = overchargeNFs();
   if (overList.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overchargeExportRows(overList)), 'Possível cobrança a mais');
@@ -5266,6 +5389,7 @@ function getFilteredNFs() {
   const valorDiffF = $('filterValorDiff')?.checked;
   const sapMissingF = $('filterSapMissing')?.checked;
   const qzDupF = $('filterQzDup')?.checked;
+  const qzForaF = $('filterQzFora')?.checked;
   const overchargeF = $('filterOvercharge')?.checked;
   const devExpF = $('filterDevExplain')?.checked;
   let list = currentNFs;
@@ -5275,6 +5399,7 @@ function getFilteredNFs() {
   if (valorDiffF) list = list.filter(x => x.sapValorMismatch);
   if (sapMissingF) list = list.filter(x => x.sapMissing);
   if (qzDupF) list = list.filter(x => x.qzDupCount > 0);
+  if (qzForaF) list = list.filter(x => x.qzForaCount > 0);
   if (overchargeF) list = list.filter(x => x.overchargeFlag);
   if (devExpF) list = list.filter(x => x.devExplainFlag);
   if (searchF) list = list.filter(x =>
@@ -5391,10 +5516,20 @@ function renderAll() {
     ${overchargeKpiHtml()}
     ${devExplainKpiHtml()}
     ${qzDupKpiHtml()}
+    ${qzForaKpiHtml()}
     ${sapKpi}
   `;
   kpisEl?.querySelectorAll('[data-cte-goto]').forEach(k => {
     k.addEventListener('click', () => switchCteSub(k.dataset.cteGoto));
+  });
+  kpisEl?.querySelectorAll('[data-cte-filter]').forEach(k => {
+    k.addEventListener('click', () => {
+      const chk = $(k.dataset.cteFilter);
+      if (chk) chk.checked = true;
+      switchCteSub('detalhe');
+      renderTable();
+      $('nfTable')?.scrollIntoView({ behavior: 'smooth' });
+    });
   });
 
   const reconcileBox = $('reconcileBox');
@@ -5496,6 +5631,53 @@ function qzDupKpiHtml() {
   return `<div class="kpi flag qz-kpi-filter" data-cte-goto="qzdup" role="button" tabindex="0" title="Ver lista de CT-e faturados em 2 quinzenas">
     <div class="label">CT-e faturado em 2 quinzenas</div><div class="value">${rows.length}</div>
     <div class="sub">${nfs} NF · ${fmtMoney(total)} a reclamar (contado 1×)</div></div>`;
+}
+
+/** One row per CT-e whose Dt CTE is outside the quinzena of the file that billed it. */
+function qzForaRows(list = currentNFs) {
+  const out = [];
+  (list || []).forEach(x => (x.ctes || []).forEach(c => {
+    if (!c.qzForaQz) return;
+    out.push({
+      nf: x.nf, cliente: x.cliente || '', numCte: c.numCte, dtCte: c.dtCte || null,
+      qzDate: c.qzForaQz.label, qzFile: c.qzFirst?.quinzenaLabel || c.qzFirst?.quinzenaKey || '',
+      file: c.qzFirst?.fileName || '', pago: num(c.pago),
+      alsoIn: (c.qzAlsoIn || []).map(w => w.quinzenaLabel || w.quinzenaKey).join('; '),
+      status: x.status
+    });
+  }));
+  return out;
+}
+
+function qzForaBadge(x) {
+  if (!x?.qzForaCount) return '';
+  return ` <span class="badge b-qzdup" style="background:#e0f2fe;color:#075985" title="${x.qzForaCount} CT-e com Dt CTE fora da quinzena do ficheiro que os faturou (${fmtMoney(x.qzForaPago)}) — ficam no total desse ficheiro">fora QZ</span>`;
+}
+
+function qzForaKpiHtml() {
+  const rows = qzForaRows();
+  if (!rows.length) return '';
+  const total = rows.reduce((s, r) => s + r.pago, 0);
+  const nfs = new Set(rows.map(r => r.nf)).size;
+  const twice = rows.filter(r => r.alsoIn).length;
+  return `<div class="kpi flag qz-kpi-filter" data-cte-filter="filterQzFora" role="button" tabindex="0" title="Filtrar NFs com CT-e cuja Dt CTE está fora da quinzena do ficheiro">
+    <div class="label">CT-e fora da quinzena 📅</div><div class="value">${rows.length}</div>
+    <div class="sub">${nfs} NF · ${fmtMoney(total)}${twice ? ` · ${twice} também noutra quinzena` : ''}</div></div>`;
+}
+
+function qzForaExportRows(rows) {
+  return rows.map(r => ({
+    'Nota Fiscal': r.nf,
+    'Cliente': r.cliente,
+    'Nº CT-e': r.numCte,
+    'Data CT-e': parseCteDateValue(r.dtCte) || '',
+    'Quinzena pela Dt CTE': r.qzDate,
+    'Faturado na quinzena': r.qzFile,
+    'Ficheiro': r.file,
+    'Valor': r.pago,
+    'Também faturado em': r.alsoIn,
+    'Estado NF': (statusMeta[r.status] || {}).label || r.status
+  }));
 }
 
 function updateQzDupTabCount() {
@@ -6192,7 +6374,7 @@ function renderTable() {
       + (x.sapValorMismatch ? ' nf-val-mismatch' : '')
       + (x.sapMissing ? ' nf-sap-missing' : '');
     parts.push(`<tr class="${cls}" data-nf-i="${i}">
-      <td>${x.nf}${qzDupBadge(x)}${overchargeBadge(x)}${devExpBadge(x)}</td>
+      <td>${x.nf}${qzDupBadge(x)}${qzForaBadge(x)}${overchargeBadge(x)}${devExpBadge(x)}</td>
       <td>${fmtDate(x.dtNF)}</td>
       <td>${x.cliente || '-'}</td>
       <td>${x.transportador}</td>
@@ -6244,8 +6426,11 @@ function toggleDetail(tr, x) {
     const alsoIn = c.qzAlsoIn?.length
       ? ` <span class="badge b-qzdup" title="Também faturado em: ${c.qzAlsoIn.map(w => `${w.quinzenaLabel || w.quinzenaKey} (${fmtMoney(w.pago)})`).join(', ').replace(/"/g, '&quot;')}">2 quinzenas</span>`
       : '';
+    const fora = c.qzForaQz
+      ? ` <span class="badge b-qzdup" style="background:#e0f2fe;color:#075985" title="Dt CTE em ${c.qzForaQz.label}, faturado em ${(c.qzFirst?.quinzenaLabel || '?').replace(/"/g, '&quot;')}">fora da quinzena</span>`
+      : '';
     return `<tr class="cte-row${c.validacao !== 'pendente' ? ' cte-row-' + c.validacao : ''}">
-      <td>${c.numCte || '-'}${alsoIn}</td>
+      <td>${c.numCte || '-'}${alsoIn}${fora}</td>
       <td>${c.dtCte ? new Date(c.dtCte).toLocaleDateString('pt-BR') : '-'}</td>
       <td>${c.tipoOp || '-'}</td>
       <td>${c.devolucao ? 'Sim' : 'Não'}</td>
@@ -6838,6 +7023,7 @@ const QZ_B2C_ALIASES = {
   chaveNF: ['chaves acesso nf', 'chave acesso nf', 'chave nf', 'chave da nota fiscal', 'numeros nf', 'números nf'],
   dtColeta: ['data da coleta', 'data coleta'],
   dtNF: ['datas de emissao nf', 'datas de emissão nf', 'data emissao nf', 'data ct-e', 'data cte'],
+  dtCte: ['datas de emissao ct-e', 'datas de emissao cte', 'data de emissao ct-e', 'data emissao ct-e', 'data ct-e', 'data cte'],
   numCte: ['numeros ct-e', 'numeros cte', 'números ct-e', 'numero ct-e', 'numero cte'],
   transportador: ['nome transportadora', 'transportadora', 'transportador'],
   destinatario: ['nome destinatario', 'nome destinatário', 'destinatario', 'destinatário'],
@@ -6985,6 +7171,192 @@ function monthDateRange(ano, mes) {
   return { start, end };
 }
 
+/** Quinzena of a day: 1–15 → Q1, 16–end → Q2 ("YYYY-MM-Qn"). */
+function qzKeyOfDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-Q${d.getDate() <= 15 ? 1 : 2}`;
+}
+
+function qzKeyLabel(qk) {
+  const p = parseQuinzenaKeyParts(qk);
+  return p ? `${p.quinzena}ªQ ${MESES_PT[p.mes - 1]}/${p.ano}` : String(qk || '');
+}
+
+function qzPeriodFields(qk) {
+  const p = parseQuinzenaKeyParts(qk);
+  const mesKey = `${p.ano}-${String(p.mes).padStart(2, '0')}`;
+  return { ano: p.ano, mes: p.mes, quinzena: p.quinzena, mesKey, mesLabel: fmtMesLabel(mesKey), quinzenaKey: qk, quinzenaLabel: qzKeyLabel(qk) };
+}
+
+/** Billing date of a line, first column present: B2B Dt CTE → Dt NF; B2C Datas de Emissão CT-e → Data da coleta → Dt NF. */
+const QZ_LINE_DATE_FIELDS = {
+  B2B: [['dtCte', 'Dt CTE'], ['dtNF', 'Dt NF']],
+  B2C: [['dtCte', 'Data CT-e'], ['dtColeta', 'Data da coleta'], ['dtNF', 'Dt NF']]
+};
+
+function qzLineBillingDate(line, canal) {
+  for (const [k, field] of QZ_LINE_DATE_FIELDS[canal] || QZ_LINE_DATE_FIELDS.B2B) {
+    const d = parseSapBrDate(line?.[k]);
+    if (d) return { d, field };
+  }
+  return null;
+}
+
+/**
+ * Period of a quinzenal / export file from the dates of its own lines (file name and footer text change every send).
+ * - Each line goes to the quinzena of its billing date; the file's period is the quinzena with most lines (tie: value).
+ * - Full-month file → split [Q1, Q2]: both halves of that month have lines and the smaller half holds
+ *   ≥ QZ_PERIOD_SPLIT_SHARE of the dated lines, or the name/footer only named a month (opts.monthOnly).
+ * - Lines in any other quinzena are outliers (CT-e fora da quinzena): they stay in the file and its billed total.
+ */
+function qzPeriodFromLines(lines, canal, opts = {}) {
+  const by = {};
+  const fieldN = {};
+  let dated = 0;
+  (lines || []).forEach(r => {
+    const bd = qzLineBillingDate(r, canal);
+    if (!bd) return;
+    const k = qzKeyOfDate(bd.d);
+    const b = by[k] || (by[k] = { n: 0, v: 0 });
+    b.n++;
+    b.v += num(r.pago);
+    fieldN[bd.field] = (fieldN[bd.field] || 0) + 1;
+    dated++;
+  });
+  if (!dated) return null;
+  const quinzenaKey = Object.entries(by).sort((a, b) => b[1].n - a[1].n || b[1].v - a[1].v)[0][0];
+  const mesKey = quinzenaKey.slice(0, 7);
+  const n1 = by[`${mesKey}-Q1`]?.n || 0;
+  const n2 = by[`${mesKey}-Q2`]?.n || 0;
+  const split = !!(n1 && n2 && (opts.monthOnly || Math.min(n1, n2) / dated >= QZ_PERIOD_SPLIT_SHARE));
+  const keys = split ? [`${mesKey}-Q1`, `${mesKey}-Q2`] : [quinzenaKey];
+  const outliers = { n: 0, v: 0, byKey: {} };
+  Object.entries(by).forEach(([k, b]) => {
+    if (keys.includes(k)) return;
+    outliers.n += b.n;
+    outliers.v += b.v;
+    outliers.byKey[k] = b.n;
+  });
+  const field = Object.entries(fieldN).sort((a, b) => b[1] - a[1])[0][0];
+  return { quinzenaKey, mesKey, split, keys, dated, undated: (lines || []).length - dated, by, outliers, field };
+}
+
+/** Half of mesKey a line of a split full-month file goes to (other months → nearest half; undated → null). */
+function qzSplitKeyOfLine(line, canal, mesKey) {
+  const bd = qzLineBillingDate(line, canal);
+  if (!bd) return null;
+  const k = qzKeyOfDate(bd.d);
+  const m = k.slice(0, 7);
+  return m === mesKey ? k : `${mesKey}-Q${m < mesKey ? 1 : 2}`;
+}
+
+function qzOutlierNote(out, canal, field, factor = 1) {
+  if (!out?.n) return '';
+  const where = Object.entries(out.byKey || {}).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} em ${qzKeyLabel(k)}`).join(', ');
+  return `${out.n} ${canal === 'B2C' ? 'linha(s)' : 'CT-e'} fora da quinzena (${field}: ${where}; ${fmtMoney(out.v * factor)}) — ficam no total do ficheiro`;
+}
+
+/**
+ * Period of an uploaded file: the dates of its lines win; the file name and the export footer are fallback and
+ * cross-check only (a disagreement becomes a warning on the file). Returns [{ rows, meta }]: one part, or two
+ * when a full-month file is split by date into 1ªQ and 2ªQ (each with its share of the billed total).
+ * opts.footer: parseQzExportFiltros result; opts.taxFactor: gross-up for exports (no Resumo).
+ */
+function qzPartsByDatePeriod(loaded, meta, opts = {}) {
+  const canal = loaded.canal || meta.canal;
+  const footer = opts.footer || {};
+  const pad = m => String(m).padStart(2, '0');
+  const footerMes = footer.ano && footer.mes ? `${footer.ano}-${pad(footer.mes)}` : null;
+  const footerQk = footerMes && footer.quinzena ? `${footerMes}-Q${footer.quinzena}` : null;
+  const nameQk = meta.quinzenaKey || null;
+  const nameMes = meta.mesKey || null;
+  const monthOnly = !(footer.quinzena || meta.quinzena) && !!(footerMes || nameMes);
+  const per = qzPeriodFromLines(loaded.rows, canal, { monthOnly });
+  const isExport = opts.taxFactor != null;
+  const factor = isExport ? opts.taxFactor : qzTaxFactor(meta);
+  const warnings = [];
+  let keys;
+  let source = 'datas';
+  if (per) {
+    keys = per.keys;
+    const used = keys.map(qzKeyLabel).join(' + ');
+    const check = (label, qk, mes) => {
+      if (qk && !keys.includes(qk)) warnings.push(`${label} diz ${qzKeyLabel(qk)}, datas (${per.field}) indicam ${used} — usado ${used}`);
+      else if (!qk && mes && mes !== per.mesKey) warnings.push(`${label} diz ${fmtMesLabel(mes)}, datas (${per.field}) indicam ${used} — usado ${used}`);
+    };
+    check('Nome', nameQk, nameMes);
+    check('Rodapé', footerQk, footerMes);
+    if (per.split && !monthOnly) {
+      warnings.push(`Ficheiro com o mês inteiro (${per.field}) — dividido por data em ${used}`);
+    }
+  } else if (footerQk || nameQk) {
+    keys = [footerQk || nameQk];
+    source = footerQk ? 'rodape' : 'nome';
+    warnings.push(`Linhas sem ${canal === 'B2C' ? 'Data CT-e / coleta' : 'Dt CTE'} — período lido do ${footerQk ? 'rodapé' : 'nome'} (${qzKeyLabel(keys[0])})`);
+  } else {
+    if (isExport) return null;
+    return [{ rows: loaded.rows, meta: { ...meta, periodSource: 'nome', periodWarnings: ['Sem datas nas linhas nem quinzena no nome'] } }];
+  }
+  const base = {
+    periodSource: source,
+    periodField: per?.field || null,
+    nameQuinzenaKey: nameQk || undefined,
+    footerQuinzenaKey: footerQk || undefined
+  };
+  const split = keys.length > 1;
+  const byKey = new Map(keys.map(k => [k, []]));
+  loaded.rows.forEach(r => {
+    const k = split ? qzSplitKeyOfLine(r, canal, per.mesKey) : keys[0];
+    (byKey.get(k) || byKey.get(per?.quinzenaKey) || byKey.get(keys[0])).push(r);
+  });
+  const ext = (String(meta.fileName).match(/\.xlsx?$/i) || ['.xlsx'])[0];
+  const stem = String(meta.fileName).replace(/\.xlsx?$/i, '');
+  const parts = [];
+  keys.forEach(k => {
+    const rows = byKey.get(k);
+    if (!rows.length) return;
+    const p = qzPeriodFields(k);
+    const partPer = per ? qzPeriodFromLines(rows, canal) : null;
+    const out = { n: 0, v: 0, byKey: {} };
+    if (partPer) {
+      Object.entries(partPer.by).forEach(([bk, b]) => {
+        if (bk === k) return;
+        out.n += b.n;
+        out.v += b.v;
+        out.byKey[bk] = b.n;
+      });
+    }
+    const partMeta = {
+      ...meta, ...base, ...p,
+      periodWarnings: [...warnings, ...(out.n ? [qzOutlierNote(out, canal, per.field, factor)] : [])],
+      foraQz: out.n ? { n: out.n, pago: out.v * factor } : undefined
+    };
+    if (split) {
+      partMeta.fileName = `${stem} (${p.quinzena}ªQ)${ext}`;
+      partMeta.sourceFileName = meta.fileName;
+      partMeta.periodSplit = true;
+    }
+    if (isExport || split) {
+      const frete = rows.reduce((s, r) => s + num(r.pago), 0);
+      partMeta.resumoTotalFrete = frete;
+      partMeta.resumoImpostos = frete * (factor - 1);
+      partMeta.resumoTotalComImpostos = frete * factor;
+      if (split) partMeta.resumoTotalValorNF = null;
+    }
+    parts.push({ rows, meta: partMeta });
+  });
+  return parts;
+}
+
+/** Period / cross-check fields kept on a pack file entry. */
+function qzPeriodFileFields(meta) {
+  const o = {};
+  ['periodSource', 'periodField', 'periodWarnings', 'foraQz', 'nameQuinzenaKey', 'footerQuinzenaKey', 'sourceFileName', 'periodSplit'].forEach(k => {
+    const v = meta?.[k];
+    if (v != null && !(Array.isArray(v) && !v.length)) o[k] = v;
+  });
+  return o;
+}
+
 function detectCanalFromWorkbook(wb) {
   let b2bScore = 0;
   let b2cScore = 0;
@@ -7049,6 +7421,7 @@ function normalizeQzB2CRow(row) {
     pedido, nf, chaveNF: chave,
     dtColeta: findQzField(row, 'dtColeta', QZ_B2C_ALIASES),
     dtNF: findQzField(row, 'dtNF', QZ_B2C_ALIASES),
+    dtCte: persistDateValue(findQzField(row, 'dtCte', QZ_B2C_ALIASES)),
     numCte: findQzField(row, 'numCte', QZ_B2C_ALIASES),
     transportador: findQzField(row, 'transportador', QZ_B2C_ALIASES),
     destinatario: findQzField(row, 'destinatario', QZ_B2C_ALIASES),
@@ -7270,62 +7643,35 @@ function qzExportTaxFactor(operator) {
 }
 
 /**
- * Period of an export: footer filter (Ano/Mês/Quinzena CTE) → file name → Dt CTE.
- * Footer with a quinzena = that quinzena only; otherwise the full month split by Dt CTE (day ≤ 15 → 1ªQ).
+ * Period of an export from its Dt CTE (qzPartsByDatePeriod); the footer (Ano / Mês / Quinzena CTE) and the name
+ * are fallback + cross-check. A month-only export is split by Dt CTE (day ≤ 15 → 1ªQ).
  * Returns one loaded part per quinzena (same shape as loadQuinzenalFromWorkbook), with Resumo-like totals.
  */
 function splitQzExportByQuinzena(loaded, meta, exp) {
   const f = parseQzExportFiltros(exp?.filtros);
   if (f.operator) meta.operator = f.operator;
-  const rowDate = r => parseSapBrDate(r.dtCte) || parseSapBrDate(r.dtNF);
-  let ano = f.ano || meta.ano || null;
-  let mes = f.mes || meta.mes || null;
-  if (!ano || !mes) {
-    const cnt = {};
-    loaded.rows.forEach(r => { const d = rowDate(r); if (d) { const k = monthKey(d); cnt[k] = (cnt[k] || 0) + 1; } });
-    const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
-    if (top) { ano = parseInt(top[0].slice(0, 4), 10); mes = parseInt(top[0].slice(5, 7), 10); }
-  }
-  if (!ano || !mes) return null;
-  const mesKey = `${ano}-${String(mes).padStart(2, '0')}`;
-  const fixedQ = f.quinzena || meta.quinzena || null;
-  const byQ = { 1: [], 2: [] };
-  const undated = [];
-  loaded.rows.forEach(r => {
-    if (fixedQ) { byQ[fixedQ].push(r); return; }
-    const d = rowDate(r);
-    if (!d) { undated.push(r); return; }
-    const k = monthKey(d);
-    const q = k === mesKey ? (d.getDate() <= 15 ? 1 : 2) : (k < mesKey ? 1 : 2);
-    byQ[q].push(r);
-  });
-  if (undated.length) byQ[byQ[1].length > byQ[2].length ? 1 : 2].push(...undated);
-  const qs = [1, 2].filter(q => byQ[q].length);
   const factor = qzExportTaxFactor(qzOperatorOf(meta));
-  const ext = (String(meta.fileName).match(/\.xlsx?$/i) || ['.xlsx'])[0];
-  const base = String(meta.fileName).replace(/\.xlsx?$/i, '');
-  return qs.map(q => {
-    const rows = byQ[q];
-    const totalFrete = rows.reduce((s, r) => s + num(r.pago), 0);
-    const partMeta = {
-      ...meta,
+  const parts = qzPartsByDatePeriod({ ...loaded, canal: 'B2B' }, { ...meta, canal: 'B2B' }, { footer: f, taxFactor: factor });
+  if (!parts?.length) return null;
+  const exportFiltros = exp?.filtros ? String(exp.filtros).replace(/\s*[\r\n]+\s*/g, ' · ').slice(0, 300) : '';
+  const linesFrete = loaded.rows.reduce((s, r) => s + num(r.pago), 0);
+  if (loaded.totalRowPago != null && Math.abs(num(loaded.totalRowPago) - linesFrete) > 0.05) {
+    const w = `Linha «Total» do ficheiro diz ${fmtMoney(num(loaded.totalRowPago))}, soma das linhas ${fmtMoney(linesFrete)} — usada a soma das linhas`;
+    parts.forEach(p => { p.meta.periodWarnings = [w, ...(p.meta.periodWarnings || [])]; });
+  }
+  return parts.map(p => ({
+    ok: true, rows: p.rows, headers: loaded.headers, sheetName: loaded.sheetName, canal: 'B2B',
+    meta: {
+      ...p.meta,
       format: 'export',
       sourceFileName: meta.fileName,
-      fileName: qs.length > 1 ? `${base} (${q}ªQ)${ext}` : meta.fileName,
-      canal: 'B2B', ano, mes, quinzena: q, mesKey, mesLabel: fmtMesLabel(mesKey),
-      quinzenaKey: `${mesKey}-Q${q}`,
-      quinzenaLabel: `${q}ªQ ${MESES_PT[mes - 1]}/${ano}`,
-      exportPeriod: fixedQ ? 'quinzena' : 'mes',
-      exportFiltros: exp?.filtros ? String(exp.filtros).replace(/\s*[\r\n]+\s*/g, ' · ').slice(0, 300) : '',
-      exportTotalRow: qs.length === 1 && loaded.totalRowPago != null ? loaded.totalRowPago : null,
-      resumoTotalFrete: totalFrete,
-      resumoImpostos: totalFrete * (factor - 1),
-      resumoTotalComImpostos: totalFrete * factor,
+      exportPeriod: (f.quinzena || meta.quinzena) ? 'quinzena' : 'mes',
+      exportFiltros,
+      exportTotalRow: parts.length === 1 && loaded.totalRowPago != null ? loaded.totalRowPago : null,
       taxDerived: true,
       taxFactor: factor
-    };
-    return { ok: true, rows, headers: loaded.headers, sheetName: loaded.sheetName, meta: partMeta, canal: 'B2B' };
-  });
+    }
+  }));
 }
 
 function aggregateQzB2BRows(rows, fileMeta) {
@@ -7379,6 +7725,14 @@ function aggregateQzB2BRows(rows, fileMeta) {
   });
 }
 
+/** Dt CTE outside the quinzena of the file that billed the CT-e → { dateKey, label } (Dt NF never flags). */
+function qzCteForaQz(dtCte, quinzenaKey) {
+  const d = parseSapBrDate(dtCte);
+  if (!d || !parseQuinzenaKeyParts(quinzenaKey)) return null;
+  const k = qzKeyOfDate(d);
+  return k === quinzenaKey ? null : { dateKey: k, label: qzKeyLabel(k) };
+}
+
 /**
  * One line per distinct CT-e (NF + Num. CTE) across all quinzenal files, earliest quinzena first.
  * A CT-e repeated in a later file is not a new charge here; it is listed in qzAlsoIn on the kept line.
@@ -7424,7 +7778,8 @@ function expandQzB2bToCteLines(b2bRows) {
           mesLabel: qzMesLabel,
           qzMesKey,
           qzFirst: where,
-          qzAlsoIn: null
+          qzAlsoIn: null,
+          qzForaQz: qzCteForaQz(c.dtCte, where.quinzenaKey)
         };
         if (dupKey) seen.set(dupKey, line);
         lines.push(line);
@@ -8089,6 +8444,7 @@ function buildQuinzenalPack(fileResults, fileBinaries) {
         resumoTotalComImpostos: meta.resumoTotalComImpostos || null,
         totalCte: agg.reduce((s, x) => s + x.nCte, 0),
         ...(meta.reportType ? { reportType: meta.reportType } : {}),
+        ...qzPeriodFileFields(meta),
         ...(meta.format === 'export' ? {
           format: 'export', sourceFileName: meta.sourceFileName, exportPeriod: meta.exportPeriod,
           exportFiltros: meta.exportFiltros, exportTotalRow: meta.exportTotalRow,
@@ -8120,7 +8476,8 @@ function buildQuinzenalPack(fileResults, fileBinaries) {
         resumoImpostos: meta.resumoImpostos || null,
         resumoTotalComImpostos: meta.resumoTotalComImpostos || null,
         totalCte: rows.filter(x => x.numCte).length,
-        ...(meta.reportType ? { reportType: meta.reportType } : {})
+        ...(meta.reportType ? { reportType: meta.reportType } : {}),
+        ...qzPeriodFileFields(meta)
       });
     }
   });
@@ -8230,9 +8587,12 @@ function syncQzUploadZone() {
     zone?.classList.add('loaded');
     if (list) {
       list.style.display = 'block';
-      list.innerHTML = quinzenalPack.files.map(f => f.format === 'export'
-        ? `<div>${f.fileName} <span style="color:var(--muted)">— export Unilog · ${f.quinzenaLabel || f.mesLabel || ''}</span></div>`
-        : `<div>${f.fileName}</div>`).join('');
+      list.innerHTML = quinzenalPack.files.map(f => {
+        const period = f.quinzenaLabel || f.mesLabel || 'sem quinzena';
+        const by = f.periodSource === 'datas' && f.periodField ? ` pela ${f.periodField}` : '';
+        const warn = (f.periodWarnings || []).map(w => `<div style="color:#b45309;padding-left:12px">⚠ ${fteEscAttr(w)}</div>`).join('');
+        return `<div>${fteEscAttr(f.fileName)} <span style="color:var(--muted)">— ${f.format === 'export' ? 'export Unilog · ' : ''}${fteEscAttr(period)}${by}</span>${warn}</div>`;
+      }).join('');
     }
   } else {
     if (fn) fn.textContent = '';
@@ -8430,11 +8790,20 @@ function processQuinzenalFile(file) {
           resolve({ ok: true, fileName: file.name, parts });
           return;
         }
+        const parts = qzPartsByDatePeriod(loaded, meta);
         console.log('[fretes] qz file ok', file.name,
-          'canal', meta.canal, 'quinzenaKey', meta.quinzenaKey,
-          'rows', loaded.rows.length,
-          'resumoComImp', meta.resumoTotalComImpostos || 0);
-        resolve({ ok: true, ...loaded, meta, canal: meta.canal, arrayBuffer: buf });
+          'canal', meta.canal, 'nome', meta.quinzenaKey,
+          'datas', parts.map(p => `${p.meta.quinzenaKey} (${p.rows.length} linhas, ${p.meta.periodField || p.meta.periodSource})`).join(' + '),
+          'resumoComImp', meta.resumoTotalComImpostos || 0,
+          'avisos', parts.flatMap(p => p.meta.periodWarnings || []));
+        if (parts.length > 1) {
+          resolve({
+            ok: true, fileName: file.name,
+            parts: parts.map((p, i) => ({ ok: true, ...loaded, rows: p.rows, meta: p.meta, canal: meta.canal, ...(i ? {} : { arrayBuffer: buf }) }))
+          });
+          return;
+        }
+        resolve({ ok: true, ...loaded, meta: parts[0].meta, canal: meta.canal, arrayBuffer: buf });
       } catch (err) {
         resolve({ ok: false, fileName: file.name, error: formatXlsxReadError(err, 'qz') });
       }
@@ -9184,7 +9553,7 @@ function initFretes() {
     if (document.visibilityState === 'hidden') flushNfResp();
   });
 
-  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff', 'filterSapMissing', 'filterQzDup', 'filterOvercharge', 'filterDevExplain'].forEach(id => {
+  ['filterStatus', 'filterTransp', 'filterMes', 'searchNF', 'filterValorDiff', 'filterSapMissing', 'filterQzDup', 'filterQzFora', 'filterOvercharge', 'filterDevExplain'].forEach(id => {
     const el = $(id);
     if (!el) return;
     el.addEventListener('input', () => {
