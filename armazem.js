@@ -1,5 +1,5 @@
-// armazem.js v1.0.43 — QB igual à DFB (dados por empresa), taxa NF configurável, leitura read-only p/ Total Brasil
-const ARMAZEM_JS_VERSION = '1.0.43';
+// armazem.js v1.0.46 — Bruto×ZFACT: NF no mapa s/ valor face ≠ OK (não mostrar R$ 0,00)
+const ARMAZEM_JS_VERSION = '1.0.46';
 
 const ARM_MINIMO_CONTRATUAL = 120000;
 /** Contract rate on expedited NF — default for every company; a company pack may override it (pack.contract.nfRate). */
@@ -32,6 +32,9 @@ let armLancamentoAutosaveTimer = null;
 let armLancamentoSaving = false;
 let armLastPersistedJson = '';
 let armNfUploadRows = [];
+/** Upload Unilog Expedição % NF → cruzamento com ZFACT (aba Bruto × ZFACT). */
+let armBrutoZfactState = { rows: [], files: [], meta: {}, updatedAt: '' };
+let armBrutoZfactPersistTimer = null;
 const ARM_VENDAS_CACHE_MS = 60_000;
 let armCatalogOverrides = {};
 let armSorts = {
@@ -40,7 +43,8 @@ let armSorts = {
   nf: { col: 'nf', dir: 1 },
   nfUpload: { col: 'nf', dir: 1 },
   adicionais: { col: 'valor', dir: -1 },
-  catalogo: { col: 'servico', dir: 1 }
+  catalogo: { col: 'servico', dir: 1 },
+  brutoZfact: { col: 'mesKey', dir: 1 }
 };
 
 /** Nome canónico — plain, [AG], [AT], [AREA TECNICA] e [AG/AT] são o mesmo serviço. */
@@ -1018,30 +1022,70 @@ async function armSaveLancamento(opts = {}) {
   }
 }
 
-function parseNfListFromWorkbook(wb, fileName, mesKey) {
-  const nfRows = [];
-  const nfSheet = wb.SheetNames.find(n => /PERCENTUAL SOBRE NF/i.test(n)) ||
-    wb.SheetNames.find(n => /percentual.*nf/i.test(normSheetName(n)));
-  if (nfSheet) {
-    const m = sheetToMatrix(wb.Sheets[nfSheet]);
-    let dataHdr = -1;
-    for (let r = 0; r < m.length; r++) {
-      if (/Data Cobran/i.test(cellText(m, r, 0)) && /Documento/i.test(cellText(m, r, 1))) { dataHdr = r; break; }
-    }
-    if (dataHdr >= 0) {
-      for (let r = dataHdr + 1; r < m.length; r++) {
-        const dt = cellText(m, r, 0);
-        const nf = cellText(m, r, 1);
-        const valorNF = armCellNum(m, r, 2);
-        const fee = armCellNum(m, r, 3);
-        if (!nf || nf === '-') continue;
-        nfRows.push({
-          data: parseBrDate(dt), nf, valorNF, taxa: armNfRate(),
-          fee: fee || valorNF * armNfRate(), mesKey, fileName
-        });
+/** Folha Unilog com NFs da taxa % sobre valor da NF (Expedição / PERCENTUAL SOBRE NF). */
+function armFindExpedicaoNfSheet(wb) {
+  const names = wb?.SheetNames || [];
+  return names.find(n => /Expedi[cç][aã]o/i.test(n) && /NF/i.test(n))
+    || names.find(n => /%\s*sobre\s*valor\s*da\s*NF/i.test(n))
+    || names.find(n => /PERCENTUAL SOBRE NF/i.test(n))
+    || names.find(n => /percentual.*nf|expedi.*nf/i.test(normSheetName(n)))
+    || null;
+}
+
+/**
+ * Lê a aba Expedição — % sobre valor da NF:
+ * A=Data Cobrança, B=Nº Documento (NF), C=Quantidade (= valor NF), D=Valor (= cobrado).
+ */
+function parseExpedicaoNfFromWorkbook(wb, fileName, mesKey) {
+  const nfSheet = armFindExpedicaoNfSheet(wb);
+  const rows = [];
+  const meta = { sheet: nfSheet || '', qtyTotalHdr: 0, feeTotalHdr: 0, taxaHdr: 0 };
+  if (!nfSheet) return { rows, meta };
+
+  const m = sheetToMatrix(wb.Sheets[nfSheet]);
+  let dataHdr = -1;
+  for (let r = 0; r < Math.min(40, m.length); r++) {
+    const a = cellText(m, r, 0);
+    const b = cellText(m, r, 1);
+    if (/Quantidade\s*Total/i.test(a)) meta.qtyTotalHdr = armCellNum(m, r, 1) || armCellNum(m, r, 2) || 0;
+    if (/Valor\s*Total/i.test(a) && !/Unit/i.test(a)) meta.feeTotalHdr = armCellNum(m, r, 1) || armCellNum(m, r, 2) || 0;
+    if (/Valor\s*Unit/i.test(a)) meta.taxaHdr = armCellNum(m, r, 1) || 0;
+    if (/Data Cobran/i.test(a) && /Documento|N[ºo°]?\s*Doc/i.test(b)) { dataHdr = r; break; }
+    if (/Data Cobran/i.test(a) && /Documento/i.test(cellText(m, r, 1))) { dataHdr = r; break; }
+  }
+  if (dataHdr < 0) {
+    for (let r = 0; r < Math.min(40, m.length); r++) {
+      if (/Data Cobran/i.test(cellText(m, r, 0)) && /Documento/i.test(cellText(m, r, 1))) {
+        dataHdr = r; break;
       }
     }
   }
+  if (dataHdr < 0) return { rows, meta };
+
+  for (let r = dataHdr + 1; r < m.length; r++) {
+    const dt = cellText(m, r, 0);
+    const nf = String(cellText(m, r, 1) || '').trim();
+    const valorNF = armCellNum(m, r, 2);
+    const fee = armCellNum(m, r, 3);
+    if (!nf || nf === '-' || /documento|total|soma/i.test(nf)) continue;
+    if (!(valorNF > 0) && !(fee > 0)) continue;
+    const data = parseBrDate(dt);
+    let rowMes = mesKey || '';
+    if (!rowMes && data instanceof Date && !isNaN(data.getTime())) {
+      rowMes = data.getFullYear() + '-' + String(data.getMonth() + 1).padStart(2, '0');
+    }
+    rows.push({
+      data, nf, valorNF, taxa: meta.taxaHdr > 0 ? meta.taxaHdr : armNfRate(),
+      fee: fee || (valorNF > 0 ? valorNF * armNfRate() : 0),
+      mesKey: rowMes, fileName, sheet: nfSheet
+    });
+  }
+  return { rows, meta };
+}
+
+function parseNfListFromWorkbook(wb, fileName, mesKey) {
+  const parsed = parseExpedicaoNfFromWorkbook(wb, fileName, mesKey);
+  let nfRows = parsed.rows;
   if (!nfRows.length) {
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const m = sheetToMatrix(sheet);
@@ -1514,20 +1558,66 @@ function armFmtPctGasto(armVal, nfBase) {
   return fmtArmPct(armVal / nfBase * 100, 2);
 }
 
-function armVendasFromSapNf() {
+/** YYYY-MM from ZFACT dtEmissao (Date, ISO string, or already mesKey). */
+function armMesKeyFromSapDt(dt) {
+  if (!dt && dt !== 0) return '';
+  if (typeof dt === 'string') {
+    const s = dt.trim();
+    if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7);
+  }
+  const d = dt instanceof Date ? dt : new Date(dt);
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+/** Face / bruto SAP da NF: Val.total incl.imp. (AP) quando marcado; senão valorNF; senão docVal. */
+function armSapEntryBruto(entry) {
+  if (!entry) return 0;
+  const doc = Number(entry.docVal) || 0;
+  const v = Number(entry.valorNF) || 0;
+  if (entry.docFromInclImp && doc > 0) return doc;
+  if (v > 0) return v;
+  return doc > 0 ? doc : 0;
+}
+
+/**
+ * Soma do valor bruto ZFACT por mês de emissão (mapa SAP dos Fretes).
+ * Base para bater com Vendas Brutas Unilog no armazém (100% do produzido).
+ */
+function armZfactBrutoByMes() {
   const api = sapApi();
-  if (!api?.isSapLoaded?.()) return { byMes: {}, loaded: false, source: null, note: '' };
+  if (!api?.isSapLoaded?.()) return { byMes: {}, loaded: false, nNf: 0, note: 'Carrega o ZFACT em Fretes CT-e.' };
   const byMes = {};
-  Object.values(api.getMap()).forEach(entry => {
-    const mk = String(entry.dtEmissao || '').slice(0, 7);
+  let nNf = 0;
+  Object.values(api.getMap() || {}).forEach(entry => {
+    const mk = armMesKeyFromSapDt(entry.dtEmissao);
     if (!/^\d{4}-\d{2}$/.test(mk)) return;
-    if (!byMes[mk]) byMes[mk] = { valor: 0 };
-    byMes[mk].valor += Number(entry.valorNF) || 0;
+    if (!byMes[mk]) byMes[mk] = { valor: 0, n: 0 };
+    const bruto = armSapEntryBruto(entry);
+    if (!(bruto > 0)) return;
+    byMes[mk].valor += bruto;
+    byMes[mk].n += 1;
+    nNf += 1;
   });
   const loaded = Object.keys(byMes).length > 0;
   return {
-    byMes, loaded, source: loaded ? 'sap_nf' : null,
-    note: loaded ? 'Vendas estimadas via export SAP NF (Fretes)' : ''
+    byMes, loaded, nNf,
+    note: loaded
+      ? `ZFACT: ${nNf} NF(s) com valor — soma por data de emissão SAP`
+      : 'ZFACT carregado mas sem datas/valores utilizáveis'
+  };
+}
+
+function armVendasFromSapNf() {
+  const z = armZfactBrutoByMes();
+  if (!z.loaded) return { byMes: {}, loaded: false, source: null, note: z.note || '' };
+  const byMes = {};
+  Object.keys(z.byMes).forEach(mk => {
+    byMes[mk] = { valor: z.byMes[mk].valor };
+  });
+  return {
+    byMes, loaded: true, source: 'sap_nf',
+    note: 'Vendas estimadas via export SAP NF (Fretes)'
   };
 }
 
@@ -1921,26 +2011,9 @@ function parseArmazemV2(wb, fileName, opts) {
 
   const nfRows = [];
   if (!skipNfDetail) {
-    const nfSheet = wb.SheetNames.find(n => /PERCENTUAL SOBRE NF/i.test(n));
-    if (nfSheet) {
-      const m = sheetToMatrix(wb.Sheets[nfSheet]);
-      let dataHdr = -1;
-      for (let r = 0; r < m.length; r++) {
-        if (/Data Cobran/i.test(cellText(m, r, 0)) && /Documento/i.test(cellText(m, r, 1))) { dataHdr = r; break; }
-      }
-      if (dataHdr >= 0) {
-        for (let r = dataHdr + 1; r < m.length; r++) {
-          const dt = cellText(m, r, 0);
-          const nf = cellText(m, r, 1);
-          const valorNF = armCellNum(m, r, 2);
-          const fee = armCellNum(m, r, 3);
-          if (!nf || nf === '-') continue;
-          nfRows.push({
-            data: parseBrDate(dt), nf, valorNF, taxa: armNfRate(),
-            fee, mesKey: meta.mesKey, fileName
-          });
-        }
-      }
+    const fromExp = parseExpedicaoNfFromWorkbook(wb, fileName, meta.mesKey);
+    if (fromExp.rows.length) {
+      nfRows.push(...fromExp.rows);
     } else if (diarioName) {
       const m = sheetToMatrix(wb.Sheets[diarioName]);
       let hdrD = -1;
@@ -2133,6 +2206,9 @@ function armNfEstadoBadge(r) {
 function refreshArmazemSapValidation() {
   refreshAllSapOnNfs();
   armNfUploadRows = armNfUploadRows.map(r => applySapToArmNf(r));
+  if (armBrutoZfactState.rows?.length) {
+    armBrutoZfactState.rows = armEnrichBrutoZfactRows(armBrutoZfactState.rows);
+  }
   if (armInited) renderArmActiveTab();
 }
 
@@ -2140,7 +2216,16 @@ async function armRefreshWithSap() {
   await armEnsureSapLoaded();
   refreshAllSapOnNfs();
   armNfUploadRows = armNfUploadRows.map(r => applySapToArmNf(r));
+  if (armBrutoZfactState.rows?.length) {
+    armBrutoZfactState.rows = armEnrichBrutoZfactRows(armBrutoZfactState.rows);
+  }
   renderArmActiveTab();
+}
+
+function armNormNfKey(nf) {
+  const api = sapApi();
+  if (api?.normNFKey) return api.normNFKey(nf);
+  return String(nf || '').replace(/\D/g, '').replace(/^0+/, '') || String(nf || '').trim();
 }
 
 function applySapToArmNf(row) {
@@ -2150,6 +2235,7 @@ function applySapToArmNf(row) {
   out.feeUnilog = armNum(row.fee);
   out.feeExpected = out.valorUnilog * armNfRate();
   out.feeDelta = out.feeUnilog - out.feeExpected;
+  out.nfKey = armNormNfKey(row.nf);
 
   const sapLoaded = !!(api && api.isSapLoaded());
   out.sapLoaded = sapLoaded;
@@ -2158,17 +2244,23 @@ function applySapToArmNf(row) {
   if (!sapLoaded) {
     out.sapFound = false;
     out.sapMissing = false;
+    out.sapNoValor = false;
     out.sapValor = null;
     out.valorDiff = false;
+    out.valorDiffAbs = null;
     return out;
   }
 
   const sap = api.lookupSapEntry(row.nf);
   out.sapFound = !!sap;
   out.sapMissing = !sap;
-  out.sapValor = sap ? sap.valorNF : null;
   out.sapCliente = sap?.cliente || '';
-  out.valorDiff = sap && api.isRelevantValorDiff(out.valorUnilog, out.sapValor);
+  const bruto = sap ? armSapEntryBruto(sap) : 0;
+  // NF existe no mapa mas sem face (parse/scrub) — não é match de valor; não mostrar R$ 0,00 como se fosse ZFACT.
+  out.sapNoValor = !!(sap && !(bruto > 0));
+  out.sapValor = bruto > 0 ? bruto : null;
+  out.valorDiff = !!(sap && bruto > 0 && api.isRelevantValorDiff(out.valorUnilog, bruto));
+  out.valorDiffAbs = sap && bruto > 0 ? out.valorUnilog - bruto : null;
   return out;
 }
 
@@ -2269,7 +2361,7 @@ function buildArmPackFromFiles(fileResults) {
 
 function slimArmPackForPersist(pack) {
   if (!pack) return null;
-  return {
+  const out = {
     version: pack.version || 3,
     updatedAt: new Date().toISOString(),
     contract: pack.contract || undefined,
@@ -2293,6 +2385,15 @@ function slimArmPackForPersist(pack) {
     }),
     failedFiles: pack.failedFiles || []
   };
+  if (pack.brutoZfact?.rows?.length) {
+    out.brutoZfact = {
+      files: pack.brutoZfact.files || [],
+      meta: pack.brutoZfact.meta || {},
+      updatedAt: pack.brutoZfact.updatedAt || '',
+      rows: pack.brutoZfact.rows
+    };
+  }
+  return out;
 }
 
 /** Run fn with the NF rate of `pack` (another company's pack computed read-only). Synchronous fn only. */
@@ -2479,7 +2580,7 @@ function switchArmTab(tab) {
   document.querySelectorAll('#page-armazem .arm-tab').forEach(t => {
     t.classList.toggle('active', t.dataset.tab === tab);
   });
-  ['lancamento', 'carregamento', 'mensal', 'resumo', 'nf', 'adicionais', 'catalogo'].forEach(id => {
+  ['lancamento', 'carregamento', 'mensal', 'resumo', 'nf', 'adicionais', 'catalogo', 'brutoZfact'].forEach(id => {
     const el = $arm('tab-' + id);
     if (el) el.style.display = id === tab ? 'block' : 'none';
   });
@@ -2502,6 +2603,7 @@ function renderArmActiveTab() {
   if (armActiveTab === 'nf') renderArmNf();
   if (armActiveTab === 'adicionais') renderArmAdicionais();
   if (armActiveTab === 'catalogo') renderArmCatalogo();
+  if (armActiveTab === 'brutoZfact') renderArmBrutoZfact();
   if (typeof scheduleColResize === 'function') scheduleColResize();
 }
 
@@ -2905,6 +3007,294 @@ function renderArmMensal() {
   }
 
   if (typeof scheduleTableSort === 'function') scheduleTableSort();
+}
+
+function armEnrichBrutoZfactRows(rawRows) {
+  const counts = {};
+  rawRows.forEach(r => {
+    const k = armNormNfKey(r.nf);
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  return rawRows.map(r => {
+    const out = applySapToArmNf(r);
+    const k = out.nfKey || armNormNfKey(r.nf);
+    out.dupCount = counts[k] || 1;
+    out.isDup = out.dupCount > 1;
+    out.hasIssue = !!(out.isDup || out.sapMissing || out.sapNoValor || out.valorDiff || out.sapNotLoaded);
+    return out;
+  });
+}
+
+function armBrutoZfactFilteredRows() {
+  const filter = $arm('brutoZfactFilter')?.value || '';
+  const q = String($arm('brutoZfactSearch')?.value || '').trim().toLowerCase();
+  let rows = armBrutoZfactState.rows || [];
+  if (filter === 'dup') rows = rows.filter(r => r.isDup);
+  else if (filter === 'missing') rows = rows.filter(r => r.sapMissing || r.sapNoValor);
+  else if (filter === 'diff') rows = rows.filter(r => r.valorDiff);
+  else if (filter === 'issues') rows = rows.filter(r => r.hasIssue);
+  if (q) {
+    rows = rows.filter(r =>
+      String(r.nf || '').toLowerCase().includes(q)
+      || String(r.nfKey || '').includes(q)
+      || String(r.fileName || '').toLowerCase().includes(q)
+      || String(r.sapCliente || '').toLowerCase().includes(q)
+    );
+  }
+  return rows;
+}
+
+function armScheduleBrutoZfactPersist() {
+  clearTimeout(armBrutoZfactPersistTimer);
+  armBrutoZfactPersistTimer = setTimeout(() => {
+    armPersistBrutoZfactState().catch(e => console.warn('[armazem] brutoZfact persist', e));
+  }, 1200);
+}
+
+async function armPersistBrutoZfactState() {
+  if (!armPack || armPackCompany !== armCompany()) return false;
+  // Guarda só meta + linhas slim (sem regravar meses) — pack já tem de estar carregado.
+  armPack.brutoZfact = {
+    files: armBrutoZfactState.files || [],
+    meta: armBrutoZfactState.meta || {},
+    updatedAt: armBrutoZfactState.updatedAt || new Date().toISOString(),
+    rows: (armBrutoZfactState.rows || []).map(r => ({
+      data: r.data || '', nf: r.nf, valorNF: r.valorNF, fee: r.fee,
+      mesKey: r.mesKey || '', fileName: r.fileName || '', sheet: r.sheet || ''
+    }))
+  };
+  return persistArmPack(armPack, { company: armCompany(), quiet: true });
+}
+
+function armRestoreBrutoZfactFromPack(pack) {
+  const bz = pack?.brutoZfact;
+  if (!bz?.rows?.length) {
+    armBrutoZfactState = { rows: [], files: [], meta: {}, updatedAt: '' };
+    return;
+  }
+  armBrutoZfactState = {
+    files: bz.files || [],
+    meta: bz.meta || {},
+    updatedAt: bz.updatedAt || '',
+    rows: armEnrichBrutoZfactRows(bz.rows)
+  };
+}
+
+function armClearBrutoZfact() {
+  armBrutoZfactState = { rows: [], files: [], meta: {}, updatedAt: '' };
+  if (armPack && armPackCompany === armCompany()) {
+    delete armPack.brutoZfact;
+    armScheduleBrutoZfactPersist();
+  }
+  const fn = $arm('brutoZfactFn');
+  if (fn) fn.textContent = '';
+  const inp = $arm('brutoZfactInput');
+  if (inp) inp.value = '';
+  renderArmBrutoZfact();
+  armToast('Cruzamento Bruto × ZFACT limpo.');
+}
+
+async function armProcessBrutoZfactFiles(fileList) {
+  const files = [...(fileList || [])].filter(Boolean);
+  if (!files.length) return;
+  await armEnsureSapLoaded();
+  const allRows = [];
+  const fileNames = [];
+  const metas = [];
+  for (const file of files) {
+    try {
+      const { wb } = await readFileToWorkbook(file, {});
+      const parsed = parseExpedicaoNfFromWorkbook(wb, file.name, '');
+      if (!parsed.rows.length) {
+        armToast(`${file.name}: aba Expedição / % NF não encontrada ou sem linhas.`, 'error');
+        continue;
+      }
+      allRows.push(...parsed.rows);
+      fileNames.push(file.name);
+      metas.push({ fileName: file.name, ...parsed.meta, n: parsed.rows.length });
+    } catch (e) {
+      console.error('[armazem] brutoZfact', e);
+      armToast(`Erro a ler ${file.name}: ${e.message || e}`, 'error');
+    }
+  }
+  if (!allRows.length) {
+    renderArmBrutoZfact();
+    return;
+  }
+  // Novo upload substitui o conjunto (mesmo período / ficheiro fresh).
+  armBrutoZfactState = {
+    rows: armEnrichBrutoZfactRows(allRows),
+    files: fileNames,
+    meta: {
+      qtyTotalHdr: metas.reduce((s, m) => s + (m.qtyTotalHdr || 0), 0),
+      feeTotalHdr: metas.reduce((s, m) => s + (m.feeTotalHdr || 0), 0),
+      files: metas
+    },
+    updatedAt: new Date().toISOString()
+  };
+  const fn = $arm('brutoZfactFn');
+  if (fn) fn.textContent = fileNames.join(' · ');
+  renderArmBrutoZfact();
+  const nDup = new Set(armBrutoZfactState.rows.filter(r => r.isDup).map(r => r.nfKey)).size;
+  const nMiss = armBrutoZfactState.rows.filter(r => r.sapMissing).length;
+  armToast(`${armBrutoZfactState.rows.length} NF(s) · ${nDup} repetida(s) · ${nMiss} ausente(s) no ZFACT`, nMiss || nDup ? 'error' : 'success');
+  armScheduleBrutoZfactPersist();
+}
+
+function renderArmBrutoZfact() {
+  const empty = $arm('brutoZfactEmpty');
+  const content = $arm('brutoZfactContent');
+  const note = $arm('brutoZfactNote');
+  const sapReady = !!sapApi()?.isSapLoaded?.();
+  const rowsAll = armBrutoZfactState.rows || [];
+
+  if (note) {
+    let msg = sapReady
+      ? armSapStatusHtml().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      : 'Carrega o ZFACT em Fretes CT-e antes (ou ao mesmo tempo) — NFs só no ZFACT são ignoradas de propósito.';
+    if (armBrutoZfactState.meta?.qtyTotalHdr > 0) {
+      msg += ` · Cabeçalho Unilog «Quantidade Total» = ${armFmtMoney(armBrutoZfactState.meta.qtyTotalHdr)}`;
+    }
+    note.innerHTML = sapReady ? armSapStatusHtml() + (armBrutoZfactState.meta?.qtyTotalHdr > 0
+      ? `<div style="margin-top:6px;">Cabeçalho Unilog «Quantidade Total» = <strong>${armFmtMoney(armBrutoZfactState.meta.qtyTotalHdr)}</strong></div>`
+      : '')
+      : msg;
+    note.style.display = 'block';
+    note.classList.toggle('data-warn', !sapReady);
+    note.querySelectorAll('.arm-link-fretes').forEach(a => {
+      a.addEventListener('click', armGotoFretesPage);
+    });
+  }
+
+  if (!rowsAll.length) {
+    if (empty) empty.style.display = 'block';
+    if (content) content.style.display = 'none';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  if (content) content.style.display = 'block';
+
+  const sumValor = rowsAll.reduce((s, r) => s + armNum(r.valorNF), 0);
+  const sumFee = rowsAll.reduce((s, r) => s + armNum(r.fee), 0);
+  const nDupLines = rowsAll.filter(r => r.isDup).length;
+  const nDupKeys = new Set(rowsAll.filter(r => r.isDup).map(r => r.nfKey)).size;
+  const nMiss = rowsAll.filter(r => r.sapMissing).length;
+  const nNoValor = rowsAll.filter(r => r.sapNoValor).length;
+  const nDiff = rowsAll.filter(r => r.valorDiff).length;
+  const nOk = rowsAll.filter(r => !r.hasIssue).length;
+  const nWithZ = rowsAll.filter(r => r.sapFound && armNum(r.sapValor) > 0).length;
+  const matchedValorZ = rowsAll.reduce((s, r) => s + (armNum(r.sapValor) > 0 ? armNum(r.sapValor) : 0), 0);
+  const kpis = $arm('brutoZfactKpis');
+  if (kpis) {
+    const nProb = nDupKeys + nMiss + nNoValor + nDiff;
+    kpis.innerHTML = `
+      <div class="kpi"><div class="label">Linhas Unilog</div><div class="value">${rowsAll.length}</div><div class="sub">${armBrutoZfactState.files?.length || 0} ficheiro(s)</div></div>
+      <div class="kpi"><div class="label">Valor NF Unilog</div><div class="value">${armFmtMoney(sumValor)}</div><div class="sub">Cobrado ${armFmtMoney(sumFee)}</div></div>
+      <div class="kpi"><div class="label">Match ZFACT (valor)</div><div class="value">${armFmtMoney(matchedValorZ)}</div><div class="sub">${nWithZ} NF(s) com valor no mapa</div></div>
+      <div class="kpi${nProb ? ' flag' : ''}"><div class="label">Problemas</div><div class="value">${nProb}</div><div class="sub">${nDupKeys} repetida(s) · ${nMiss} ausente(s) · ${nNoValor} no mapa s/ valor · ${nDiff} Δ · ${nOk} OK</div></div>`;
+  }
+
+  const rows = armApplySort(armBrutoZfactFilteredRows(), 'brutoZfact', {
+    data: r => (r.data instanceof Date ? r.data.getTime() : String(r.data || '')),
+    nf: r => r.nfKey || String(r.nf || ''),
+    valorNF: r => armNum(r.valorNF),
+    fee: r => armNum(r.fee),
+    sapValor: r => armNum(r.sapValor),
+    valorDiffAbs: r => (r.valorDiffAbs != null ? r.valorDiffAbs : -1e15),
+    dupCount: r => r.dupCount || 1,
+    estado: r => (r.isDup ? 3 : r.sapMissing ? 2 : r.valorDiff ? 1 : 0),
+    fileName: r => r.fileName || ''
+  });
+
+  const thead = $arm('brutoZfactHead');
+  const body = $arm('brutoZfactBody');
+  const table = thead?.closest('table') || body?.closest('table');
+  if (table) armEnsureTableCols(table, 9);
+
+  if (thead) {
+    thead.innerHTML = `
+      ${sortTh('brutoZfact', 'data', 'Data')}
+      ${sortTh('brutoZfact', 'nf', 'NF')}
+      ${sortTh('brutoZfact', 'valorNF', 'Valor NF Unilog', 'right')}
+      ${sortTh('brutoZfact', 'fee', 'Cobrado', 'right')}
+      ${sortTh('brutoZfact', 'sapValor', 'Valor ZFACT', 'right')}
+      ${sortTh('brutoZfact', 'valorDiffAbs', 'Δ Unilog − ZFACT', 'right')}
+      ${sortTh('brutoZfact', 'dupCount', '×', 'right')}
+      ${sortTh('brutoZfact', 'estado', 'Estado')}
+      ${sortTh('brutoZfact', 'fileName', 'Ficheiro')}`;
+  }
+  if (body) {
+    const fmtDt = (d) => {
+      if (d instanceof Date && !isNaN(d.getTime())) {
+        return d.toLocaleDateString('pt-BR');
+      }
+      return d ? armEsc(String(d)) : '—';
+    };
+    body.innerHTML = rows.map(r => {
+      const cls = r.isDup || r.sapMissing || r.sapNoValor ? ' class="nf-sap-missing"' : (r.valorDiff ? ' class="nf-val-mismatch"' : '');
+      let badges = '';
+      if (r.isDup) badges += `<span class="badge b-flag">Repetida ×${r.dupCount}</span> `;
+      if (r.sapNotLoaded) badges += '<span class="badge b-warn">SAP não carregado</span> ';
+      else if (r.sapMissing) badges += '<span class="badge b-flag">Ausente ZFACT</span> ';
+      else if (r.sapNoValor) badges += '<span class="badge b-flag" title="NF existe no mapa SAP (cliente/data) mas o valor face ficou a 0 — reprocessa o ZFACT">ZFACT s/ valor</span> ';
+      else if (r.valorDiff) badges += '<span class="badge b-fix165">Δ valor</span> ';
+      else badges += '<span class="badge b-ok">OK</span> ';
+      const zTxt = (r.sapFound && armNum(r.sapValor) > 0) ? armFmtMoney(r.sapValor) : '—';
+      return `<tr${cls}>
+        <td>${fmtDt(r.data)}</td>
+        <td>${armEsc(r.nf)}</td>
+        <td class="right">${armFmtMoney(r.valorNF)}</td>
+        <td class="right">${armFmtMoney(r.fee)}</td>
+        <td class="right">${zTxt}</td>
+        <td class="right">${r.valorDiffAbs != null ? armFmtMoney(r.valorDiffAbs) : '—'}</td>
+        <td class="right">${r.dupCount > 1 ? r.dupCount : '1'}</td>
+        <td>${badges}</td>
+        <td style="font-size:10px;color:var(--muted)">${armEsc(r.fileName || '')}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="9" class="empty">Nenhuma linha com este filtro.</td></tr>`;
+  }
+  if (typeof scheduleTableSort === 'function') scheduleTableSort();
+}
+
+function exportArmBrutoZfact() {
+  const rows = armBrutoZfactState.rows || [];
+  if (!rows.length) { armToast('Sem dados para exportar.'); return; }
+  if (typeof XLSX === 'undefined') { armToast('SheetJS não carregado.'); return; }
+  const data = rows.map(r => ({
+    Data: r.data instanceof Date ? r.data : (r.data || ''),
+    NF: r.nf,
+    ValorNF_Unilog: armNum(r.valorNF),
+    Cobrado: armNum(r.fee),
+    Valor_ZFACT: r.sapFound ? armNum(r.sapValor) : '',
+    Delta_Unilog_menos_ZFACT: r.valorDiffAbs != null ? r.valorDiffAbs : '',
+    Repetida: r.isDup ? 'Sim' : 'Não',
+    VezesNoFicheiro: r.dupCount || 1,
+    AusenteZFACT: r.sapMissing ? 'Sim' : 'Não',
+    ZFACTSemValor: r.sapNoValor ? 'Sim' : 'Não',
+    DeltaValorRelevante: r.valorDiff ? 'Sim' : 'Não',
+    ClienteSAP: r.sapCliente || '',
+    Ficheiro: r.fileName || '',
+    Mes: r.mesKey || ''
+  }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Unilog x ZFACT');
+  const dups = rows.filter(r => r.isDup);
+  if (dups.length) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dups.map(r => ({
+      NF: r.nf, Data: r.data instanceof Date ? r.data : '', ValorNF: r.valorNF, Cobrado: r.fee,
+      Vezes: r.dupCount, Ficheiro: r.fileName
+    }))), 'NF repetidas');
+  }
+  const miss = rows.filter(r => r.sapMissing);
+  if (miss.length) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(miss.map(r => ({
+      NF: r.nf, Data: r.data instanceof Date ? r.data : '', ValorNF: r.valorNF, Cobrado: r.fee, Ficheiro: r.fileName
+    }))), 'Ausentes ZFACT');
+  }
+  const fn = `Armazem_Expedicao_x_ZFACT_${armCompany()}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  if (typeof downloadWorkbook === 'function') downloadWorkbook(wb, fn);
+  else XLSX.writeFile(wb, fn);
+  armToast('Exportado.');
 }
 
 async function renderArmAcumulado() {
@@ -3412,6 +3802,7 @@ async function _loadSavedArmazemImpl(co, silent) {
       armPackCompany = co;
       armCloudMonthCount = armPack.months?.length || 0;
       refreshAllSapOnNfs();
+      armRestoreBrutoZfactFromPack(armPack);
       try {
         const slim = slimArmPackForPersist(armPack);
         armLastPersistedJson = co + '|' + JSON.stringify({ ...slim, updatedAt: '' });
@@ -3636,6 +4027,29 @@ function initArmazem() {
     if (ok) switchArmTab((armPack?.months?.length || 0) === 1 ? 'mensal' : 'resumo');
   });
   $arm('exportBtn')?.addEventListener('click', () => exportArmazemWorkbook());
+  $arm('brutoZfactExportBtn')?.addEventListener('click', () => exportArmBrutoZfact());
+  $arm('brutoZfactClearBtn')?.addEventListener('click', () => armClearBrutoZfact());
+  $arm('brutoZfactFilter')?.addEventListener('change', () => renderArmBrutoZfact());
+  $arm('brutoZfactSearch')?.addEventListener('input', () => {
+    clearTimeout($arm('brutoZfactSearch')._armT);
+    $arm('brutoZfactSearch')._armT = setTimeout(() => renderArmBrutoZfact(), 200);
+  });
+  const bzZone = $arm('brutoZfactZone');
+  const bzInput = $arm('brutoZfactInput');
+  if (bzZone && bzInput && !bzInput._armBound) {
+    bzInput._armBound = true;
+    bzInput.addEventListener('change', e => armProcessBrutoZfactFiles(e.target.files));
+    ;['dragenter', 'dragover'].forEach(ev => bzZone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation(); bzZone.classList.add('drag');
+    }));
+    ;['dragleave', 'drop'].forEach(ev => bzZone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation(); bzZone.classList.remove('drag');
+    }));
+    bzZone.addEventListener('drop', e => {
+      const files = e.dataTransfer?.files;
+      if (files?.length) armProcessBrutoZfactFiles(files);
+    });
+  }
 
   $arm('nfRate')?.addEventListener('input', () => armOnNfRateInput());
 
@@ -3717,6 +4131,7 @@ window.processArmFiles = processArmFiles;
 window.armDoSort = armDoSort;
 window.armSetCatalog = armSetCatalog;
 window.exportArmazemWorkbook = exportArmazemWorkbook;
+window.exportArmBrutoZfact = exportArmBrutoZfact;
 window.armInvalidateVendasCache = armInvalidateVendasCache;
 window.armLancamentoRowChange = armLancamentoRowChange;
 window.armLancamentoRowPreview = armLancamentoRowPreview;

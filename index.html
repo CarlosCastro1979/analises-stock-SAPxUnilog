@@ -563,7 +563,7 @@ select.cad-inp{cursor:pointer;}
 <header>
   <div class="logo">
     <div class="logo-mark">DF</div>
-    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.116 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
+    <div class="logo-name">Performance Logística<span>Delta Foods Brasil · v1.8.119 · <a href="http://localhost:8080/" target="_blank" rel="noopener" class="hdr-local" title="Servidor local">↗ localhost:8080</a></span></div>
   </div>
   <div class="hdr-r">
     <select id="coSel" onchange="switchCompany()" style="font-size:12px;font-weight:700;background:var(--navy2);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 10px;cursor:pointer;outline:none">
@@ -1986,7 +1986,10 @@ select.cad-inp{cursor:pointer;}
     <div id="fte-tab-carregamento">
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Carrega só estes 2: <strong>relatórios quinzenais</strong> (B2B + B2C) e <strong>SAP NF / ZFACT</strong>. A Análise CT-e monta-se a partir dos quinzenais B2B. Um único <strong>Processar e Guardar</strong> processa tudo e persiste na cloud. Ao abrir a página, só aparecem os nomes guardados — usa <strong>Carregar último guardado</strong> (ou abre uma aba de análise) para restaurar os dados sem travar o menu.</p>
       <div class="data-warn" style="display:block;margin:0 0 14px;">
-        <strong>Atualização v1.8.116 — Quinzena pelas datas dos documentos + Set/2026 corrigido:</strong> o período de cada quinzenal / export Unilog deixa de vir do nome do ficheiro ou do rodapé (mudam a cada envio — «Set_26», «Excluídos … 1ª Quinzena» já deram erro) e passa a vir das <strong>datas das linhas</strong>: B2B pela <strong>Dt CTE</strong> (a «Quinzena CTE» da Unilog; Dt NF só se faltar), B2C pela <strong>Data de emissão CT-e</strong> (senão Data da coleta). Dias 1–15 = 1ªQ, 16–fim = 2ªQ; o ficheiro fica na quinzena com mais linhas e mantém sempre o seu total (Resumo com impostos / 11,25%). Um ficheiro com o mês inteiro (metade menor ≥ 35% das linhas) é dividido por data em 1ªQ + 2ªQ. CT-e com data noutra quinzena ficam no ficheiro e aparecem como <strong>«CT-e fora da quinzena»</strong> (KPI, filtro, badge, folha Excel): DFB tem 68 — 65 do 1ªQ Fev/2026 com Dt CTE 18–21 Fev e 3 do 1ªQ Mar/2026 de 16 Mar — são exactamente os 68 «CT-e em 2 quinzenas» (faturados no 1ªQ e outra vez no 2ªQ). Nome / rodapé ficam como verificação: se discordarem das datas, ganham as datas e aparece o aviso («Nome diz 1ªQ Set/2026, datas indicam 2ªQ Set/2026 — usado 2ªQ»). Um reenvio com outro nome substitui o mesmo operador/canal/quinzena; o mesmo nome só substitui dentro da mesma quinzena. Os 43 ficheiros DFB e 8 QB guardados foram revistos pelas datas (backup antes): nenhum mudou de quinzena. <strong>LOGISTICA EXTERNA DELTA Set_26 rev01</strong> reprocessado com o ficheiro corrigido: saem 11 CT-e de carretas MWM - ELITE EXPRESS que não eram da DELTA (NF 4537–4554, R$ 114.570,51 c/ imp.); 2ªQ Set/2026 B2B = R$ 45.900,53 (era R$ 160.471,04), Set/2026 B2B = R$ 122.504,43 (era R$ 237.074,95). A linha «Total» desse ficheiro ainda diz R$ 142.418,05 — a app usa a soma das linhas e avisa.
+        <strong>Atualização v1.8.119 — ZFACT s/ valor:</strong> NFs que existem no mapa SAP mas com face a 0 (ex. 10 NFs de Out/2026 ≈ R$ 1,8 M) deixam de aparecer como OK / R$ 0,00 — passam a <strong>ZFACT s/ valor</strong>. Recarrega o Excel ZFACT completo em Fretes para regravar os valores.
+        <br><strong>v1.8.118 — Bruto × ZFACT por NF (Excel Expedição):</strong> a aba <strong>Bruto × ZFACT</strong> passa a ser por upload do Excel Unilog (aba <strong>Expedição — % sobre valor da NF</strong>: B = NF, C = valor NF, D = cobrado). Cruza cada NF com o ZFACT; NFs só no ZFACT são ignoradas; marca <strong>repetidas</strong>, <strong>ausentes no ZFACT</strong> e <strong>Δ valor</strong>; filtros + Excel. O ficheiro Out DFB («Quantidade Total» R$ 4.344.280,75) é o modelo.
+        <br><strong>v1.8.117 — Bruto Unilog × ZFACT (agregado):</strong> primeira versão por mês (substituída pela 1.8.118).
+        <br><strong>v1.8.116 — Quinzena pelas datas dos documentos + Set/2026 corrigido:</strong> o período de cada quinzenal / export Unilog deixa de vir do nome do ficheiro ou do rodapé (mudam a cada envio — «Set_26», «Excluídos … 1ª Quinzena» já deram erro) e passa a vir das <strong>datas das linhas</strong>: B2B pela <strong>Dt CTE</strong> (a «Quinzena CTE» da Unilog; Dt NF só se faltar), B2C pela <strong>Data de emissão CT-e</strong> (senão Data da coleta). Dias 1–15 = 1ªQ, 16–fim = 2ªQ; o ficheiro fica na quinzena com mais linhas e mantém sempre o seu total (Resumo com impostos / 11,25%). Um ficheiro com o mês inteiro (metade menor ≥ 35% das linhas) é dividido por data em 1ªQ + 2ªQ. CT-e com data noutra quinzena ficam no ficheiro e aparecem como <strong>«CT-e fora da quinzena»</strong> (KPI, filtro, badge, folha Excel): DFB tem 68 — 65 do 1ªQ Fev/2026 com Dt CTE 18–21 Fev e 3 do 1ªQ Mar/2026 de 16 Mar — são exactamente os 68 «CT-e em 2 quinzenas» (faturados no 1ªQ e outra vez no 2ªQ). Nome / rodapé ficam como verificação: se discordarem das datas, ganham as datas e aparece o aviso («Nome diz 1ªQ Set/2026, datas indicam 2ªQ Set/2026 — usado 2ªQ»). Um reenvio com outro nome substitui o mesmo operador/canal/quinzena; o mesmo nome só substitui dentro da mesma quinzena. Os 43 ficheiros DFB e 8 QB guardados foram revistos pelas datas (backup antes): nenhum mudou de quinzena. <strong>LOGISTICA EXTERNA DELTA Set_26 rev01</strong> reprocessado com o ficheiro corrigido: saem 11 CT-e de carretas MWM - ELITE EXPRESS que não eram da DELTA (NF 4537–4554, R$ 114.570,51 c/ imp.); 2ªQ Set/2026 B2B = R$ 45.900,53 (era R$ 160.471,04), Set/2026 B2B = R$ 122.504,43 (era R$ 237.074,95). A linha «Total» desse ficheiro ainda diz R$ 142.418,05 — a app usa a soma das linhas e avisa.
         <br><strong>v1.8.115 — QB em Cobranças UNILOG + Total Brasil:</strong> a <strong>Avaliação Armazém</strong> e o <strong>Total Custo Unilog</strong> funcionam agora para a <strong>QB</strong> como para a DFB (deixa de aparecer «disponível apenas para DFB»): lançamento mensal, adicionais, impostos, Visão mensal, Validação NF com o <strong>mapa ZFACT da QB</strong>. Os dados de cada empresa ficam na sua própria linha da cloud — guardar na QB nunca toca na DFB; um autosave pendente ao mudar de empresa é gravado na empresa onde foi escrito, e nada é gravado antes de os dados dessa empresa estarem lidos da cloud (evita apagar meses). Nova <strong>taxa contratual sobre NF expedida</strong> por empresa (padrão 5,5%). Novo separador <strong>Total Brasil</strong> (com DFB seleccionada): soma DFB + QB mês a mês, com detalhe por empresa, meses em falta assinalados e Excel — a QB é lida da cloud só para leitura.
         <br><strong>v1.8.114 — Q-BRASIL «Detalhamento Fatura» (Set/2026 2ªQ):</strong> o ficheiro «Detalhamento Fatura Q-BRASIL_2ªQZSET2026 rev01» não aparecia na 2ªQ: é o mesmo export Unilog do «LOGISTICA EXTERNA» (folha «Export», mesmas colunas sem as 3 «Revisado», linha Total, sem Resumo), mas o rodapé diz «Incluídos 2026 + setembro · <em>Excluídos</em> 2026 + setembro + 1ª Quinzena» — a app lia o «1ª Quinzena» dos Excluídos e guardava-o na <strong>1ªQ</strong>. Agora uma quinzena nos Excluídos = a outra quinzena; o nome aceita «2ªQZSET2026», «1QZ OUT2026», meses abreviados colados (JAN…DEZ, SET) e «Detalhamento Fatura» como tipo de relatório; uma cópia «(3)» / « - Cópia» / «revNN» substitui o mesmo relatório (não duplica); exports já guardados na quinzena errada são corrigidos ao abrir pelo próprio rodapé. QB Set/2026 B2B: 1ªQ R$ 1.320,61 + 2ªQ R$ 17.065,44 (7 NF, frete R$ 15.145,58 = linha Total do ficheiro, + impostos Unilog 11,25% porque não há Resumo) = <strong>R$ 18.386,05</strong>. DFB inalterada.
         <br><strong>v1.8.113 — B2C novo layout (Out/2026):</strong> o quinzenal «Gestão de Frete DELTA_B2C - 1Q Outubro 2026 (002)» não entrava («Cabeçalho B2C não encontrado»): a Unilog mudou a folha Dados (cabeçalho na linha 2, colunas «Números NF / Chaves acesso NF / Total NF / Numeros CT-e / Região de Cobrança / Frete Peso / AD Valorem / GRIS / <strong>Fatura Total</strong>», sem «Valor produtos» / «Valor Fatura» / «Zona Entrega»). A app reconhece agora este layout: pago = <strong>Fatura Total</strong> (não «Frete Peso»), zona = Região de Cobrança, impostos do Resumo como sempre. Out/2026 B2C 1ªQ: 34 NF, frete R$ 1.448,83 + impostos R$ 183,65 = <strong>R$ 1.632,48</strong>. O nome do ficheiro aceita também 1Q/2Q, 1aQ, 1a Q, 1º Q, «1 Quinzena» e sufixos de cópia/revisão («(002)», « - Cópia», «rev01», «v2»). Layout antigo, export «LOGISTICA EXTERNA» e restantes regras mantêm-se.
@@ -2337,6 +2340,7 @@ select.cad-inp{cursor:pointer;}
       <div class="arm-tab active" data-tab="lancamento">Lançamento mensal</div>
       <div class="arm-tab" data-tab="carregamento">Carregamento Excel</div>
       <div class="arm-tab" data-tab="mensal">Visão mensal</div>
+      <div class="arm-tab" data-tab="brutoZfact">Bruto × ZFACT</div>
       <div class="arm-tab" data-tab="resumo">Resumo por mês</div>
       <div class="arm-tab" data-tab="nf">NF <span data-arm-rate-label>5,5%</span></div>
       <div class="arm-tab" data-tab="adicionais">Adicionais</div>
@@ -2462,6 +2466,50 @@ select.cad-inp{cursor:pointer;}
           <table id="armMensalTable" class="arm-sort-table" data-managed-sort="arm">
             <colgroup><col><col><col><col><col><col><col><col><col><col><col></colgroup>
             <thead><tr id="arm-mensalHead"></tr></thead><tbody id="arm-mensalBody"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <div id="arm-tab-brutoZfact" style="display:none;">
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        <button class="btn bg bs" id="arm-brutoZfactClearBtn" type="button">Limpar</button>
+        <button class="btn bg bs" id="arm-brutoZfactExportBtn" type="button">Exportar Excel</button>
+      </div>
+      <p class="cu-note" style="font-size:11px;color:var(--muted);margin:0 0 12px;line-height:1.5;">
+        Carrega o Excel Unilog do armazém (aba <strong>Expedição — % sobre valor da NF</strong>:
+        B = Nº Documento / NF, C = valor da NF, D = valor cobrado).
+        Cada NF cobrada é cruzada com o <strong>ZFACT</strong> (mapa SAP dos Fretes).
+        NFs só no ZFACT são <strong>ignoradas</strong> (SAP traz tudo, mesmo sem intervenção Unilog).
+        Atenção a <strong>NF repetida</strong> no ficheiro Unilog e a Δ de valor vs ZFACT.
+      </p>
+      <div class="uz" id="arm-brutoZfactZone" style="padding:16px;" onclick="document.getElementById('arm-brutoZfactInput').click()">
+        <div style="font-size:22px;margin-bottom:6px">📄</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clica ou arrasta o Excel Unilog (Expedição % NF)</div>
+        <div style="font-size:11px;color:var(--muted)">Ex.: Armazem Out DFB.xlsx — multi-selecção permitida. Compara após ler; ZFACT tem de estar carregado em Fretes.</div>
+        <div id="arm-brutoZfactFn" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-top:8px"></div>
+        <input type="file" id="arm-brutoZfactInput" accept=".xlsx,.xls" multiple style="display:none">
+      </div>
+      <div id="arm-brutoZfactNote" class="data-warn" style="display:none;margin:12px 0;font-size:12px;"></div>
+      <div id="arm-brutoZfactEmpty" class="empty" style="margin-top:16px;"><div class="empty-i">⚖️</div><div>Carrega o Excel Unilog para confrontar as NFs cobradas com o ZFACT.</div></div>
+      <div id="arm-brutoZfactContent" style="display:none;margin-top:16px;">
+        <div class="kpis" id="arm-brutoZfactKpis"></div>
+        <div class="filters" style="margin-top:8px;">
+          <select id="arm-brutoZfactFilter">
+            <option value="">Todas as linhas</option>
+            <option value="dup">Só NF repetidas</option>
+            <option value="missing">Só ausente / s/ valor no ZFACT</option>
+            <option value="diff">Só Δ valor</option>
+            <option value="issues">Só problemas (rep + ausente + s/ valor + Δ)</option>
+          </select>
+          <input type="text" id="arm-brutoZfactSearch" placeholder="Procurar NF…">
+        </div>
+        <div class="section-title">NFs Unilog × ZFACT</div>
+        <div class="tbl-wrap">
+          <table id="armBrutoZfactTable" class="arm-sort-table" data-managed-sort="arm">
+            <colgroup><col><col><col><col><col><col><col><col><col></colgroup>
+            <thead><tr id="arm-brutoZfactHead"></tr></thead>
+            <tbody id="arm-brutoZfactBody"></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -10484,7 +10532,7 @@ function applyResizable(){scheduleColResize();}
   }
   load('fretes.js', 'v=1.8.116', function () {
     loadInventarioAcerto();
-    load('armazem.js', 'v=1.0.43', function () {
+    load('armazem.js', 'v=1.0.46', function () {
       load('total-brasil.js', 'v=1.0.0');
       load('insumos.js', 'v=1.0.0', bootApp, bootApp);
     }, function () {
